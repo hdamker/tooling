@@ -171,4 +171,3 @@ jobs:
             
             core.summary.addRaw(summary);
             await core.summary.write();
-            

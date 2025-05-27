@@ -286,4 +286,3 @@ jobs:
           elif [ "${{ steps.check-changes.outputs.has_changes }}" == "true" ]; then
             echo "**Note**: Changes have been committed and pushed." >> $GITHUB_STEP_SUMMARY
           fi
-          
