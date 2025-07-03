@@ -54,8 +54,17 @@ on:
         required: true
         type: string
       issue_number:
+        required: false
+        type: string
+        description: 'Issue number for posting results (when result_target=issue)'
+      pr_number_for_comment:
+        required: false
+        type: string
+        description: 'PR number for posting results (when result_target=pull_request)'
+      result_target:
         required: true
         type: string
+        description: 'Where to post results (manual, comment)'
     outputs:
       summary_content:
         description: "The review summary content for posting to issues"
