@@ -179,9 +179,9 @@ jobs:
             echo "❌ Input validation failed:"
             echo -e "$ERRORS"
             echo "inputs_valid=false" >> $GITHUB_OUTPUT
-            echo "validation_errors<<VALIDATION_EOF" >> $GITHUB_OUTPUT
+            echo "validation_errors<<EOF" >> $GITHUB_OUTPUT
             echo -e "$ERRORS" >> $GITHUB_OUTPUT
-            echo "VALIDATION_EOF" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
             exit 1
           else
             echo "✅ All inputs are valid"
@@ -821,12 +821,10 @@ Low Issues: $LOW_ISSUES_COUNT
 Status: $REVIEW_STATUS
 Exit Code: ${{ steps.review.outputs.validation_exit_code }}"
           
-          # Set outputs
-          {
-            echo 'summary_content<<SUMMARY_EOF_MARKER'
-            echo "$SUMMARY_CONTENT"
-            echo 'SUMMARY_EOF_MARKER'
-          } >> $GITHUB_OUTPUT
+          # Set outputs with proper multi-line syntax
+          echo "summary_content<<EOF" >> $GITHUB_OUTPUT
+          echo "$SUMMARY_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
           
           echo "review_status=$REVIEW_STATUS" >> $GITHUB_OUTPUT
           echo "critical_issues_count=$CRITICAL_ISSUES_COUNT" >> $GITHUB_OUTPUT
@@ -834,11 +832,9 @@ Exit Code: ${{ steps.review.outputs.validation_exit_code }}"
           echo "low_issues_count=$LOW_ISSUES_COUNT" >> $GITHUB_OUTPUT
           echo "report_filename=$REPORT_FILENAME" >> $GITHUB_OUTPUT
           
-          {
-            echo 'validation_summary<<SUMMARY_EOF_MARKER'
-            echo "$VALIDATION_SUMMARY"
-            echo 'SUMMARY_EOF_MARKER'
-          } >> $GITHUB_OUTPUT
+          echo "validation_summary<<EOF" >> $GITHUB_OUTPUT
+          echo "$VALIDATION_SUMMARY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
           
           echo ""
           echo "📋 Results processing complete:"
@@ -1005,11 +1001,9 @@ $VALIDATION_ERRORS
 
 **Tooling Repository**: ${{ github.repository }}"
           
-          {
-            echo 'summary_content<<SUMMARY_EOF_MARKER'
-            echo "$ERROR_SUMMARY"
-            echo 'SUMMARY_EOF_MARKER'
-          } >> $GITHUB_OUTPUT
+          echo "summary_content<<EOF" >> $GITHUB_OUTPUT
+          echo "$ERROR_SUMMARY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
           
           echo "review_status=error" >> $GITHUB_OUTPUT
           echo "critical_issues_count=0" >> $GITHUB_OUTPUT
@@ -1058,11 +1052,9 @@ $ERROR_MSG
 **Tooling Repository**: ${{ github.repository }}  
 **Workflow Documentation**: Available in repository documentation"
           
-          {
-            echo 'summary_content<<SUMMARY_EOF_MARKER'
-            echo "$ERROR_SUMMARY"
-            echo 'SUMMARY_EOF_MARKER'
-          } >> $GITHUB_OUTPUT
+          echo "summary_content<<EOF" >> $GITHUB_OUTPUT
+          echo "$ERROR_SUMMARY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
           
           echo "review_status=error" >> $GITHUB_OUTPUT
           echo "critical_issues_count=0" >> $GITHUB_OUTPUT
@@ -1142,22 +1134,18 @@ The API review workflow encountered an unexpected error and could not complete s
             VALIDATION_SUMMARY="Workflow failed unexpectedly"
           fi
           
-          # Set all outputs
-          {
-            echo 'summary_content<<SUMMARY_EOF_MARKER'
-            echo "$SUMMARY_CONTENT"
-            echo 'SUMMARY_EOF_MARKER'
-          } >> $GITHUB_OUTPUT
+          # Set all outputs with proper multi-line syntax
+          echo "summary_content<<EOF" >> $GITHUB_OUTPUT
+          echo "$SUMMARY_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
           
           echo "review_status=$REVIEW_STATUS" >> $GITHUB_OUTPUT
           echo "critical_issues_count=$CRITICAL_ISSUES_COUNT" >> $GITHUB_OUTPUT
           echo "report_filename=$REPORT_FILENAME" >> $GITHUB_OUTPUT
           
-          {
-            echo 'validation_summary<<SUMMARY_EOF_MARKER'
-            echo "$VALIDATION_SUMMARY"
-            echo 'SUMMARY_EOF_MARKER'
-          } >> $GITHUB_OUTPUT
+          echo "validation_summary<<EOF" >> $GITHUB_OUTPUT
+          echo "$VALIDATION_SUMMARY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
           
           echo ""
           echo "📋 Final workflow outputs determined:"
