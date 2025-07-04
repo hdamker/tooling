@@ -3,19 +3,7 @@
 # CAMARA API Review - Reusable Workflow
 # 
 # Purpose: Performs automated validation of CAMARA API definitions against compliance checklist.
-#   - Robust error handling and logging
-#   - Uses version-specific validator scripts
-#   - Currently supports Commonalities 0.6 only
-#   - Checks out target repository PR branch
-#   - Finds API YAML files in /code/API_definitions/  
-#   - Runs comprehensive automated validation checks
-#   - Generates detailed reports with unique filenames
-#   - Generates issue summaries
-# 
 # Called by: api-review-trigger.yml workflow
-# 
-# Usage Guide: /documentation/SupportingDocuments/CAMARA_API_Review_Workflow_Usage_Guide.md
-# Place this file in: hdamker/tooling/.github/workflows/ directory
 
 name: 'CAMARA API Review - Reusable'
 
@@ -55,15 +43,12 @@ on:
       issue_number:
         required: false
         type: string
-        description: 'Issue number for posting results (when result_target=issue)'
       pr_number_for_comment:
         required: false
         type: string
-        description: 'PR number for posting results (when result_target=pull_request)'
       result_target:
         required: true
         type: string
-        description: 'Where to post results (manual, comment)'
     outputs:
       summary_content:
         description: "The review summary content for posting to issues"
@@ -90,7 +75,6 @@ jobs:
           
           echo "🔍 Validating Commonalities version: $COMMONALITIES_VERSION"
           
-          # Define supported versions and their corresponding validator scripts
           case "$COMMONALITIES_VERSION" in
             "0.6")
               echo "✅ Commonalities 0.6 is supported"
@@ -111,14 +95,6 @@ jobs:
               echo "error_message=Unknown Commonalities version '$COMMONALITIES_VERSION'. Supported versions: 0.6" >> $GITHUB_OUTPUT
               ;;
           esac
-          
-          echo ""
-          echo "📋 Version validation results:"
-          echo "  Version: $COMMONALITIES_VERSION"
-          echo "  Supported: $([ '${{ steps.determine-validator.outputs.version_supported }}' = 'true' ] && echo 'Yes' || echo 'No')"
-          if [[ "${{ steps.determine-validator.outputs.validator_script }}" != "" ]]; then
-            echo "  Validator: ${{ steps.determine-validator.outputs.validator_script }}"
-          fi
 
   api-review:
     runs-on: ubuntu-latest
@@ -135,23 +111,11 @@ jobs:
       - name: Setup Review Environment
         run: |
           echo "🚀 Starting CAMARA API Review"
-          echo "=============================================="
-          echo "📂 Repository Information:"
-          echo "  Repository: ${{ inputs.repo_owner }}/${{ inputs.repo_name }}"
-          echo "  PR: #${{ inputs.pr_number }}"
-          echo "  Head SHA: ${{ inputs.pr_head_sha }}"
-          echo "  Head Ref: ${{ inputs.pr_head_ref }}"
-          echo "  Head Repo: ${{ inputs.pr_head_repo }}"
-          echo "  Base Ref: ${{ inputs.pr_base_ref }}"
-          echo "  Base Repo: ${{ inputs.pr_base_repo }}"
-          echo ""
-          echo "⚙️ Validation Configuration:"
-          echo "  Review Type: ${{ inputs.review_type }}"
-          echo "  Commonalities Version: ${{ inputs.commonalities_version }}"
-          echo "  Validator: ${{ needs.validate-commonalities-version.outputs.validator_script }}"
-          echo "  Workflow Repository: ${{ github.repository }}"
-          echo "  Timeout: 15 minutes"
-          echo "=============================================="
+          echo "Repository: ${{ inputs.repo_owner }}/${{ inputs.repo_name }}"
+          echo "PR: #${{ inputs.pr_number }}"
+          echo "Review Type: ${{ inputs.review_type }}"
+          echo "Commonalities Version: ${{ inputs.commonalities_version }}"
+          echo "Validator: ${{ needs.validate-commonalities-version.outputs.validator_script }}"
 
       - name: Checkout Workflow Repository
         uses: actions/checkout@v4
@@ -167,64 +131,28 @@ jobs:
           path: target-repo
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout Verification
+      - name: Verify Checkout
         run: |
-          echo "🔍 Checkout verification with detailed diagnostics..."
-          echo "Repository: ${{ inputs.pr_head_repo }}"
-          echo "Expected SHA: ${{ inputs.pr_head_sha }}"
-          echo "Expected Branch: ${{ inputs.pr_head_ref }}"
-          echo ""
-          
+          echo "🔍 Verifying checkout..."
           cd target-repo
           
-          # Get current commit info
           CURRENT_SHA=$(git rev-parse HEAD)
-          CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "detached")
+          echo "Current SHA: $CURRENT_SHA"
+          echo "Expected SHA: ${{ inputs.pr_head_sha }}"
           
-          echo "📋 Checkout Results:"
-          echo "  Current SHA: $CURRENT_SHA"
-          echo "  Current Branch: $CURRENT_BRANCH"
-          echo "  Working Directory: $(pwd)"
-          echo ""
-          
-          # Verify we have the right commit
           if [[ "$CURRENT_SHA" == "${{ inputs.pr_head_sha }}" ]]; then
-            echo "✅ Successfully checked out PR commit: ${{ inputs.pr_head_sha }}"
+            echo "✅ Successfully checked out PR commit"
           else
             echo "❌ SHA mismatch!"
-            echo "  Expected: ${{ inputs.pr_head_sha }}"
-            echo "  Got: $CURRENT_SHA"
             exit 1
           fi
           
-          # Repository structure check
-          echo ""
-          echo "📁 Repository Structure Analysis:"
           if [[ -d "code/API_definitions" ]]; then
             API_COUNT=$(find code/API_definitions -name "*.yaml" -o -name "*.yml" | wc -l)
-            echo "  ✅ API definitions directory found"
-            echo "  📊 YAML files found: $API_COUNT"
-            if [[ $API_COUNT -gt 0 ]]; then
-              echo "  📄 API files preview:"
-              find code/API_definitions -name "*.yaml" -o -name "*.yml" | head -5
-              if [[ $API_COUNT -gt 5 ]]; then
-                echo "  ... and $((API_COUNT - 5)) more files"
-              fi
-            else
-              echo "  ⚠️ Warning: No YAML files found in API_definitions"
-            fi
+            echo "✅ API definitions directory found with $API_COUNT YAML files"
           else
-            echo "  ❌ API definitions directory not found at code/API_definitions"
-            echo "  🔍 Searching for alternative API directories:"
-            find . -type d -name "*API*" -o -name "*api*" -o -name "*definition*" | head -10 || echo "  No relevant directories found"
+            echo "⚠️ No API definitions directory found at code/API_definitions"
           fi
-          
-          # Show some recent commits for debugging
-          echo ""
-          echo "📝 Recent commits on this branch:"
-          git log --oneline -n 5 || echo "Could not get git log"
-          
-          cd ..
 
       - name: Setup Python Environment
         uses: actions/setup-python@v4
@@ -233,355 +161,175 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          echo "📦 Installing Python dependencies with version pinning..."
+          echo "📦 Installing Python dependencies..."
           pip install --upgrade pip
-          
-          # Install with specific versions for stability
-          pip install \
-            pyyaml>=6.0 \
-            jsonschema>=4.0 \
-            openapi-spec-validator>=0.5 \
-            requests>=2.28
-          
-          echo ""
-          echo "✅ Dependencies installed:"
-          pip list | grep -E "(pyyaml|jsonschema|openapi-spec-validator|requests)"
-          
-          echo ""
-          echo "🐍 Python environment info:"
-          echo "  Python version: $(python --version)"
-          echo "  Pip version: $(pip --version)"
+          pip install pyyaml>=6.0 jsonschema>=4.0 openapi-spec-validator>=0.5 requests>=2.28
 
-      - name: Locate and Verify Validator Script
+      - name: Locate Validator Script
         run: |
           VALIDATOR_SCRIPT="${{ needs.validate-commonalities-version.outputs.validator_script }}"
-          COMMONALITIES_VERSION="${{ inputs.commonalities_version }}"
           
-          echo "🔍 Validator script location and verification..."
-          echo "Commonalities Version: $COMMONALITIES_VERSION"
-          echo "Validator: $VALIDATOR_SCRIPT"
-          echo "Workflow Repository: ${{ github.repository }}"
-          echo "Expected Script Location: review-tools/scripts/$VALIDATOR_SCRIPT"
+          echo "🔍 Locating validator script: $VALIDATOR_SCRIPT"
           
-          # Check if the version-specific script exists
           if [[ -f "review-tools/scripts/$VALIDATOR_SCRIPT" ]]; then
-            echo "✅ Found validator script: $VALIDATOR_SCRIPT"
-            
-            # Get script information for verification
-            SCRIPT_SIZE=$(stat -f%z "review-tools/scripts/$VALIDATOR_SCRIPT" 2>/dev/null || stat -c%s "review-tools/scripts/$VALIDATOR_SCRIPT" 2>/dev/null || echo "unknown")
-            echo "📊 Script information:"
-            echo "  Size: $SCRIPT_SIZE bytes"
-            echo "  Expected: >10KB"
-            
-            if [[ "$SCRIPT_SIZE" != "unknown" ]] && [[ $SCRIPT_SIZE -gt 10000 ]]; then
-              echo "✅ Script size acceptable"
-            elif [[ "$SCRIPT_SIZE" != "unknown" ]] && [[ $SCRIPT_SIZE -lt 5000 ]]; then
-              echo "⚠️ Warning: Script seems small ($SCRIPT_SIZE bytes) - may be placeholder"
-            fi
-            
+            echo "✅ Found validator script"
             cp "review-tools/scripts/$VALIDATOR_SCRIPT" ./api_review_validator.py
+            chmod +x api_review_validator.py
           else
-            echo "❌ API Validator script not found!"
-            echo ""
-            echo "Expected location: review-tools/scripts/$VALIDATOR_SCRIPT"
-            echo "Workflow repository: ${{ github.repository }}"
-            echo "Commonalities version: $COMMONALITIES_VERSION"
-            echo ""
-            echo "📁 Checking directory structure:"
-            if [[ -d "review-tools" ]]; then
-              echo "review-tools directory contents:"
-              find review-tools -type f -name "*.py" | head -10 || echo "No Python files found"
-              echo ""
-              echo "review-tools/scripts directory contents:"
-              ls -la review-tools/scripts/ 2>/dev/null || echo "scripts directory not found"
-            else
-              echo "review-tools directory does not exist"
-            fi
-            echo ""
-            echo "🔧 Available validator scripts:"
-            find review-tools -name "api_review_validator*.py" 2>/dev/null || echo "No validator scripts found"
-            echo ""
-            echo "Please ensure the validator script exists at:"
-            echo "  ${{ github.repository }}/scripts/$VALIDATOR_SCRIPT"
-            echo ""
-            echo "📋 Supported Commonalities versions and their scripts:"
-            echo "  - 0.6: api_review_validator_v0_6.py"
-            echo "  - Future versions will have their own scripts"
+            echo "❌ Validator script not found at review-tools/scripts/$VALIDATOR_SCRIPT"
+            echo "Available files in scripts directory:"
+            ls -la review-tools/scripts/ 2>/dev/null || echo "scripts directory not found"
             exit 1
           fi
-          
-          # Make script executable and verify
-          chmod +x api_review_validator.py
-          
-          # Script verification
-          echo "🧪 Validator script verification..."
-          if python api_review_validator.py --help >/dev/null 2>&1; then
-            echo "✅ Validator has working --help command"
-          elif python api_review_validator.py 2>&1 | grep -q "Usage:" || [[ $? -eq 1 ]]; then
-            echo "✅ Validator script is accessible and functional"
-          else
-            echo "⚠️ Validator script may have issues, but continuing..."
-          fi
-          
-          echo ""
-          echo "📋 Validator Setup Complete:"
-          echo "  Script: $VALIDATOR_SCRIPT"
-          echo "  Target Commonalities: $COMMONALITIES_VERSION" 
-          echo "  Local Name: api_review_validator.py"
 
       - name: Run API Review
         id: review
         run: |
-          echo "🔍 Starting API validation process..."
-          echo "Using validator: ${{ needs.validate-commonalities-version.outputs.validator_script }}"
-          echo "For Commonalities: ${{ inputs.commonalities_version }}"
-          echo "Repository: ${{ inputs.repo_name }}"
-          echo "PR: #${{ inputs.pr_number }}"
+          echo "🔍 Starting API validation..."
           
-          # Record start time for duration tracking
           VALIDATION_START_TIME=$(date +%s)
-          
-          # Create output directory
           mkdir -p ./review-output
           
-          # Repository analysis
-          echo ""
-          echo "📁 Target repository analysis:"
-          API_FILE_COUNT=$(find target-repo -type f -name "*.yaml" -o -name "*.yml" | wc -l)
-          echo "  Total YAML files: $API_FILE_COUNT"
-          
+          # Count API files
           if [[ -d "target-repo/code/API_definitions" ]]; then
             API_DEF_COUNT=$(find target-repo/code/API_definitions -name "*.yaml" -o -name "*.yml" | wc -l)
-            echo "  API definition files: $API_DEF_COUNT"
           else
             API_DEF_COUNT=0
-            echo "  API definition files: 0 (directory not found)"
           fi
           
-          # Run the validation
-          echo ""
-          echo "🚀 Starting validation..."
-          echo "Command: python api_review_validator.py \"./target-repo\" \\"
-          echo "           --output \"./review-output\" \\"
-          echo "           --repo-name \"${{ inputs.repo_name }}\" \\"
-          echo "           --pr-number \"${{ inputs.pr_number }}\" \\"
-          echo "           --commonalities-version \"${{ inputs.commonalities_version }}\" \\"
-          echo "           --review-type \"${{ inputs.review_type }}\" \\"
-          echo "           --verbose"
-          echo ""
+          echo "APIs found: $API_DEF_COUNT"
           
-          # Execution with comprehensive error handling
-          set +e  # Don't exit on error, capture exit code
-          
+          # Run validation (don't exit on error)
+          set +e
           python api_review_validator.py "./target-repo" \
             --output "./review-output" \
             --repo-name "${{ inputs.repo_name }}" \
             --pr-number "${{ inputs.pr_number }}" \
             --commonalities-version "${{ inputs.commonalities_version }}" \
-            --review-type "${{ inputs.review_type }}" \
-            --verbose
+            --review-type "${{ inputs.review_type }}"
           
           VALIDATION_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
+          set -e
           
-          # Calculate validation duration
           VALIDATION_END_TIME=$(date +%s)
           VALIDATION_DURATION=$((VALIDATION_END_TIME - VALIDATION_START_TIME))
           
-          echo ""
-          echo "📊 Validation analysis completed:"
-          echo "  Exit Code: $VALIDATION_EXIT_CODE"
-          echo "  Duration: ${VALIDATION_DURATION}s"
-          echo "  APIs Found: $API_DEF_COUNT"
-          
-          # Set outputs for reporting
           echo "validation_exit_code=$VALIDATION_EXIT_CODE" >> $GITHUB_OUTPUT
           echo "validation_duration=$VALIDATION_DURATION" >> $GITHUB_OUTPUT
           echo "apis_found_count=$API_DEF_COUNT" >> $GITHUB_OUTPUT
           
-          # Output file analysis
-          echo ""
-          echo "📄 Output file analysis:"
-          if [[ -d "./review-output" ]]; then
-            OUTPUT_FILE_COUNT=$(find ./review-output -type f | wc -l)
-            echo "  Output files generated: $OUTPUT_FILE_COUNT"
-            ls -la ./review-output/ || echo "  Could not list output directory"
-          else
-            echo "  ❌ Output directory not created"
-          fi
-          
-          # Status determination with detailed analysis
+          # Determine status
           if [[ -f "./review-output/summary.md" ]]; then
-            echo "✅ Summary report generated"
-            
-            # Parsing to determine status with more detail
             if grep -q "🔴 Critical: 0" "./review-output/summary.md"; then
               echo "review_status=success" >> $GITHUB_OUTPUT
               echo "critical_issues=0" >> $GITHUB_OUTPUT
-              echo "✅ Validation: No critical issues found - ready for release"
             elif grep -q "🔴 Critical:" "./review-output/summary.md"; then
-              # Extract critical issue count with parsing
               CRITICAL_COUNT=$(grep -o "🔴 Critical: [0-9]*" "./review-output/summary.md" | grep -o "[0-9]*" || echo "unknown")
               echo "review_status=has_critical_issues" >> $GITHUB_OUTPUT
               echo "critical_issues=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
-              echo "⚠️ Validation: Found $CRITICAL_COUNT critical issue(s) - requires attention before release"
             else
-              # Fallback based on exit code for error handling
               if [[ $VALIDATION_EXIT_CODE -eq 0 ]]; then
                 echo "review_status=success" >> $GITHUB_OUTPUT
                 echo "critical_issues=0" >> $GITHUB_OUTPUT
-                echo "✅ Validation: Completed successfully"
               else
                 echo "review_status=has_critical_issues" >> $GITHUB_OUTPUT
                 echo "critical_issues=unknown" >> $GITHUB_OUTPUT
-                echo "⚠️ Validation: Issues found (exit code $VALIDATION_EXIT_CODE)"
               fi
             fi
           else
             echo "review_status=error" >> $GITHUB_OUTPUT
             echo "critical_issues=unknown" >> $GITHUB_OUTPUT
-            echo "❌ Validation: No summary report generated - validation may have failed"
           fi
 
       - name: Find Generated Report File
         id: find-report
         if: always()
         run: |
-          echo "🔍 Searching for generated detailed report..."
+          echo "🔍 Searching for generated report..."
           
-          # Report file detection with multiple patterns
           REPORT_FILE=""
-          
-          # Look for report filename pattern first
           REPORT_FILE=$(find ./review-output -name "*_pr*_api_review_report_v*.md" -type f | head -1)
           
           if [[ -z "$REPORT_FILE" ]]; then
-            # Fallback to legacy pattern
-            REPORT_FILE=$(find ./review-output -name "camara-api-review_*.md" -type f | head -1)
-          fi
-          
-          if [[ -z "$REPORT_FILE" ]]; then
-            # Additional fallback patterns
             REPORT_FILE=$(find ./review-output -name "*report*.md" -type f | head -1)
           fi
           
           if [[ -n "$REPORT_FILE" ]]; then
             REPORT_FILENAME=$(basename "$REPORT_FILE")
-            echo "✅ Found detailed report: $REPORT_FILENAME"
-            
-            # Report analysis
-            REPORT_SIZE=$(stat -f%z "$REPORT_FILE" 2>/dev/null || stat -c%s "$REPORT_FILE" 2>/dev/null || echo "unknown")
-            echo "📊 Report information:"
-            echo "  Filename: $REPORT_FILENAME"
-            echo "  Size: $REPORT_SIZE bytes"
-            
+            echo "✅ Found report: $REPORT_FILENAME"
             echo "report_filename=$REPORT_FILENAME" >> $GITHUB_OUTPUT
             echo "report_path=$REPORT_FILE" >> $GITHUB_OUTPUT
           else
-            echo "⚠️ No report file found, checking for any markdown files..."
-            # Check for any .md files as fallback
-            FALLBACK_FILE=$(find ./review-output -name "*.md" -type f | head -1)
-            if [[ -n "$FALLBACK_FILE" ]]; then
-              FALLBACK_FILENAME=$(basename "$FALLBACK_FILE")
-              echo "📄 Using fallback report: $FALLBACK_FILENAME"
-              echo "report_filename=$FALLBACK_FILENAME" >> $GITHUB_OUTPUT
-              echo "report_path=$FALLBACK_FILE" >> $GITHUB_OUTPUT
-            else
-              echo "❌ No report files found - validation may have failed"
-              echo "report_filename=no-report-generated.md" >> $GITHUB_OUTPUT
-              echo "report_path=" >> $GITHUB_OUTPUT
-            fi
+            echo "⚠️ No report file found"
+            echo "report_filename=no-report-generated.md" >> $GITHUB_OUTPUT
+            echo "report_path=" >> $GITHUB_OUTPUT
           fi
 
-      - name: Prepare Production Summary Output
+      - name: Prepare Summary Output
         id: prepare-summary
-        if: always()  # Always run to ensure we have summary content
+        if: always()
         run: |
-          echo "📋 Preparing enhanced summary output for workflow communication..."
+          echo "📋 Preparing summary output..."
           
           if [[ -f "./review-output/summary.md" ]]; then
-            echo "✅ Enhanced summary file found, processing content..."
+            echo "✅ Summary file found"
             
-            # Enhanced file size validation with GitHub Actions limits
+            # Check file size (GitHub Actions limit)
             FILE_SIZE=$(stat -f%z "./review-output/summary.md" 2>/dev/null || stat -c%s "./review-output/summary.md" 2>/dev/null || echo "0")
-            MAX_SIZE=1048576  # 1MB limit for GitHub Actions
-            
-            echo "📊 Enhanced summary file analysis:"
-            echo "  File size: $FILE_SIZE bytes"
-            echo "  Limit: $MAX_SIZE bytes"
+            MAX_SIZE=1048576  # 1MB
             
             if [[ "$FILE_SIZE" -gt "$MAX_SIZE" ]]; then
-              echo "⚠️ Enhanced summary truncation: File too large ($FILE_SIZE bytes)"
-              # Enhanced truncation with proper formatting
+              echo "⚠️ Summary too large, truncating..."
               head -c 900000 "./review-output/summary.md" > summary_truncated.md
               echo "" >> summary_truncated.md
               echo "---" >> summary_truncated.md
-              echo "⚠️ **Enhanced Summary Truncated**" >> summary_truncated.md
-              echo "" >> summary_truncated.md
-              echo "The summary was truncated due to GitHub Actions size limits." >> summary_truncated.md
-              echo "Download the detailed report for complete analysis." >> summary_truncated.md
+              echo "⚠️ **Summary Truncated**" >> summary_truncated.md
+              echo "The summary was truncated due to size limits." >> summary_truncated.md
               mv summary_truncated.md "./review-output/summary.md"
-              echo "✅ Enhanced truncation completed"
             fi
             
-            # Enhanced content sanitization for GitHub Actions
-            if grep -q "::set-output\|::add-mask\|::debug\|::warning\|::error" "./review-output/summary.md"; then
-              echo "⚠️ Enhanced sanitization: Removing GitHub Actions control sequences..."
-              sed 's/::\([a-zA-Z-]*\)::/&#58;&#58;\1&#58;&#58;/g' "./review-output/summary.md" > summary_sanitized.md
-              mv summary_sanitized.md "./review-output/summary.md"
-              echo "✅ Enhanced sanitization completed"
-            fi
-            
-            # Enhanced summary with workflow metadata
+            # Add workflow metadata
             echo "" >> "./review-output/summary.md"
             echo "---" >> "./review-output/summary.md"
-            echo "**Enhanced Workflow Information:**" >> "./review-output/summary.md"
-            echo "- Enhanced Validator: ${{ needs.validate-commonalities-version.outputs.validator_script }}" >> "./review-output/summary.md"
-            echo "- Validation Duration: ${{ steps.review.outputs.validation_duration }}s" >> "./review-output/summary.md"
+            echo "**Workflow Information:**" >> "./review-output/summary.md"
+            echo "- Validator: ${{ needs.validate-commonalities-version.outputs.validator_script }}" >> "./review-output/summary.md"
+            echo "- Duration: ${{ steps.review.outputs.validation_duration }}s" >> "./review-output/summary.md"
             echo "- APIs Found: ${{ steps.review.outputs.apis_found_count }}" >> "./review-output/summary.md"
             echo "- Workflow Run: [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> "./review-output/summary.md"
             
-            # Use proper heredoc format for production multiline content
             {
               echo 'summary_content<<SUMMARY_EOF_MARKER'
               cat ./review-output/summary.md
               echo 'SUMMARY_EOF_MARKER'
             } >> $GITHUB_OUTPUT
-            
-            echo "✅ Enhanced summary content prepared for output"
           else
-            echo "❌ No enhanced summary file found, creating error summary..."
+            echo "❌ No summary file found"
             
-            # Enhanced error summary with more detail
-            ERROR_SUMMARY="❌ **Enhanced API Review Failed**
+            ERROR_SUMMARY="❌ **API Review Failed**
 
-          The enhanced automated review could not be completed successfully.
+          The automated review could not be completed.
 
-          **Enhanced Diagnostics:**
+          **Diagnostics:**
           - Exit Code: ${{ steps.review.outputs.validation_exit_code }}
           - Duration: ${{ steps.review.outputs.validation_duration }}s
-          - APIs Expected: ${{ steps.review.outputs.apis_found_count }}
-          - Enhanced Validator: ${{ needs.validate-commonalities-version.outputs.validator_script }}
+          - APIs Found: ${{ steps.review.outputs.apis_found_count }}
+          - Validator: ${{ needs.validate-commonalities-version.outputs.validator_script }}
 
           **Next Steps:**
-          1. Check the workflow logs for detailed error information
-          2. Verify the enhanced validator script is properly deployed
-          3. Ensure the repository has API definition files in /code/API_definitions/
-          4. Contact support if issues persist
+          1. Check workflow logs for error details
+          2. Verify API files exist in /code/API_definitions/
+          3. Ensure validator script is properly deployed
 
-          **Enhanced Support:**
-          - Workflow Run: [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          **Workflow Run:** [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
             
             {
               echo 'summary_content<<SUMMARY_EOF_MARKER'
               echo "$ERROR_SUMMARY"
               echo 'SUMMARY_EOF_MARKER'
             } >> $GITHUB_OUTPUT
-            
-            echo "⚠️ Enhanced error summary prepared for output"
           fi
 
-      - name: Upload Enhanced Detailed Report
+      - name: Upload Detailed Report
         uses: actions/upload-artifact@v4
         if: always() && steps.find-report.outputs.report_path != ''
         with:
@@ -589,72 +337,13 @@ jobs:
           path: ${{ steps.find-report.outputs.report_path }}
           retention-days: 30
 
-      - name: Upload Enhanced Summary for Comment
+      - name: Upload Summary
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: enhanced-api-review-summary-${{ inputs.repo_name }}-pr${{ inputs.pr_number }}-${{ inputs.commonalities_version }}
+          name: api-review-summary-${{ inputs.repo_name }}-pr${{ inputs.pr_number }}-${{ inputs.commonalities_version }}
           path: ./review-output/summary.md
           retention-days: 7
-
-      - name: Display Enhanced Review Summary
-        if: always()
-        run: |
-          echo "## 📋 Enhanced API Review Summary"
-          echo "=============================================="
-          echo "**Repository**: ${{ inputs.repo_name }}"
-          echo "**PR**: #${{ inputs.pr_number }}"
-          echo "**Review Type**: ${{ inputs.review_type }}"
-          echo "**Commonalities Version**: ${{ inputs.commonalities_version }}"
-          echo "**Enhanced Validator**: ${{ needs.validate-commonalities-version.outputs.validator_script }}"
-          echo "**Validation Duration**: ${{ steps.review.outputs.validation_duration }}s"
-          echo "**APIs Found**: ${{ steps.review.outputs.apis_found_count }}"
-          echo "**Report File**: ${{ steps.find-report.outputs.report_filename }}"
-          echo "**Workflow Repository**: ${{ github.repository }}"
-          echo ""
-          echo "### Enhanced Validation Results:"
-          echo "**Status**: ${{ steps.review.outputs.review_status }}"
-          echo "**Critical Issues**: ${{ steps.review.outputs.critical_issues }}"
-          echo "**Exit Code**: ${{ steps.review.outputs.validation_exit_code }}"
-          echo ""
-          echo "### Enhanced Summary Content:"
-          if [ -f "./review-output/summary.md" ]; then
-            cat ./review-output/summary.md
-          else
-            echo "❌ Enhanced summary file not generated"
-            echo "This usually indicates an error in the enhanced validation script"
-          fi
-          echo ""
-          echo "=============================================="
-
-      - name: Enhanced Critical Issues Assessment
-        if: always()
-        run: |
-          EXIT_CODE="${{ steps.review.outputs.validation_exit_code }}"
-          REVIEW_STATUS="${{ steps.review.outputs.review_status }}"
-          
-          echo "🎯 Enhanced API Review Results Assessment:"
-          echo "================================================"
-          echo "   Repository: ${{ inputs.repo_name }}"
-          echo "   PR: #${{ inputs.pr_number }}"
-          echo "   Enhanced Validator: ${{ needs.validate-commonalities-version.outputs.validator_script }}"
-          echo "   Validation Duration: ${{ steps.review.outputs.validation_duration }}s"
-          echo "   APIs Processed: ${{ steps.review.outputs.apis_found_count }}"
-          echo "   Status: $REVIEW_STATUS"
-          echo "   Exit Code: $EXIT_CODE"
-          echo "   Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo ""
-          
-          if [ "$EXIT_CODE" = "0" ]; then
-            echo "✅ Enhanced validation: No critical issues found - ready for release!"
-            echo "   The enhanced validator confirmed API compliance with CAMARA guidelines."
-          else
-            echo "❌ Enhanced validation: Critical issues found that must be addressed"
-            echo "   The enhanced validator identified issues requiring attention before release."
-            echo "   📄 Download the detailed report for comprehensive analysis"
-            echo "   🔄 After fixing issues, re-run the enhanced review workflow"
-          fi
-          echo "================================================"
 
   handle-unsupported-version:
     runs-on: ubuntu-latest
@@ -665,64 +354,37 @@ jobs:
       review_status: "error"
       critical_issues_count: "N/A"
     steps:
-      - name: Create Enhanced Version Error Summary
+      - name: Create Version Error Summary
         id: create-error-summary
         run: |
           COMMONALITIES_VERSION="${{ inputs.commonalities_version }}"
           ERROR_MESSAGE="${{ needs.validate-commonalities-version.outputs.error_message }}"
           
-          echo "❌ Creating enhanced error summary for unsupported version"
-          echo "Version requested: $COMMONALITIES_VERSION"
-          echo "Enhanced error: $ERROR_MESSAGE"
-          
-          # Create enhanced error summary content
-          ERROR_SUMMARY="❌ **Enhanced Validation: Unsupported Commonalities Version**
+          ERROR_SUMMARY="❌ **Unsupported Commonalities Version**
 
-          **Enhanced Error Analysis**: $ERROR_MESSAGE
+          **Error**: $ERROR_MESSAGE
 
           **Requested Version**: \`$COMMONALITIES_VERSION\`
           **Currently Supported**: \`0.6\`
 
-          **Enhanced Resolution Options:**
-          1. **Use Enhanced v0.6**: Change the version parameter to \`0.6\` for enhanced validation
-          2. **Future Enhanced Versions**: Enhanced validators for other versions are planned
-          3. **Enhanced Support**: Contact maintainers for enhanced version roadmap
+          **Resolution Options:**
+          1. **Use v0.6**: Change the version parameter to \`0.6\`
+          2. **Future Versions**: Other versions are planned for future releases
+          3. **Manual Review**: Use manual review process for unsupported versions
 
-          **Enhanced Version Roadmap:**
-          - 📅 Enhanced Commonalities 0.7: Planned for future release
-          - 📅 Enhanced Commonalities 0.8: Planned for future release  
-          - 📅 Enhanced Commonalities 1.0: Planned for future release
+          **Version Roadmap:**
+          - 📅 Commonalities 0.7: Planned
+          - 📅 Commonalities 0.8: Planned  
+          - 📅 Commonalities 1.0: Planned
 
-          **Enhanced Manual Review**: For unsupported versions, please use manual review process while enhanced support is developed.
-
-          **Enhanced Workflow Information:**
-          - Enhanced Tooling Repository: ${{ github.repository }}
-          - Enhanced Workflow Run: [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          **Workflow Run:** [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
           
-          # Use proper heredoc format for enhanced multiline content
           {
             echo 'summary_content<<EOF'
             echo "$ERROR_SUMMARY"
             echo 'EOF'
           } >> $GITHUB_OUTPUT
-          
-          echo "✅ Enhanced error summary prepared for unsupported version"
 
-      - name: Display Enhanced Version Error
-        run: |
-          echo "## ❌ Enhanced Validation: Unsupported Commonalities Version"
-          echo "=========================================================="
-          echo ""
-          echo "**Requested**: ${{ inputs.commonalities_version }}"
-          echo "**Enhanced Support**: 0.6"
-          echo ""
-          echo "${{ needs.validate-commonalities-version.outputs.error_message }}"
-          echo ""
-          echo "**Enhanced Features Available:**"
-          echo "Please update to use Commonalities 0.6 for enhanced validation features."
-          echo "=========================================================="
-
-  # Enhanced meta job to provide consistent outputs
   provide-outputs:
     runs-on: ubuntu-latest
     needs: [validate-commonalities-version, api-review, handle-unsupported-version]
@@ -732,16 +394,14 @@ jobs:
       review_status: ${{ steps.determine-outputs.outputs.review_status }}
       critical_issues_count: ${{ steps.determine-outputs.outputs.critical_issues_count }}
     steps:
-      - name: Determine Enhanced Final Outputs
+      - name: Determine Final Outputs
         id: determine-outputs
         run: |
-          echo "🔍 Determining enhanced final workflow outputs..."
+          echo "🔍 Determining final outputs..."
           
           if [[ "${{ needs.validate-commonalities-version.outputs.version_supported }}" == "true" ]]; then
-            # Version was supported, use enhanced api-review job outputs
-            echo "✅ Using enhanced outputs from successful API review"
+            echo "✅ Using outputs from API review"
             
-            # Set enhanced outputs with proper heredoc format
             {
               echo 'summary_content<<SUMMARY_EOF_MARKER'
               cat << 'SUMMARY_EOF'
@@ -752,15 +412,9 @@ jobs:
             
             echo "review_status=${{ needs.api-review.outputs.review_status }}" >> $GITHUB_OUTPUT
             echo "critical_issues_count=${{ needs.api-review.outputs.critical_issues_count }}" >> $GITHUB_OUTPUT
-            
-            REVIEW_STATUS="${{ needs.api-review.outputs.review_status }}"
-            CRITICAL_ISSUES="${{ needs.api-review.outputs.critical_issues_count }}"
-            DURATION="${{ needs.api-review.outputs.validation_duration }}"
           else
-            # Version was not supported, use enhanced error handler outputs  
-            echo "❌ Using enhanced outputs from version error handler"
+            echo "❌ Using outputs from version error handler"
             
-            # Set enhanced error outputs with proper heredoc format
             {
               echo 'summary_content<<SUMMARY_EOF_MARKER'
               cat << 'SUMMARY_EOF'
@@ -771,16 +425,4 @@ jobs:
             
             echo "review_status=error" >> $GITHUB_OUTPUT
             echo "critical_issues_count=N/A" >> $GITHUB_OUTPUT
-            
-            REVIEW_STATUS="error"
-            CRITICAL_ISSUES="N/A"
-            DURATION="N/A"
           fi
-          
-          echo ""
-          echo "📋 Enhanced Final Workflow Results:"
-          echo "  Enhanced Version Supported: ${{ needs.validate-commonalities-version.outputs.version_supported }}"
-          echo "  Enhanced Review Status: $REVIEW_STATUS"
-          echo "  Enhanced Critical Issues: $CRITICAL_ISSUES"
-          echo "  Enhanced Validation Duration: ${DURATION}s"
-          echo "  Enhanced Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
