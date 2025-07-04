@@ -120,33 +120,11 @@ jobs:
           echo "Review Type: ${{ inputs.review_type }}"
           echo "Commonalities Version: ${{ inputs.commonalities_version }}"
           echo "Validator: ${{ needs.validate-commonalities-version.outputs.validator_script }}"
-      
-      - name: Determine Tooling Repository
-        id: determine-repo
-        run: |
-          # Extract repository from workflow_ref using GitHub's string functions
-          WORKFLOW_REF="${{ github.workflow_ref }}"
-          echo "🔍 Workflow ref: $WORKFLOW_REF"
-          
-          # More robust extraction using parameter expansion
-          # Remove everything after (and including) /.github/workflows/
-          TOOLING_REPO="${WORKFLOW_REF%%/.github/workflows/*}"
-          echo "🔍 Detected tooling repository: $TOOLING_REPO"
-          
-          # Validate the result
-          if [[ "$TOOLING_REPO" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]]; then
-            echo "✅ Valid repository format: $TOOLING_REPO"
-            echo "tooling_repository=$TOOLING_REPO" >> $GITHUB_OUTPUT
-          else
-            echo "❌ Invalid repository format extracted: $TOOLING_REPO"
-            echo "❌ Falling back to default: camaraproject/tooling"
-            echo "tooling_repository=camaraproject/tooling" >> $GITHUB_OUTPUT
-          fi
 
       - name: Checkout Workflow Repository (Tooling)
         uses: actions/checkout@v4
         with:
-          repository: ${{ steps.determine-repo.outputs.tooling_repository }}
+          repository: ${{ inputs.tooling_repository }}
           path: review-tools
           token: ${{ secrets.GITHUB_TOKEN }}
 
