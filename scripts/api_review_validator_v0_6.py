@@ -2141,17 +2141,41 @@ def main():
     parser.add_argument('--review-type', required=True, help='Type of review (release-candidate, wip, public-release)')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
     
-    args = parser.parse_args()
+    # Parse arguments with better error handling
+    try:
+        args = parser.parse_args()
+    except SystemExit as e:
+        print("❌ Argument parsing failed")
+        print("📋 Expected usage:")
+        print("python api_review_validator.py <repo_path> --output <output_dir> --repo-name <name> --pr-number <num> --commonalities-version <version> --review-type <type>")
+        sys.exit(1)
+    
+    # Debug: Print all received arguments
+    print(f"🔍 Debug - Received arguments:")
+    print(f"  repo_path: '{args.repo_path}'")
+    print(f"  output: '{args.output}'")
+    print(f"  repo_name: '{args.repo_name}'")
+    print(f"  pr_number: '{args.pr_number}'")
+    print(f"  commonalities_version: '{args.commonalities_version}'")
+    print(f"  review_type: '{args.review_type}'")
     
     # Validate and sanitize inputs
     try:
         repo_dir = validate_directory_path(args.repo_path)
-        commonalities_version = args.commonalities_version
-        output_dir = args.output
         
-        # Validate commonalities version format
+        # Clean and validate commonalities version
+        commonalities_version = str(args.commonalities_version).strip()
+        output_dir = str(args.output).strip()
+        
+        print(f"🔍 Validating commonalities version: '{commonalities_version}'")
+        
+        # Validate commonalities version format - fix the regex check
         if not re.match(r'^\d+\.\d+$', commonalities_version):
-            raise ValueError(f"Invalid commonalities version format: {commonalities_version}")
+            print(f"❌ Invalid commonalities version format: '{commonalities_version}'")
+            print(f"Expected format: X.Y (e.g., 0.6)")
+            raise ValueError(f"Invalid commonalities version format: {commonalities_version}. Expected format: X.Y (e.g., 0.6)")
+        
+        print(f"✅ Commonalities version validation passed: {commonalities_version}")
         
         # Sanitize optional string inputs
         repo_name = re.sub(r'[^a-zA-Z0-9_-]', '', args.repo_name)[:100]  # Sanitize and limit
@@ -2166,7 +2190,9 @@ def main():
         print(f"❌ Input validation error: {str(e)}")
         sys.exit(1)
     except Exception as e:
-        print(f"❌ Unexpected error: {str(e)}")
+        print(f"❌ Unexpected error during validation: {str(e)}")
+        print(f"❌ Error type: {type(e).__name__}")
+        traceback.print_exc()
         sys.exit(1)
     
     if args.verbose:
