@@ -199,47 +199,55 @@ jobs:
           
           echo "APIs found: $API_DEF_COUNT"
           
-          # Run validation (don't exit on error)
+          # Debug: Show environment and what we're passing to the script
+          echo "🔍 Debug: Environment check"
+          echo "  Working directory: $(pwd)"
+          echo "  Python version: $(python --version)"
+          echo "  Python path: $(which python)"
+          echo "  Script exists: $(test -f api_review_validator.py && echo 'YES' || echo 'NO')"
+          
+          echo "🔍 Debug: Arguments being passed to Python script:"
+          echo "  Repository path: './target-repo'"
+          echo "  Output directory: './review-output'" 
+          echo "  Repository name: '${{ inputs.repo_name }}'"
+          echo "  PR number: '${{ inputs.pr_number }}'"
+          echo "  Commonalities version: '${{ inputs.commonalities_version }}'"
+          echo "  Review type: '${{ inputs.review_type }}'"
+          
+          # Validate inputs before calling Python script
+          if [[ -z "${{ inputs.commonalities_version }}" ]]; then
+            echo "❌ Error: commonalities_version is empty"
+            exit 1
+          fi
+          
+          if [[ ! "${{ inputs.commonalities_version }}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Error: Invalid commonalities version format: '${{ inputs.commonalities_version }}'"
+            echo "Expected format: X.Y (e.g., 0.6)"
+            exit 1
+          fi
+          
+          # Test Python script help first
+          echo "🔍 Testing Python script accessibility:"
+          python api_review_validator.py --help || {
+            echo "❌ Error: Cannot access Python script or argparse failed"
+            echo "Script content preview:"
+            head -20 api_review_validator.py
+            exit 1
+          }
+          
+          # Run validation with explicit argument ordering and proper quoting
+          echo "🔍 Executing Python validator..."
           set +e
-          python api_review_validator.py "./target-repo" \
+          python api_review_validator.py \
+            "./target-repo" \
             --output "./review-output" \
             --repo-name "${{ inputs.repo_name }}" \
             --pr-number "${{ inputs.pr_number }}" \
             --commonalities-version "${{ inputs.commonalities_version }}" \
-            --review-type "${{ inputs.review_type }}"
+            --review-type "${{ inputs.review_type }}" \
+            --verbose
           
           VALIDATION_EXIT_CODE=$?
-          set -e
-          
-          VALIDATION_END_TIME=$(date +%s)
-          VALIDATION_DURATION=$((VALIDATION_END_TIME - VALIDATION_START_TIME))
-          
-          echo "validation_exit_code=$VALIDATION_EXIT_CODE" >> $GITHUB_OUTPUT
-          echo "validation_duration=$VALIDATION_DURATION" >> $GITHUB_OUTPUT
-          echo "apis_found_count=$API_DEF_COUNT" >> $GITHUB_OUTPUT
-          
-          # Determine status
-          if [[ -f "./review-output/summary.md" ]]; then
-            if grep -q "🔴 Critical: 0" "./review-output/summary.md"; then
-              echo "review_status=success" >> $GITHUB_OUTPUT
-              echo "critical_issues=0" >> $GITHUB_OUTPUT
-            elif grep -q "🔴 Critical:" "./review-output/summary.md"; then
-              CRITICAL_COUNT=$(grep -o "🔴 Critical: [0-9]*" "./review-output/summary.md" | grep -o "[0-9]*" || echo "unknown")
-              echo "review_status=has_critical_issues" >> $GITHUB_OUTPUT
-              echo "critical_issues=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
-            else
-              if [[ $VALIDATION_EXIT_CODE -eq 0 ]]; then
-                echo "review_status=success" >> $GITHUB_OUTPUT
-                echo "critical_issues=0" >> $GITHUB_OUTPUT
-              else
-                echo "review_status=has_critical_issues" >> $GITHUB_OUTPUT
-                echo "critical_issues=unknown" >> $GITHUB_OUTPUT
-              fi
-            fi
-          else
-            echo "review_status=error" >> $GITHUB_OUTPUT
-            echo "critical_issues=unknown" >> $GITHUB_OUTPUT
-          fi
 
       - name: Find Generated Report File
         id: find-report
