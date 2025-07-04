@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-CAMARA API Review Validator - Complete Enhanced Version v0.6
+CAMARA API Review Validator v0.6
 Automated validation of CAMARA API definitions with comprehensive validation coverage
 
-Enhanced features:
+Features:
 - Differentiated validation for explicit vs implicit subscription APIs
 - Proper classification of subscription API types
 - Targeted validation checks based on API type
-- Enhanced schema equivalence checking (allows differences in examples/descriptions)
+- Schema equivalence checking (allows differences in examples/descriptions)
 - Comprehensive validation coverage including all CAMARA requirements
-- Enhanced filename consistency checking
+- Filename consistency checking
 - Improved scope validation
 - Test alignment validation
 - Multi-file consistency checking
@@ -21,6 +21,7 @@ import sys
 import yaml
 import json
 import re
+import argparse
 from pathlib import Path
 from typing import Dict, List, Any, Tuple, Optional
 from dataclasses import dataclass, field
@@ -241,13 +242,13 @@ class CAMARAAPIValidator:
             self._check_device_schema(api_spec, result)
             self._check_file_naming(file_path, api_spec, result)
             
-            # Enhanced checks for Commonalities 0.6
+            # Checks for Commonalities 0.6
             self._check_work_in_progress_version(api_spec, result)
             self._check_updated_generic401(api_spec, result)
             
-            # Enhanced consistency checks
+            # Consistency checks
             self._check_scope_naming_patterns(api_spec, result)
-            self._check_enhanced_filename_consistency(file_path, api_spec, result)
+            self._check_filename_consistency(file_path, api_spec, result)
             
             # New comprehensive validation checks
             self._check_mandatory_error_responses(api_spec, result)
@@ -583,7 +584,7 @@ class CAMARAAPIValidator:
                 ))
 
     # ===========================================
-    # Enhanced Validation Functions
+    # Validation Functions
     # ===========================================
 
     def _check_scope_naming_patterns(self, spec: dict, result: ValidationResult):
@@ -673,9 +674,9 @@ class CAMARAAPIValidator:
                     f"Expected: `{api_name}:<action>` or `{api_name}:<resource>:<action>`"
                 ))
 
-    def _check_enhanced_filename_consistency(self, file_path: str, spec: dict, result: ValidationResult):
-        """Enhanced filename consistency validation with better error messages"""
-        result.checks_performed.append("Enhanced filename consistency validation")
+    def _check_filename_consistency(self, file_path: str, spec: dict, result: ValidationResult):
+        """Filename consistency validation with better error messages"""
+        result.checks_performed.append("Filename consistency validation")
         
         filename = Path(file_path).stem
         
@@ -725,7 +726,7 @@ class CAMARAAPIValidator:
                 f"Rename file to `{url_api_name}.yaml` or update server URL to match filename"
             ))
         
-        # Enhanced title consistency check
+        # Title consistency check
         if title:
             # Create expected title variations
             expected_variations = [
@@ -799,7 +800,7 @@ class CAMARAAPIValidator:
                         ))
 
     def _check_server_url_format(self, spec: dict, result: ValidationResult):
-        """Enhanced server URL format validation per CAMARA Design Guide Section 5.5"""
+        """Server URL format validation per CAMARA Design Guide Section 5.5"""
         result.checks_performed.append("Server URL format validation")
         
         servers = spec.get('servers', [])
@@ -1027,7 +1028,7 @@ class CAMARAAPIValidator:
         pass
 
     # ===========================================
-    # Core Validation Functions (enhanced with backticks)
+    # Core Validation Functions
     # ===========================================
 
     def _check_openapi_version(self, spec: dict, result: ValidationResult):
@@ -1059,7 +1060,7 @@ class CAMARAAPIValidator:
                 "Remove 'API' from title"
             ))
         
-        # Version check (enhanced for wip detection)
+        # Version check (for wip detection)
         version = info.get('version', '')
         if version != 'wip' and not re.match(r'^\d+\.\d+\.\d+(-rc\.\d+|-alpha\.\d+)?$', version):
             result.issues.append(ValidationIssue(
@@ -1146,7 +1147,7 @@ class CAMARAAPIValidator:
         # Extract version from info for validation
         version = spec.get('info', {}).get('version', '')
         
-        # Enhanced check for wip versions
+        # Check for wip versions
         if version == 'wip' and 'vwip' not in url:
             result.issues.append(ValidationIssue(
                 Severity.MEDIUM, "Servers Object",
@@ -1816,19 +1817,20 @@ def find_api_files(directory: str) -> List[str]:
 
 def generate_report(results: List[ValidationResult], output_dir: str, repo_name: str = "", pr_number: str = "", 
                    consistency_result: Optional[ConsistencyResult] = None, 
-                   test_results: List[TestAlignmentResult] = None):
-    """Generate comprehensive report and summary with enhanced API type detection"""
+                   test_results: List[TestAlignmentResult] = None, commonalities_version: str = "0.6"):
+    """Generate comprehensive report and summary with API type detection"""
     os.makedirs(output_dir, exist_ok=True)
     
-    # Generate unique filename with repository name, PR number, and timestamp
+    # Generate unique filename with repository name and timestamp
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     
-    if repo_name and pr_number:
-        report_filename = f"camara-api-review_{repo_name}_pr{pr_number}_{timestamp}.md"
-    elif repo_name:
-        report_filename = f"camara-api-review_{repo_name}_{timestamp}.md"
+    # Clean version for filename (remove dots)
+    version_clean = commonalities_version.replace('.', '_')
+    
+    if repo_name:
+        report_filename = f"{repo_name}_{timestamp}_api_review_report_v{version_clean}.md"
     else:
-        report_filename = f"camara-api-review_{timestamp}.md"
+        report_filename = f"api_review_{timestamp}_report_v{version_clean}.md"
     
     report_path = f"{output_dir}/{report_filename}"
     
@@ -1872,7 +1874,7 @@ def generate_report(results: List[ValidationResult], output_dir: str, repo_name:
     
     # Generate detailed report
     with open(report_path, "w") as f:
-        f.write("# CAMARA API Review - Complete Enhanced Report with Subscription Type Detection (Commonalities 0.6)\n\n")
+        f.write("# CAMARA API Review Report\n\n")
         
         # Add header information
         if repo_name:
@@ -1881,7 +1883,7 @@ def generate_report(results: List[ValidationResult], output_dir: str, repo_name:
             f.write(f"**Pull Request**: #{pr_number}\n")
         f.write(f"**Generated**: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}\n")
         f.write(f"**Report File**: {report_filename}\n")
-        f.write(f"**Validator**: Complete Enhanced CAMARA API Review Validator with Subscription Type Detection v0.6\n\n")
+        f.write(f"**Validator**: CAMARA API Review Validator v{commonalities_version}\n\n")
         
         # 1. SUMMARY
         f.write("## Summary\n\n")
@@ -2049,7 +2051,7 @@ def generate_report(results: List[ValidationResult], output_dir: str, repo_name:
         f.write(f"- 🟡 Medium: {total_medium}\n")
         f.write(f"- 🔵 Low: {total_low}\n\n")
         
-        # Enhanced issues detail with 25-item limit, prioritizing critical then medium
+        # Issues detail with 25-item limit, prioritizing critical then medium
         if total_critical > 0 or total_medium > 0:
             f.write("**Issues Requiring Attention**:\n")
             
@@ -2123,36 +2125,37 @@ def generate_report(results: List[ValidationResult], output_dir: str, repo_name:
         
         f.write(f"\n📄 **Detailed Report**: {report_filename}\n")
         f.write("\n📄 **Download**: Available as workflow artifact for complete analysis\n")
-        f.write("\n🔍 **Complete Enhanced Validation**: This review includes subscription type detection, enhanced scope validation, improved filename consistency, comprehensive schema compliance, project consistency, and test alignment validation\n")
+        f.write("\n🔍 **Validation**: This review includes subscription type detection, scope validation, filename consistency, schema compliance, project consistency, and test alignment validation\n")
     
     # Return the report filename for use by the workflow
     return report_filename
 
 def main():
-    """Main function with enhanced security validation"""
-    if len(sys.argv) < 4:
-        print("Usage: python api_review_validator_v0_6.py <repo_directory> <commonalities_version> <output_directory> [repo_name] [pr_number]")
-        sys.exit(1)
+    """Main function with security validation"""
+    parser = argparse.ArgumentParser(description='CAMARA API Review Validator v0.6')
+    parser.add_argument('repo_path', help='Path to repository containing API definitions')
+    parser.add_argument('--output', required=True, help='Output directory for reports')
+    parser.add_argument('--repo-name', required=True, help='Repository name')
+    parser.add_argument('--pr-number', required=True, help='Pull request number')
+    parser.add_argument('--commonalities-version', required=True, help='CAMARA Commonalities version')
+    parser.add_argument('--review-type', required=True, help='Type of review (release-candidate, wip, public-release)')
+    parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
+    
+    args = parser.parse_args()
     
     # Validate and sanitize inputs
     try:
-        repo_dir = validate_directory_path(sys.argv[1])
-        commonalities_version = sys.argv[2]
-        output_dir = sys.argv[3]
+        repo_dir = validate_directory_path(args.repo_path)
+        commonalities_version = args.commonalities_version
+        output_dir = args.output
         
         # Validate commonalities version format
         if not re.match(r'^\d+\.\d+$', commonalities_version):
             raise ValueError(f"Invalid commonalities version format: {commonalities_version}")
         
         # Sanitize optional string inputs
-        repo_name = ""
-        pr_number = ""
-        
-        if len(sys.argv) > 4:
-            repo_name = re.sub(r'[^a-zA-Z0-9_-]', '', sys.argv[4])[:100]  # Sanitize and limit
-        
-        if len(sys.argv) > 5:
-            pr_number = re.sub(r'[^0-9]', '', sys.argv[5])[:20]  # Only digits, limit length
+        repo_name = re.sub(r'[^a-zA-Z0-9_-]', '', args.repo_name)[:100]  # Sanitize and limit
+        pr_number = re.sub(r'[^0-9]', '', args.pr_number)[:20]  # Only digits, limit length
         
         # Validate/create output directory safely
         abs_output_dir = os.path.abspath(os.path.expanduser(output_dir))
@@ -2166,18 +2169,13 @@ def main():
         print(f"❌ Unexpected error: {str(e)}")
         sys.exit(1)
     
-    # Log any additional arguments (but ignore them)
-    if len(sys.argv) > 6:
-        additional_args = sys.argv[6:]
-        print(f"📋 Additional arguments (ignored): {additional_args}")
-    
-    print(f"🚀 Starting Complete Enhanced CAMARA API validation with Subscription Type Detection (Commonalities {commonalities_version})")
-    print(f"📁 Repository directory: {repo_dir}")
-    print(f"📊 Output directory: {output_dir}")
-    if repo_name:
+    if args.verbose:
+        print(f"🚀 Starting CAMARA API validation (Commonalities {commonalities_version})")
+        print(f"📁 Repository directory: {repo_dir}")
+        print(f"📊 Output directory: {output_dir}")
         print(f"📦 Repository: {repo_name}")
-    if pr_number:
         print(f"🔗 PR Number: {pr_number}")
+        print(f"🔧 Review Type: {args.review_type}")
     
     # Find API files
     api_files = find_api_files(repo_dir)
@@ -2188,30 +2186,33 @@ def main():
         print("📄 Creating empty results report...")
         # Create empty results for summary
         try:
-            report_filename = generate_report([], output_dir, repo_name, pr_number)
+            report_filename = generate_report([], output_dir, repo_name, pr_number, commonalities_version=commonalities_version)
             print(f"📄 Empty report generated: {report_filename}")
         except Exception as e:
             print(f"❌ Error generating empty report: {str(e)}")
         sys.exit(0)
     
-    print(f"🔍 Found {len(api_files)} API definition file(s)")
-    for file in api_files:
-        print(f"  - {file}")
+    if args.verbose:
+        print(f"🔍 Found {len(api_files)} API definition file(s)")
+        for file in api_files:
+            print(f"  - {file}")
     
     # Validate each file
     validator = CAMARAAPIValidator(commonalities_version)
     results = []
     
     for api_file in api_files:
-        print(f"\n📋 Validating {api_file}...")
+        if args.verbose:
+            print(f"\n📋 Validating {api_file}...")
         try:
             result = validator.validate_api_file(api_file)
             results.append(result)
             
-            print(f"  📄 API Type: {result.api_type.value}")
-            print(f"  🔴 Critical: {result.critical_count}")
-            print(f"  🟡 Medium: {result.medium_count}")
-            print(f"  🔵 Low: {result.low_count}")
+            if args.verbose:
+                print(f"  📄 API Type: {result.api_type.value}")
+                print(f"  🔴 Critical: {result.critical_count}")
+                print(f"  🟡 Medium: {result.medium_count}")
+                print(f"  🔵 Low: {result.low_count}")
                 
         except Exception as e:
             print(f"  ❌ Error validating {api_file}: {str(e)}")
@@ -2222,52 +2223,57 @@ def main():
             ))
             results.append(error_result)
     
-    # Enhanced: Project-wide consistency validation
+    # Project-wide consistency validation
     consistency_result = None
     if len(api_files) > 1:
-        print(f"\n🔗 Performing comprehensive project consistency validation...")
+        if args.verbose:
+            print(f"\n🔗 Performing project consistency validation...")
         try:
             consistency_result = validator.validate_project_consistency(api_files)
             consistency_critical = len([i for i in consistency_result.issues if i.severity == Severity.CRITICAL])
             consistency_medium = len([i for i in consistency_result.issues if i.severity == Severity.MEDIUM])
             consistency_low = len([i for i in consistency_result.issues if i.severity == Severity.LOW])
             
-            print(f"  🔴 Critical: {consistency_critical}")
-            print(f"  🟡 Medium: {consistency_medium}")
-            print(f"  🔵 Low: {consistency_low}")
+            if args.verbose:
+                print(f"  🔴 Critical: {consistency_critical}")
+                print(f"  🟡 Medium: {consistency_medium}")
+                print(f"  🔵 Low: {consistency_low}")
         except Exception as e:
             print(f"  ❌ Error in consistency validation: {str(e)}")
     
-    # Enhanced: Test alignment validation
+    # Test alignment validation
     test_results = []
     test_dir = os.path.join(repo_dir, "code", "Test_definitions")
     if os.path.exists(test_dir):
-        print(f"\n🧪 Performing comprehensive test alignment validation...")
+        if args.verbose:
+            print(f"\n🧪 Performing test alignment validation...")
         for api_file in api_files:
             try:
                 test_result = validator.validate_test_alignment(api_file, test_dir)
                 test_results.append(test_result)
                 
-                api_name = Path(api_file).stem
-                test_critical = len([i for i in test_result.issues if i.severity == Severity.CRITICAL])
-                test_medium = len([i for i in test_result.issues if i.severity == Severity.MEDIUM])
-                test_low = len([i for i in test_result.issues if i.severity == Severity.LOW])
-                
-                print(f"  {api_name}: 🔴 {test_critical} 🟡 {test_medium} 🔵 {test_low} | Files: {len(test_result.test_files)}")
+                if args.verbose:
+                    api_name = Path(api_file).stem
+                    test_critical = len([i for i in test_result.issues if i.severity == Severity.CRITICAL])
+                    test_medium = len([i for i in test_result.issues if i.severity == Severity.MEDIUM])
+                    test_low = len([i for i in test_result.issues if i.severity == Severity.LOW])
+                    
+                    print(f"  {api_name}: 🔴 {test_critical} 🟡 {test_medium} 🔵 {test_low} | Files: {len(test_result.test_files)}")
             except Exception as e:
                 print(f"  ❌ Error validating tests for {api_file}: {str(e)}")
-    else:
+    elif args.verbose:
         print(f"\n📝 No test directory found at {test_dir}")
     
-    print(f"\n📊 Complete enhanced validation analysis completed")
+    if args.verbose:
+        print(f"\n📊 Validation analysis completed")
     
-    # Generate reports with enhanced data
-    print(f"📄 Generating complete enhanced reports in {output_dir}...")
+    # Generate reports
+    print(f"📄 Generating reports in {output_dir}...")
     try:
         # Ensure output directory exists
         os.makedirs(output_dir, exist_ok=True)
         report_filename = generate_report(results, output_dir, repo_name, pr_number, 
-                                        consistency_result, test_results)
+                                        consistency_result, test_results, commonalities_version)
         
         # Verify summary was created
         summary_path = os.path.join(output_dir, "summary.md")
@@ -2276,7 +2282,7 @@ def main():
         else:
             print("❌ Summary report not created - check generate_report function")
             
-        print(f"✅ Complete enhanced reports generated successfully")
+        print(f"✅ Reports generated successfully")
         print(f"📄 Detailed report: {report_filename}")
         
     except Exception as e:
@@ -2314,7 +2320,7 @@ def main():
         api_type = result.api_type.value
         type_counts[api_type] = type_counts.get(api_type, 0) + 1
     
-    print(f"\n🎯 **Complete Enhanced Review Complete with Subscription Type Detection** (Commonalities {commonalities_version})")
+    print(f"\n🎯 **Review Complete** (Commonalities {commonalities_version})")
     if repo_name:
         print(f"Repository: {repo_name}")
     if pr_number:
@@ -2329,7 +2335,7 @@ def main():
     print(f"Total Low Issues: {total_low}")
     
     # Always exit successfully - we are a reporter, not a judge
-    print("\n📋 Complete enhanced analysis complete with comprehensive validation coverage.")
+    print("\n📋 Analysis complete with comprehensive validation coverage.")
     sys.exit(0)
 
 if __name__ == "__main__":
