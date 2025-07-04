@@ -49,6 +49,10 @@ on:
       result_target:
         required: true
         type: string
+      tooling_repository:  # for the repository where the tooling scripts are located
+        required: false
+        type: string
+        default: "camaraproject/tooling"  # Default for production
     outputs:
       summary_content:
         description: "The review summary content for posting to issues"
