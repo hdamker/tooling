@@ -223,7 +223,12 @@ jobs:
           echo "🔍 Searching for generated report..."
           
           REPORT_FILE=""
-          REPORT_FILE=$(find ./review-output -name "*_pr*_api_review_report_v*.md" -type f | head -1)
+
+          # Replace in api-review-reusable.yml "Find Generated Report File" step:
+          REPORT_FILE=$(find ./review-output -name "api_review_*_pr*_v*.md" -type f | head -1)
+          if [[ -z "$REPORT_FILE" ]]; then
+            REPORT_FILE=$(find ./review-output -name "api_review_v*.md" -type f | head -1)
+          fi
           
           if [[ -z "$REPORT_FILE" ]]; then
             REPORT_FILE=$(find ./review-output -name "*report*.md" -type f | head -1)
