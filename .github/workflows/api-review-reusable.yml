@@ -186,7 +186,6 @@ jobs:
             ls -la review-tools/scripts/ 2>/dev/null || echo "scripts directory not found"
             exit 1
           fi
-
       - name: Run API Review
         id: review
         run: |
@@ -204,44 +203,7 @@ jobs:
           
           echo "APIs found: $API_DEF_COUNT"
           
-          # Debug: Show environment and what we're passing to the script
-          echo "🔍 Debug: Environment check"
-          echo "  Working directory: $(pwd)"
-          echo "  Python version: $(python --version)"
-          echo "  Python path: $(which python)"
-          echo "  Script exists: $(test -f api_review_validator.py && echo 'YES' || echo 'NO')"
-          
-          echo "🔍 Debug: Arguments being passed to Python script:"
-          echo "  Repository path: './target-repo'"
-          echo "  Output directory: './review-output'" 
-          echo "  Repository name: '${{ inputs.repo_name }}'"
-          echo "  PR number: '${{ inputs.pr_number }}'"
-          echo "  Commonalities version: '${{ inputs.commonalities_version }}'"
-          echo "  Review type: '${{ inputs.review_type }}'"
-          
-          # Validate inputs before calling Python script
-          if [[ -z "${{ inputs.commonalities_version }}" ]]; then
-            echo "❌ Error: commonalities_version is empty"
-            exit 1
-          fi
-          
-          if [[ ! "${{ inputs.commonalities_version }}" =~ ^[0-9]+\.[0-9]+$ ]]; then
-            echo "❌ Error: Invalid commonalities version format: '${{ inputs.commonalities_version }}'"
-            echo "Expected format: X.Y (e.g., 0.6)"
-            exit 1
-          fi
-          
-          # Test Python script help first
-          echo "🔍 Testing Python script accessibility:"
-          python api_review_validator.py --help || {
-            echo "❌ Error: Cannot access Python script or argparse failed"
-            echo "Script content preview:"
-            head -20 api_review_validator.py
-            exit 1
-          }
-          
-          # Run validation with explicit argument ordering and proper quoting
-          echo "🔍 Executing Python validator..."
+          # Run validation
           set +e
           python api_review_validator.py \
             "./target-repo" \
