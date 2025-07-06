@@ -140,12 +140,13 @@ class TestAlignmentResult:
 class CAMARAAPIValidator:
     """CAMARA API Validator for Commonalities v0.6"""
 
-    def __init__(self, commonalities_version: str = "0.6"):
+    def __init__(self, commonalities_version: str = "0.6", review_type: str = "release-candidate"):
         """Initialize validator with version validation"""
         self.expected_commonalities_version = commonalities_version
         self.implemented_version = "0.6"  # This validator only implements v0.6 rules
         self.api_spec = None  # Will store the API spec for reference resolution
-        
+        self.review_type = review_type  # Store review type for validation behavior
+
         # Warn if requested version doesn't match implemented version
         if self.expected_commonalities_version != self.implemented_version:
             print(f"⚠️ WARNING: This validator implements Commonalities v{self.implemented_version} rules")
@@ -828,18 +829,53 @@ class CAMARAAPIValidator:
             ))
 
     def _check_work_in_progress_version(self, api_spec: dict, result: ValidationResult):
-        """Check for work-in-progress versions that shouldn't be released"""
+        """Check work-in-progress versions based on review type"""
         result.checks_performed.append("Work-in-progress version validation")
         
         version = api_spec.get('info', {}).get('version', '')
         
-        if version == 'wip':
-            result.issues.append(ValidationIssue(
-                Severity.CRITICAL, "Version",
-                "Work-in-progress version `wip` cannot be released",
-                "info.version",
-                "Update to proper semantic version (e.g., `0.1.0-rc.1`)"
-            ))
+        if self.review_type == "wip":
+            # For WIP reviews, expect "wip" version
+            if version != 'wip':
+                result.issues.append(ValidationIssue(
+                    Severity.MEDIUM, "Version",
+                    f"WIP review expects version `wip`, found: `{version}`",
+                    "info.version",
+                    "Use version `wip` for work-in-progress development"
+                ))
+            
+            # Check server URL should contain vwip
+            servers = api_spec.get('servers', [])
+            if servers:
+                server_url = servers[0].get('url', '')
+                if 'vwip' not in server_url:
+                    result.issues.append(ValidationIssue(
+                        Severity.MEDIUM, "Server URL",
+                        "WIP review expects server URL to contain `vwip`",
+                        "servers[0].url",
+                        "Use `vwip` in server URL for work-in-progress development"
+                    ))
+        else:
+            # For release-candidate and other reviews, forbid "wip" version
+            if version == 'wip':
+                result.issues.append(ValidationIssue(
+                    Severity.CRITICAL, "Version",
+                    "Work-in-progress version `wip` cannot be released",
+                    "info.version",
+                    "Update to proper semantic version (e.g., `0.1.0-rc.1`)"
+                ))
+            
+            # Check server URL for vwip
+            servers = api_spec.get('servers', [])
+            if servers:
+                server_url = servers[0].get('url', '')
+                if 'vwip' in server_url:
+                    result.issues.append(ValidationIssue(
+                        Severity.CRITICAL, "Server URL",
+                        "Work-in-progress server URL (`vwip`) cannot be used in release",
+                        "servers[0].url",
+                        "Update to production server URL"
+                    ))
         
         # Check server URL for vwip
         servers = api_spec.get('servers', [])
@@ -1275,6 +1311,28 @@ class CAMARAAPIValidator:
             return
         
         lines = content.split('\n')
+    
+        # Check WIP expectations based on review type
+        if self.review_type == "wip":
+            # For WIP reviews, expect "wip" in test content
+            if 'wip' not in content.lower():
+                result.issues.append(ValidationIssue(
+                    Severity.MEDIUM, "Test Files",
+                    "WIP review expects test files to reference `wip` version",
+                    test_file,
+                    "Update test scenarios to use `wip` version references"
+                ))
+        else:
+            # For release reviews, forbid "wip" in test files  
+            if 'wip' in content.lower():
+                result.issues.append(ValidationIssue(
+                    Severity.MEDIUM, "Test Files",
+                    "Release review should not contain `wip` references in test files",
+                    test_file,
+                    "Update test scenarios to use proper version references"
+                ))
+    
+    # Check for version in Feature line (can be line 1 or 2)
         
         # Check for version in Feature line (can be line 1 or 2)
         feature_line = None
@@ -1749,7 +1807,7 @@ def main():
             print(f"  - {file}")
     
     # Validate each file
-    validator = CAMARAAPIValidator(commonalities_version)
+    validator = CAMARAAPIValidator(commonalities_version, args.review_type)
     results = []
     
     for api_file in api_files:
