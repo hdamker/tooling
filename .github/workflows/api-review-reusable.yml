@@ -256,6 +256,15 @@ jobs:
             echo "report_path=" >> $GITHUB_OUTPUT
           fi
 
+      - name: Upload Detailed Report
+        uses: actions/upload-artifact@v4
+        id: upload-detailed-report
+        if: always() && steps.find-report.outputs.report_path != ''
+        with:
+          name: ${{ steps.find-report.outputs.report_filename }}
+          path: ${{ steps.find-report.outputs.report_path }}
+          retention-days: 30
+
       - name: Prepare Summary Output
         id: prepare-summary
         if: always()
@@ -264,6 +273,25 @@ jobs:
           
           if [[ -f "./review-output/summary.md" ]]; then
             echo "✅ Summary file found"
+            
+            # Add direct artifact download link to summary
+            if [[ "${{ steps.upload-detailed-report.outputs.artifact-url }}" != "" ]]; then
+              echo "🔗 Adding direct artifact link to summary..."
+              
+              ARTIFACT_URL="${{ steps.upload-detailed-report.outputs.artifact-url }}"
+              DETAILED_REPORT_NAME="${{ steps.find-report.outputs.report_filename }}"
+              
+              # Replace the detailed report line with a direct download link
+              sed -i.bak "s|📄 \*\*Detailed Report\*\*:.*|📄 **Detailed Report**: [\`${DETAILED_REPORT_NAME}\`](${ARTIFACT_URL}) - Direct download|g" "./review-output/summary.md"
+              
+              # Add fallback if sed didn't match
+              if ! grep -q "Direct download" "./review-output/summary.md"; then
+                echo "" >> "./review-output/summary.md"
+                echo "📄 **Detailed Report**: [\`${DETAILED_REPORT_NAME}\`](${ARTIFACT_URL}) - Direct download" >> "./review-output/summary.md"
+              fi
+            else
+              echo "⚠️ No artifact URL available, keeping original summary"
+            fi
             
             # Check file size (GitHub Actions limit)
             FILE_SIZE=$(stat -f%z "./review-output/summary.md" 2>/dev/null || stat -c%s "./review-output/summary.md" 2>/dev/null || echo "0")
@@ -319,14 +347,6 @@ jobs:
               echo 'SUMMARY_EOF_MARKER'
             } >> $GITHUB_OUTPUT
           fi
-
-      - name: Upload Detailed Report
-        uses: actions/upload-artifact@v4
-        if: always() && steps.find-report.outputs.report_path != ''
-        with:
-          name: ${{ steps.find-report.outputs.report_filename }}
-          path: ${{ steps.find-report.outputs.report_path }}
-          retention-days: 30
 
       - name: Upload Summary
         uses: actions/upload-artifact@v4
