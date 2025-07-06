@@ -1776,69 +1776,83 @@ def generate_report(results: List[ValidationResult], output_dir: str, repo_name:
         f.write(f"- 🟡 Medium: {total_medium}\n")
         f.write(f"- 🔵 Low: {total_low}\n\n")
         
-        # Enhanced issues detail with 25-item limit, prioritizing critical then medium
-        if total_critical > 0 or total_medium > 0:
-            f.write("**Issues Requiring Attention**:\n")
+    # Enhanced issues detail with 25-item limit, prioritizing critical then medium
+    if total_critical > 0 or total_medium > 0:
+        f.write("**Issues Requiring Attention**:\n")
+        
+        # Collect all issues from all sources
+        all_critical_issues = []
+        all_medium_issues = []
+        
+        # From individual API results
+        for result in results:
+            critical_issues = [i for i in result.issues if i.severity == Severity.CRITICAL]
+            medium_issues = [i for i in result.issues if i.severity == Severity.MEDIUM]
             
-            # Collect all issues from all sources
-            all_critical_issues = []
-            all_medium_issues = []
+            for issue in critical_issues:
+                all_critical_issues.append((result.api_name, issue))
+            for issue in medium_issues:
+                all_medium_issues.append((result.api_name, issue))
+        
+        # From consistency results
+        if consistency_result:
+            critical_issues = [i for i in consistency_result.issues if i.severity == Severity.CRITICAL]
+            medium_issues = [i for i in consistency_result.issues if i.severity == Severity.MEDIUM]
             
-            # From individual API results
-            for result in results:
-                critical_issues = [i for i in result.issues if i.severity == Severity.CRITICAL]
-                medium_issues = [i for i in result.issues if i.severity == Severity.MEDIUM]
+            for issue in critical_issues:
+                all_critical_issues.append(("Project-wide", issue))
+            for issue in medium_issues:
+                all_medium_issues.append(("Project-wide", issue))
+        
+        # From test results
+        if test_results:
+            for test_result in test_results:
+                critical_issues = [i for i in test_result.issues if i.severity == Severity.CRITICAL]
+                medium_issues = [i for i in test_result.issues if i.severity == Severity.MEDIUM]
                 
+                api_name = Path(test_result.api_file).stem
                 for issue in critical_issues:
-                    all_critical_issues.append((result.api_name, issue))
+                    all_critical_issues.append((f"{api_name} Tests", issue))
                 for issue in medium_issues:
-                    all_medium_issues.append((result.api_name, issue))
-            
-            # From consistency results
-            if consistency_result:
-                critical_issues = [i for i in consistency_result.issues if i.severity == Severity.CRITICAL]
-                medium_issues = [i for i in consistency_result.issues if i.severity == Severity.MEDIUM]
-                
-                for issue in critical_issues:
-                    all_critical_issues.append(("Project-wide", issue))
-                for issue in medium_issues:
-                    all_medium_issues.append(("Project-wide", issue))
-            
-            # From test results
-            if test_results:
-                for test_result in test_results:
-                    critical_issues = [i for i in test_result.issues if i.severity == Severity.CRITICAL]
-                    medium_issues = [i for i in test_result.issues if i.severity == Severity.MEDIUM]
-                    
-                    api_name = Path(test_result.api_file).stem
-                    for issue in critical_issues:
-                        all_critical_issues.append((f"{api_name} Tests", issue))
-                    for issue in medium_issues:
-                        all_medium_issues.append((f"{api_name} Tests", issue))
-            
-            # Show critical issues first (up to 20 to leave room for medium)
-            critical_to_show = min(len(all_critical_issues), 20)
-            
-            if critical_to_show > 0:
-                f.write(f"\n**🔴 Critical Issues ({critical_to_show}):**\n")
-                for source_name, issue in all_critical_issues[:critical_to_show]:
-                    f.write(f"- *{source_name}*: **{issue.category}** - {issue.description}\n")
-            
-            # Show medium issues if there's room
-            remaining_slots = 25 - critical_to_show
-            medium_to_show = min(len(all_medium_issues), remaining_slots)
-            
-            if medium_to_show > 0:
-                f.write(f"\n**🟡 Medium Priority Issues ({medium_to_show}):**\n")
-                for source_name, issue in all_medium_issues[:medium_to_show]:
-                    f.write(f"- *{source_name}*: **{issue.category}** - {issue.description}\n")
-            
-            # Note if there are more issues not shown
-            total_not_shown = (len(all_critical_issues) + len(all_medium_issues)) - 25
-            if total_not_shown > 0:
-                f.write(f"\n*Note: {total_not_shown} additional issues not shown above. See detailed report for complete analysis.*\n")
-            
-            f.write("\n")
+                    all_medium_issues.append((f"{api_name} Tests", issue))
+        
+        # Helper function to sanitize descriptions for single-line output
+        def sanitize_for_summary(text: str) -> str:
+            """Sanitize text for safe single-line markdown output"""
+            # Replace newlines and multiple spaces with single space
+            text = ' '.join(text.split())
+            # Escape backticks to prevent markdown issues
+            text = text.replace('`', '\\`')
+            # Limit length for readability
+            if len(text) > 200:
+                text = text[:197] + "..."
+            return text
+        
+        # Show critical issues first (up to 20 to leave room for medium)
+        critical_to_show = min(len(all_critical_issues), 20)
+        
+        if critical_to_show > 0:
+            f.write(f"\n**🔴 Critical Issues ({critical_to_show}):**\n")
+            for source_name, issue in all_critical_issues[:critical_to_show]:
+                description = sanitize_for_summary(issue.description)
+                f.write(f"- *{source_name}*: **{issue.category}** - {description}\n")
+        
+        # Show medium issues if there's room
+        remaining_slots = 25 - critical_to_show
+        medium_to_show = min(len(all_medium_issues), remaining_slots)
+        
+        if medium_to_show > 0:
+            f.write(f"\n**🟡 Medium Priority Issues ({medium_to_show}):**\n")
+            for source_name, issue in all_medium_issues[:medium_to_show]:
+                description = sanitize_for_summary(issue.description)
+                f.write(f"- *{source_name}*: **{issue.category}** - {description}\n")
+        
+        # Note if there are more issues not shown
+        total_not_shown = (len(all_critical_issues) + len(all_medium_issues)) - 25
+        if total_not_shown > 0:
+            f.write(f"\n*Note: {total_not_shown} additional issues not shown above. See detailed report for complete analysis.*\n")
+        
+        f.write("\n") 
         
         # Recommendation
         if total_critical == 0 and total_medium == 0:
