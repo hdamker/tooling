@@ -1747,6 +1747,18 @@ def generate_report(results: List[ValidationResult], output_dir: str, repo_name:
             f.write("Please ensure YAML files are located in `/code/API_definitions/`\n")
             return report_filename
         
+        # Helper function to sanitize descriptions for single-line output
+        def sanitize_for_summary(text: str) -> str:
+            """Sanitize text for safe single-line markdown output"""
+            # Replace newlines and multiple spaces with single space
+            text = ' '.join(text.split())
+            # Escape backticks to prevent markdown issues
+            text = text.replace('`', '\\`')
+            # Limit length for readability
+            if len(text) > 200:
+                text = text[:197] + "..."
+            return text
+        
         # Overall status
         if total_critical == 0:
             if total_medium == 0:
@@ -1816,18 +1828,6 @@ def generate_report(results: List[ValidationResult], output_dir: str, repo_name:
                     for issue in medium_issues:
                         all_medium_issues.append((f"{api_name} Tests", issue))
             
-            # Helper function to sanitize descriptions for single-line output
-            def sanitize_for_summary(text: str) -> str:
-                """Sanitize text for safe single-line markdown output"""
-                # Replace newlines and multiple spaces with single space
-                text = ' '.join(text.split())
-                # Escape backticks to prevent markdown issues
-                text = text.replace('`', '\\`')
-                # Limit length for readability
-                if len(text) > 200:
-                    text = text[:197] + "..."
-                return text
-            
             # Show critical issues first (up to 20 to leave room for medium)
             critical_to_show = min(len(all_critical_issues), 20)
             
@@ -1867,7 +1867,7 @@ def generate_report(results: List[ValidationResult], output_dir: str, repo_name:
         f.write("\n🔍 **Validation**: This review includes subscription type detection, scope validation, filename consistency, schema compliance, project consistency, and test alignment validation\n")
     
     # Return the report filename for use by the workflow
-    return report_filename 
+    return report_filename
 
 def main():
     """Main function with modern argparse structure matching workflow expectations"""
