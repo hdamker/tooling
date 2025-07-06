@@ -144,6 +144,7 @@ class CAMARAAPIValidator:
         """Initialize validator with version validation"""
         self.expected_commonalities_version = commonalities_version
         self.implemented_version = "0.6"  # This validator only implements v0.6 rules
+        self.api_spec = None  # Will store the API spec for reference resolution
         
         # Warn if requested version doesn't match implemented version
         if self.expected_commonalities_version != self.implemented_version:
@@ -151,6 +152,23 @@ class CAMARAAPIValidator:
             print(f"⚠️ Requested version v{self.expected_commonalities_version} will be validated using v{self.implemented_version} rules")
             print(f"⚠️ For accurate v{self.expected_commonalities_version} validation, please use the appropriate validator script")
     
+
+    def _resolve_reference(self, ref: str, api_spec: dict) -> dict:
+        """Resolve $ref reference within the API specification"""
+        if not ref.startswith('#/'):
+            return {}
+        
+        # Remove the '#/' prefix and split by '/'
+        path_parts = ref[2:].split('/')
+        
+        current = api_spec
+        for part in path_parts:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                return {}
+        
+        return current if isinstance(current, dict) else {}
 
     def _check_version_mismatch(self, api_spec: dict, result: ValidationResult):
         """Add warning if validating against different version than requested"""
@@ -184,6 +202,9 @@ class CAMARAAPIValidator:
             with open(file_path, 'r', encoding='utf-8') as f:
                 api_spec = yaml.safe_load(f)
             
+            # Store API spec for reference resolution
+            self.api_spec = api_spec
+
             # Extract basic info
             info = api_spec.get('info', {})
             result.api_name = info.get('title', Path(file_path).stem)
@@ -555,6 +576,73 @@ class CAMARAAPIValidator:
         if isinstance(schema, dict):
             ref = schema.get('$ref', '')
             if '#/components/schemas/ErrorInfo' not in ref:
+                result.issues.append(ValidationIssue(
+                    Severity.MEDIUM, "Error Responses",
+                    f"Error response {status_code} should reference ErrorInfo schema",
+                    f"{operation_name}.responses.{status_code}"
+                ))
+
+    def _validate_error_response(self, response: dict, status_code: str, operation_name: str, result: ValidationResult):
+        """Validate error response structure with $ref resolution"""
+        
+        # Handle $ref in response
+        if '$ref' in response:
+            ref_path = response['$ref']
+            resolved_response = self._resolve_reference(ref_path, self.api_spec)
+            if resolved_response:
+                # Recursively validate the resolved response
+                self._validate_error_response(resolved_response, status_code, operation_name, result)
+                return
+            else:
+                result.issues.append(ValidationIssue(
+                    Severity.CRITICAL, "Error Responses",
+                    f"Cannot resolve response reference: {ref_path}",
+                    f"{operation_name}.responses.{status_code}"
+                ))
+                return
+        
+        content = response.get('content', {})
+        
+        # Check for application/json content type
+        if 'application/json' not in content:
+            result.issues.append(ValidationIssue(
+                Severity.MEDIUM, "Error Responses",
+                f"Error response {status_code} should have application/json content",
+                f"{operation_name}.responses.{status_code}"
+            ))
+            return
+        
+        # Check for ErrorInfo schema reference
+        json_content = content.get('application/json', {})
+        schema = json_content.get('schema', {})
+        
+        if isinstance(schema, dict):
+            # Handle schema with $ref
+            if '$ref' in schema:
+                ref = schema.get('$ref', '')
+                if '#/components/schemas/ErrorInfo' not in ref:
+                    result.issues.append(ValidationIssue(
+                        Severity.MEDIUM, "Error Responses",
+                        f"Error response {status_code} should reference ErrorInfo schema",
+                        f"{operation_name}.responses.{status_code}"
+                    ))
+            # Handle schema with allOf containing ErrorInfo reference
+            elif 'allOf' in schema:
+                all_of_items = schema.get('allOf', [])
+                has_error_info = False
+                for item in all_of_items:
+                    if isinstance(item, dict) and '$ref' in item:
+                        if '#/components/schemas/ErrorInfo' in item['$ref']:
+                            has_error_info = True
+                            break
+                
+                if not has_error_info:
+                    result.issues.append(ValidationIssue(
+                        Severity.MEDIUM, "Error Responses",
+                        f"Error response {status_code} should reference ErrorInfo schema",
+                        f"{operation_name}.responses.{status_code}"
+                    ))
+            else:
                 result.issues.append(ValidationIssue(
                     Severity.MEDIUM, "Error Responses",
                     f"Error response {status_code} should reference ErrorInfo schema",
