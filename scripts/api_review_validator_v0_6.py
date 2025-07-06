@@ -1237,7 +1237,7 @@ def find_api_files(directory: str) -> List[str]:
     
     return [str(f) for f in yaml_files]
 
-def generate_report(results: List[ValidationResult], output_dir: str, repo_name: str = "", pr_number: str = "", 
+def generate_report(results: List[ValidationResult], output_dir: str, repo_name: str = "", issue_number: str = "", 
                    consistency_result: Optional[ConsistencyResult] = None, 
                    test_results: List[TestAlignmentResult] = None, commonalities_version: str = "0.6"):
     """Generate comprehensive report and summary with API type detection"""
@@ -1249,12 +1249,12 @@ def generate_report(results: List[ValidationResult], output_dir: str, repo_name:
     # Clean version for filename (remove dots)
     version_clean = commonalities_version.replace('.', '_')
     
-    if repo_name and pr_number:
-        base_filename = f"api_review_{repo_name}_pr{pr_number}_v{version_clean}_{timestamp}"
+    if repo_name and issue_number and issue_number != "0":
+        base_filename = f"api_review_{repo_name}_comment{issue_number}_v{version_clean}_{timestamp}"
+    elif repo_name:
+        base_filename = f"api_review_{repo_name}_manual_v{version_clean}_{timestamp}"
     else:
         base_filename = f"api_review_v{version_clean}_{timestamp}"
-    
-    report_filename = safe_filename(f"{base_filename}.md")
     
     # Calculate totals
     total_critical = sum(r.critical_count for r in results)
@@ -1295,8 +1295,8 @@ def generate_report(results: List[ValidationResult], output_dir: str, repo_name:
         
         if repo_name:
             f.write(f"**Repository**: {repo_name}\n")
-        if pr_number:
-            f.write(f"**PR Number**: {pr_number}\n")
+        if issue_number:
+            f.write(f"**Issue or PR Number**: {issue_number}\n")
         
         f.write(f"\n## Executive Summary\n\n")
         f.write(f"- **APIs Reviewed**: {len(results)}\n")
@@ -1506,7 +1506,7 @@ def main():
     parser.add_argument('repo_path', help='Path to repository containing API definitions')
     parser.add_argument('--output', required=True, help='Output directory for reports')
     parser.add_argument('--repo-name', required=True, help='Repository name')
-    parser.add_argument('--pr-number', required=True, help='Pull request number')
+    parser.add_argument('--issue-number', required=False, default='0', help='Issue or PR number for context')
     parser.add_argument('--commonalities-version', required=True, help='CAMARA Commonalities version')
     parser.add_argument('--review-type', required=True, help='Type of review (release-candidate, wip, public-release)')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
@@ -1524,7 +1524,7 @@ def main():
         print(f"  repo_path: '{args.repo_path}'")
         print(f"  output: '{args.output}'")
         print(f"  repo_name: '{args.repo_name}'")
-        print(f"  pr_number: '{args.pr_number}'")
+        print(f"  issue_number: '{args.issue_number}'")
         print(f"  commonalities_version: '{args.commonalities_version}'")
         print(f"  review_type: '{args.review_type}'")
         print(f"  verbose: {args.verbose}")
@@ -1560,7 +1560,7 @@ def main():
         
         output_dir = args.output
         repo_name = re.sub(r'[^a-zA-Z0-9_-]', '', args.repo_name)[:100]
-        pr_number = re.sub(r'[^0-9]', '', args.pr_number)[:20]
+        issue_number = re.sub(r'[^0-9]', '', args.issue_number)[:20]
         
         # Create output directory
         abs_output_dir = os.path.abspath(os.path.expanduser(output_dir))
@@ -1583,7 +1583,7 @@ def main():
         print(f"📁 Repository directory: {repo_dir}")
         print(f"📊 Output directory: {output_dir}")
         print(f"📦 Repository: {repo_name}")
-        print(f"🔗 PR Number: {pr_number}")
+        print(f"🔗 PR Number: {issue_number}")
         print(f"🔧 Review Type: {args.review_type}")
     
     # Find API files
@@ -1594,7 +1594,7 @@ def main():
         print(f"Checked location: {repo_dir}/code/API_definitions/")
         print("📄 Creating empty results report...")
         try:
-            report_filename = generate_report([], output_dir, repo_name, pr_number, commonalities_version=commonalities_version)
+            report_filename = generate_report([], output_dir, repo_name, issue_number, commonalities_version=commonalities_version)
             print(f"📄 Empty report generated: {report_filename}")
         except Exception as e:
             print(f"❌ Error generating empty report: {str(e)}")
@@ -1670,7 +1670,7 @@ def main():
     
     # Generate reports
     try:
-        report_filename = generate_report(results, output_dir, repo_name, pr_number, 
+        report_filename = generate_report(results, output_dir, repo_name, issue_number, 
                                         consistency_result, test_results, commonalities_version=commonalities_version)
         print(f"📄 Report generated: {report_filename}")
     except Exception as e:
@@ -1713,8 +1713,8 @@ def main():
     print(f"\n🎯 **Review Complete** (Commonalities {commonalities_version})")
     if repo_name:
         print(f"Repository: {repo_name}")
-    if pr_number:
-        print(f"PR: #{pr_number}")
+    if issue_number:
+        print(f"PR: #{issue_number}")
     print(f"Individual APIs: {len(results)}")
     for api_type, count in type_counts.items():
         print(f"  - {api_type}: {count}")
