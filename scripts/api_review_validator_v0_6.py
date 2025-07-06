@@ -139,10 +139,42 @@ class TestAlignmentResult:
 
 class CAMARAAPIValidator:
     """CAMARA API Validator for Commonalities v0.6"""
-    
+
     def __init__(self, commonalities_version: str = "0.6"):
+        """Initialize validator with version validation"""
         self.expected_commonalities_version = commonalities_version
+        self.implemented_version = "0.6"  # This validator only implements v0.6 rules
+        
+        # Warn if requested version doesn't match implemented version
+        if self.expected_commonalities_version != self.implemented_version:
+            print(f"⚠️ WARNING: This validator implements Commonalities v{self.implemented_version} rules")
+            print(f"⚠️ Requested version v{self.expected_commonalities_version} will be validated using v{self.implemented_version} rules")
+            print(f"⚠️ For accurate v{self.expected_commonalities_version} validation, please use the appropriate validator script")
     
+
+    def _check_version_mismatch(self, api_spec: dict, result: ValidationResult):
+        """Add warning if validating against different version than requested"""
+        if self.expected_commonalities_version != self.implemented_version:
+            # Get the declared commonalities version from the API spec
+            info = api_spec.get('info', {})
+            declared_version = info.get('x-camara-commonalities', 'not specified')
+            
+            result.issues.append(ValidationIssue(
+                Severity.INFO, "Version Mismatch",
+                f"Validating with v{self.implemented_version} rules (requested v{self.expected_commonalities_version})",
+                "validator",
+                f"This validator implements Commonalities v{self.implemented_version} compliance checks"
+            ))
+            
+            # Also check if API declares a different commonalities version
+            if declared_version != 'not specified' and declared_version != self.implemented_version:
+                result.issues.append(ValidationIssue(
+                    Severity.LOW, "Commonalities Version",
+                    f"API declares commonalities v{declared_version} but is being validated against v{self.implemented_version} rules",
+                    "info.x-camara-commonalities",
+                    f"Results may not accurately reflect v{declared_version} compliance"
+                ))
+
     def validate_api_file(self, file_path: str) -> ValidationResult:
         """Validate a single API file"""
         result = ValidationResult(file_path=file_path)
@@ -160,6 +192,9 @@ class CAMARAAPIValidator:
             # Detect API type first for targeted validation
             result.api_type = self._detect_api_type(api_spec)
             result.checks_performed.append(f"API type detection: {result.api_type.value}")
+
+            # Check for Commonalities version mismatch
+            self._check_version_mismatch(api_spec, result)
             
             # Core validation checks
             self._validate_info_object(api_spec, result)
@@ -757,7 +792,7 @@ class CAMARAAPIValidator:
                 if 'AUTHENTICATION_REQUIRED' in enum_values:
                     result.issues.append(ValidationIssue(
                         Severity.MEDIUM, "Error Codes",
-                        "Use `UNAUTHENTICATED` instead of `AUTHENTICATION_REQUIRED` (Commonalities 0.6)",
+                        "Use `UNAUTHENTICATED` instead of `AUTHENTICATION_REQUIRED`",
                         f"components.schemas.{schema_name}",
                         "Replace `AUTHENTICATION_REQUIRED` with `UNAUTHENTICATED`"
                     ))
@@ -1287,6 +1322,24 @@ def generate_report(results: List[ValidationResult], output_dir: str, repo_name:
         for test_result in test_results:
             all_checks_performed.update(test_result.checks_performed)
     
+    # Generate detailed report
+    with open(f"{output_dir}/{report_filename}", "w") as f:
+        f.write(f"# CAMARA API Review Report\n\n")
+        if repo_name:
+            f.write(f"**Repository**: {repo_name}\n")
+        if issue_number and issue_number != "0":
+            f.write(f"**Issue/PR**: #{issue_number}\n")
+        f.write(f"**Generated**: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} UTC\n")
+        f.write(f"**Requested Commonalities Version**: {commonalities_version}\n")
+        f.write(f"**Validator Implementation**: v0.6\n")
+        
+        # Add version warning if mismatch
+        if commonalities_version != "0.6":
+            f.write(f"\n> ⚠️ **Note**: This validator implements Commonalities v0.6 compliance rules. ")
+            f.write(f"The requested version {commonalities_version} validation is performed using v0.6 rules.\n")
+        
+        f.write("\n---\n\n")
+
     # Generate detailed report
     with open(f"{output_dir}/{report_filename}", "w") as f:
         f.write(f"# CAMARA API Review Report\n\n")
