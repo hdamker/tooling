@@ -13,46 +13,37 @@ on:
       repo_owner:
         required: true
         type: string
+        description: "Repository owner (e.g., 'camaraproject')"
       repo_name:
         required: true
         type: string
-      pr_number:
-        required: true
-        type: string
-      pr_head_sha:
-        required: true
-        type: string
-      pr_head_ref:
-        required: true
-        type: string
-      pr_head_repo:
-        required: true
-        type: string
-      pr_base_ref:
-        required: true
-        type: string
-      pr_base_repo:
-        required: true
-        type: string
-      review_type:
-        required: true
-        type: string
-      commonalities_version:
-        required: true
-        type: string
+        description: "Repository name (e.g., 'QualityOnDemand')"
       issue_number:
         required: false
         type: string
-      pr_number_for_comment:
-        required: false
-        type: string
-      result_target:
+        default: "0"
+        description: "Issue or PR number for logging and metadata (e.g., '123', defaults to '0' for manual triggers)"
+      pr_head_sha:
         required: true
         type: string
-      tooling_repository:  # for the repository where the tooling scripts are located
+        description: "Git commit SHA to checkout and review"
+      pr_head_repo:
+        required: true
+        type: string
+        description: "Repository containing the code to review"
+      review_type:
+        required: true
+        type: string
+        description: "Type of review: 'release-candidate' or 'wip'"
+      commonalities_version:
+        required: true
+        type: string
+        description: "CAMARA Commonalities version to validate against"
+      tooling_repository:
         required: false
         type: string
-        default: "camaraproject/tooling"  # Default for production
+        default: "camaraproject/tooling"
+        description: "Repository containing validation scripts"
     outputs:
       summary_content:
         description: "The review summary content for posting to issues"
@@ -116,7 +107,7 @@ jobs:
         run: |
           echo "🚀 Starting CAMARA API Review"
           echo "Repository: ${{ inputs.repo_owner }}/${{ inputs.repo_name }}"
-          echo "PR: #${{ inputs.pr_number }}"
+          echo "Issue/PR: #${{ inputs.issue_number }}"
           echo "Review Type: ${{ inputs.review_type }}"
           echo "Commonalities Version: ${{ inputs.commonalities_version }}"
           echo "Validator: ${{ needs.validate-commonalities-version.outputs.validator_script }}"
@@ -146,7 +137,7 @@ jobs:
           echo "Expected SHA: ${{ inputs.pr_head_sha }}"
           
           if [[ "$CURRENT_SHA" == "${{ inputs.pr_head_sha }}" ]]; then
-            echo "✅ Successfully checked out PR commit"
+            echo "✅ Successfully checked out commit"
           else
             echo "❌ SHA mismatch!"
             exit 1
@@ -186,6 +177,7 @@ jobs:
             ls -la review-tools/scripts/ 2>/dev/null || echo "scripts directory not found"
             exit 1
           fi
+
       - name: Run API Review
         id: review
         run: |
@@ -203,18 +195,37 @@ jobs:
           
           echo "APIs found: $API_DEF_COUNT"
           
-          # Run validation
+          # Run validation with updated parameter name
           set +e
           python api_review_validator.py \
             "./target-repo" \
             --output "./review-output" \
             --repo-name "${{ inputs.repo_name }}" \
-            --pr-number "${{ inputs.pr_number }}" \
+            --issue-number "${{ inputs.issue_number }}" \
             --commonalities-version "${{ inputs.commonalities_version }}" \
             --review-type "${{ inputs.review_type }}" \
             --verbose
           
           VALIDATION_EXIT_CODE=$?
+          set -e
+          
+          VALIDATION_END_TIME=$(date +%s)
+          VALIDATION_DURATION=$((VALIDATION_END_TIME - VALIDATION_START_TIME))
+          
+          echo "📊 Validation completed in ${VALIDATION_DURATION}s with exit code: $VALIDATION_EXIT_CODE"
+          
+          # Determine review status
+          if [[ $VALIDATION_EXIT_CODE -eq 0 ]]; then
+            echo "review_status=success" >> $GITHUB_OUTPUT
+          elif [[ $VALIDATION_EXIT_CODE -eq 1 ]]; then
+            echo "review_status=has_critical_issues" >> $GITHUB_OUTPUT
+          else
+            echo "review_status=error" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "validation_exit_code=$VALIDATION_EXIT_CODE" >> $GITHUB_OUTPUT
+          echo "validation_duration=$VALIDATION_DURATION" >> $GITHUB_OUTPUT
+          echo "apis_found_count=$API_DEF_COUNT" >> $GITHUB_OUTPUT
 
       - name: Find Generated Report File
         id: find-report
@@ -225,7 +236,7 @@ jobs:
           REPORT_FILE=""
 
           # Replace in api-review-reusable.yml "Find Generated Report File" step:
-          REPORT_FILE=$(find ./review-output -name "api_review_*_pr*_v*.md" -type f | head -1)
+          REPORT_FILE=$(find ./review-output -name "api_review_*_comment*_v*.md" -o -name "api_review_*_manual_v*.md" -type f | head -1)
           if [[ -z "$REPORT_FILE" ]]; then
             REPORT_FILE=$(find ./review-output -name "api_review_v*.md" -type f | head -1)
           fi
@@ -321,7 +332,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: api-review-summary-${{ inputs.repo_name }}-pr${{ inputs.pr_number }}-${{ inputs.commonalities_version }}
+          name: api-review-summary-${{ inputs.repo_name }}-${{ inputs.issue_number != '0' && format('comment{0}', inputs.issue_number) || 'manual' }}-${{ inputs.commonalities_version }}
           path: ./review-output/summary.md
           retention-days: 7
 
