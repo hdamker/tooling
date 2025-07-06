@@ -209,7 +209,22 @@ class CAMARAAPIValidator:
 
             # Extract basic info
             info = api_spec.get('info', {})
-            result.api_name = info.get('title', Path(file_path).stem)
+
+            # Extract api-name from servers URL (official method)
+            api_name = self._extract_api_name_from_servers(api_spec)
+
+            # Fallback to filename if servers extraction fails
+            if not api_name:
+                api_name = Path(file_path).stem
+                result.issues.append(ValidationIssue(
+                    Severity.MEDIUM, "Server Configuration",
+                    "Cannot extract api-name from servers[*].url",
+                    "servers",
+                    "Ensure servers[*].url follows format: {apiRoot}/<api-name>/<api-version>"
+                ))
+
+            result.api_name = api_name
+
             result.version = info.get('version', 'unknown')
             
             # Detect API type first for targeted validation
