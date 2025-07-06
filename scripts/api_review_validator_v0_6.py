@@ -1449,7 +1449,7 @@ class CAMARAAPIValidator:
             # For release reviews, forbid "wip" in test files  
             if 'wip' in content.lower():
                 result.issues.append(ValidationIssue(
-                    Severity.MEDIUM, "Test Files",
+                    Severity.CRITICAL, "Test Files",
                     "Release review should not contain `wip` references in test files",
                     test_file,
                     "Update test scenarios to use proper version references"
