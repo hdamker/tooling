@@ -1290,6 +1290,8 @@ def generate_report(results: List[ValidationResult], output_dir: str, repo_name:
         base_filename = f"api_review_{repo_name}_manual_v{version_clean}_{timestamp}"
     else:
         base_filename = f"api_review_v{version_clean}_{timestamp}"
+
+    report_filename = safe_filename(f"{base_filename}.md")
     
     # Calculate totals
     total_critical = sum(r.critical_count for r in results)
