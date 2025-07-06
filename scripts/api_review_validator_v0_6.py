@@ -13,7 +13,6 @@ Features:
 - Improved scope validation
 - Test alignment validation
 - Multi-file consistency checking
-- FIXED: Proper backtick wrapping for markdown rendering
 """
 
 import os
@@ -312,7 +311,7 @@ class CAMARAAPIValidator:
                 Severity.CRITICAL, "Info Object",
                 f"Invalid version format: `{version}`",
                 "info.version",
-                "Use semantic versioning (`x.y.z` or `x.y.z-rc.n`)"
+                "Use semantic versioning (`x.y.z` or `x.y.z-rc.n` or `x.y.z-alpha.n`)"
             ))
         
         # License check
@@ -494,7 +493,7 @@ class CAMARAAPIValidator:
             ))
         
         # Check for error responses
-        error_codes = ['400', '401', '403', '404', '500']
+        error_codes = ['400', '401', '403', '404']
         for code in error_codes:
             if code in responses:
                 response = responses[code]
@@ -550,7 +549,7 @@ class CAMARAAPIValidator:
     def _validate_schemas(self, schemas: dict, result: ValidationResult):
         """Validate schema definitions"""
         # Check for required common schemas
-        required_schemas = ['ErrorInfo']
+        required_schemas = ['ErrorInfo', 'XCorrelator']
         
         for schema_name in required_schemas:
             if schema_name not in schemas:
@@ -783,15 +782,6 @@ class CAMARAAPIValidator:
                                 "Missing 400 (Bad Request) response",
                                 f"{operation_name}.responses",
                                 "Add 400 response for validation errors"
-                            ))
-                        
-                        # Check for mandatory 500 (Internal Server Error)
-                        if '500' not in responses:
-                            result.issues.append(ValidationIssue(
-                                Severity.MEDIUM, "Error Responses",
-                                "Missing 500 (Internal Server Error) response",
-                                f"{operation_name}.responses",
-                                "Add 500 response for server errors"
                             ))
 
     def _check_server_url_format(self, api_spec: dict, result: ValidationResult):
