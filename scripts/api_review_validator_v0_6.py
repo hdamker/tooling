@@ -797,6 +797,60 @@ class CAMARAAPIValidator:
                                     f"components.securitySchemes.{scheme_name}.flows.{flow_name}.scopes"
                                 ))
 
+    def _extract_api_name_from_servers(self, api_spec: dict) -> Optional[str]:
+            """Extract api-name from servers[*].url property
+            
+            According to CAMARA guidelines:
+            - api-name is specified as the base path, prior to the API version, in servers[*].url
+            - Format: {apiRoot}/<api-name>/<api-version>
+            - Example: {apiRoot}/location-verification/v1 -> api-name is "location-verification"
+            """
+            servers = api_spec.get('servers', [])
+            if not servers:
+                return None
+            
+            api_names = set()
+            
+            for server in servers:
+                url = server.get('url', '')
+                if not url:
+                    continue
+                
+                # Remove {apiRoot} prefix if present
+                if url.startswith('{apiRoot}/'):
+                    path = url[10:]  # Remove '{apiRoot}/'
+                elif url.startswith('http://') or url.startswith('https://'):
+                    # Extract path from full URL
+                    from urllib.parse import urlparse
+                    parsed = urlparse(url)
+                    path = parsed.path.lstrip('/')
+                else:
+                    # Assume it's just the path part
+                    path = url.lstrip('/')
+                
+                # Split path components
+                path_parts = [part for part in path.split('/') if part]
+                
+                if len(path_parts) >= 2:
+                    # Format: <api-name>/<api-version>
+                    api_name = path_parts[0]
+                    api_names.add(api_name)
+                elif len(path_parts) == 1:
+                    # Only one component - could be api-name without version
+                    api_name = path_parts[0]
+                    # Check if it looks like a version (starts with 'v' followed by numbers/dots)
+                    if not re.match(r'^v\d+', api_name):
+                        api_names.add(api_name)
+            
+            # All servers should have the same api-name
+            if len(api_names) == 1:
+                return api_names.pop()
+            elif len(api_names) > 1:
+                # Multiple different api-names found - this is an error but return the first one
+                return sorted(api_names)[0]
+            else:
+                return None
+
     def _check_filename_consistency(self, file_path: str, api_spec: dict, result: ValidationResult):
         """Check filename consistency with API content"""
         result.checks_performed.append("Filename consistency validation")
@@ -804,29 +858,73 @@ class CAMARAAPIValidator:
         filename = Path(file_path).stem
         
         # Check kebab-case
-        if not re.match(r'^[a-z0-9-]+$', filename):
+        if not re.match(r'^[a-z0-9-]+, filename):
             result.issues.append(ValidationIssue(
-                Severity.MEDIUM, "File Naming",
+                Severity.CRITICAL, "File Naming",
                 f"Filename should use kebab-case: `{filename}`",
                 file_path,
                 "Use lowercase letters, numbers, and hyphens only"
             ))
         
-        # Check consistency with API title (optional check)
-        info = api_spec.get('info', {})
-        title = info.get('title', '').lower()
+        # Extract api-name from servers URL (this is the correct reference)
+        api_name = self._extract_api_name_from_servers(api_spec)
         
-        # Convert title to potential filename format
-        title_as_filename = re.sub(r'[^a-z0-9]+', '-', title).strip('-')
-        
-        # This is a soft check - just info level
-        if title_as_filename and filename != title_as_filename:
+        if api_name:
+            # Validate filename against api-name (primary check)
+            if filename != api_name:
+                result.issues.append(ValidationIssue(
+                    Severity.CRITICAL, "File Naming",
+                    f"Filename `{filename}` doesn't match api-name `{api_name}` from servers URL",
+                    file_path,
+                    f"Rename file to `{api_name}.yaml` to match the api-name from servers[*].url"
+                ))
+            
+            # Validate title consistency with api-name (additional check)
+            info = api_spec.get('info', {})
+            title = info.get('title', '')
+            
+            if title:
+                # Convert api-name to expected title format for comparison
+                # Example: "location-verification" -> "Location Verification"
+                expected_title_pattern = api_name.replace('-', ' ').title()
+                
+                # Also check if title contains the api-name concept
+                title_lower = title.lower()
+                api_name_words = api_name.replace('-', ' ')
+                
+                # If title doesn't contain the key concepts from api-name, flag it
+                if (api_name_words not in title_lower and 
+                    not any(word in title_lower for word in api_name.split('-') if len(word) > 3)):
+                    result.issues.append(ValidationIssue(
+                        Severity.LOW, "API Consistency",
+                        f"API title `{title}` may not align with api-name `{api_name}`",
+                        "info.title",
+                        f"Consider if title should reference concepts from api-name `{api_name}`"
+                    ))
+        else:
+            # If we can't extract api-name, fall back to basic validation
             result.issues.append(ValidationIssue(
-                Severity.INFO, "File Naming",
-                f"Filename `{filename}` doesn't match title pattern `{title_as_filename}`",
-                file_path,
-                "Consider aligning filename with API title"
+                Severity.MEDIUM, "Server Configuration",
+                "Cannot extract api-name from servers[*].url for filename validation",
+                "servers",
+                "Ensure servers[*].url follows format: {apiRoot}/<api-name>/<api-version>"
             ))
+            
+            # Still check against title as a fallback (but with lower severity)
+            info = api_spec.get('info', {})
+            title = info.get('title', '').lower()
+            
+            if title:
+                # Convert title to potential filename format
+                title_as_filename = re.sub(r'[^a-z0-9]+', '-', title).strip('-')
+                
+                if title_as_filename and filename != title_as_filename:
+                    result.issues.append(ValidationIssue(
+                        Severity.INFO, "File Naming",
+                        f"Filename `{filename}` doesn't match title pattern `{title_as_filename}`",
+                        file_path,
+                        "Consider aligning filename with API title (as fallback when api-name unavailable)"
+                    ))
 
     def _check_work_in_progress_version(self, api_spec: dict, result: ValidationResult):
         """Check work-in-progress versions based on review type"""
@@ -1237,8 +1335,18 @@ class CAMARAAPIValidator:
         api_version = api_info.get('version', '')
         api_title = api_info.get('title', '')
         
-        # Extract api-name from filename
-        api_name = Path(api_file).stem
+        # Extract api-name from servers URL (correct method)
+        api_name = self._extract_api_name_from_servers(api_spec)
+        
+        # Fallback to filename if servers extraction fails
+        if not api_name:
+            api_name = Path(api_file).stem
+            result.issues.append(ValidationIssue(
+                Severity.MEDIUM, "API Configuration",
+                "Using filename as api-name fallback due to invalid servers[*].url format",
+                "servers",
+                "Ensure servers[*].url follows format: {apiRoot}/<api-name>/<api-version>"
+            ))
         
         # Find test files
         test_files = self._find_test_files(test_dir, api_name)
