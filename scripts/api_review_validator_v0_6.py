@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 import datetime
 import traceback
+from urllib.parse import urlparse
 
 def safe_filename(filename: str, max_length: int = 200) -> str:
     """Sanitize filename to prevent path traversal and other issues"""
@@ -798,58 +799,57 @@ class CAMARAAPIValidator:
                                 ))
 
     def _extract_api_name_from_servers(self, api_spec: dict) -> Optional[str]:
-            """Extract api-name from servers[*].url property
+        """Extract api-name from servers[*].url property
+        
+        According to CAMARA guidelines:
+        - api-name is specified as the base path, prior to the API version, in servers[*].url
+        - Format: {apiRoot}/<api-name>/<api-version>
+        - Example: {apiRoot}/location-verification/v1 -> api-name is "location-verification"
+        """
+        servers = api_spec.get('servers', [])
+        if not servers:
+            return None
+        
+        api_names = set()
+        
+        for server in servers:
+            url = server.get('url', '')
+            if not url:
+                continue
             
-            According to CAMARA guidelines:
-            - api-name is specified as the base path, prior to the API version, in servers[*].url
-            - Format: {apiRoot}/<api-name>/<api-version>
-            - Example: {apiRoot}/location-verification/v1 -> api-name is "location-verification"
-            """
-            servers = api_spec.get('servers', [])
-            if not servers:
-                return None
-            
-            api_names = set()
-            
-            for server in servers:
-                url = server.get('url', '')
-                if not url:
-                    continue
-                
-                # Remove {apiRoot} prefix if present
-                if url.startswith('{apiRoot}/'):
-                    path = url[10:]  # Remove '{apiRoot}/'
-                elif url.startswith('http://') or url.startswith('https://'):
-                    # Extract path from full URL
-                    from urllib.parse import urlparse
-                    parsed = urlparse(url)
-                    path = parsed.path.lstrip('/')
-                else:
-                    # Assume it's just the path part
-                    path = url.lstrip('/')
-                
-                # Split path components
-                path_parts = [part for part in path.split('/') if part]
-                
-                if len(path_parts) >= 2:
-                    # Format: <api-name>/<api-version>
-                    api_name = path_parts[0]
-                    api_names.add(api_name)
-                elif len(path_parts) == 1:
-                    # Only one component - could be api-name without version
-                    api_name = path_parts[0]
-                    # Check if it looks like a version (starts with 'v' followed by numbers/dots)
-                    if not re.match(r'^v\d+', api_name):
-                        api_names.add(api_name)
-            
-            # All servers should have the same api-name
-            if len(api_names) == 1:
-                return api_names.pop()
-            elif len(api_names) > 1:
-                # Multiple different api-names found - this is an error but return the first one
-                return sorted(api_names)[0]
+            # Remove {apiRoot} prefix if present
+            if url.startswith('{apiRoot}/'):
+                path = url[10:]  # Remove '{apiRoot}/'
+            elif url.startswith('http://') or url.startswith('https://'):
+                # Extract path from full URL
+                parsed = urlparse(url)
+                path = parsed.path.lstrip('/')
             else:
-                return None
+                # Assume it's just the path part
+                path = url.lstrip('/')
+            
+            # Split path components
+            path_parts = [part for part in path.split('/') if part]
+            
+            if len(path_parts) >= 2:
+                # Format: <api-name>/<api-version>
+                api_name = path_parts[0]
+                api_names.add(api_name)
+            elif len(path_parts) == 1:
+                # Only one component - could be api-name without version
+                api_name = path_parts[0]
+                # Check if it looks like a version (starts with 'v' followed by numbers/dots)
+                if not re.match(r'^v\d+', api_name):
+                    api_names.add(api_name)
+        
+        # All servers should have the same api-name
+        if len(api_names) == 1:
+            return api_names.pop()
+        elif len(api_names) > 1:
+            # Multiple different api-names found - this is an error but return the first one
+            return sorted(api_names)[0]
+        else:
+            return None
 
     def _check_filename_consistency(self, file_path: str, api_spec: dict, result: ValidationResult):
         """Check filename consistency with API content"""
@@ -858,7 +858,7 @@ class CAMARAAPIValidator:
         filename = Path(file_path).stem
         
         # Check kebab-case
-        if not re.match(r'^[a-z0-9-]+, filename):
+        if not re.match(r'^[a-z0-9-]+$', filename):
             result.issues.append(ValidationIssue(
                 Severity.CRITICAL, "File Naming",
                 f"Filename should use kebab-case: `{filename}`",
