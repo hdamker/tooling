@@ -452,30 +452,27 @@ jobs:
         run: |
           echo "🔍 Determining final outputs..."
           
+          # 🐛 DEBUG: Print what we're receiving from api-review job
+          echo "🐛 DEBUG: api-review job outputs:"
+          echo "🐛   review_status: '${{ needs.api-review.outputs.review_status }}'"
+          echo "🐛   critical_issues_count: '${{ needs.api-review.outputs.critical_issues_count }}'"
+          echo "🐛   version_supported: '${{ needs.validate-commonalities-version.outputs.version_supported }}'"
+          
           if [[ "${{ needs.validate-commonalities-version.outputs.version_supported }}" == "true" ]]; then
             echo "✅ Using outputs from API review"
             
-            {
-              echo 'summary_content<<SUMMARY_EOF_MARKER'
-              cat << 'SUMMARY_EOF'
-          ${{ needs.api-review.outputs.summary_content }}
-          SUMMARY_EOF
-              echo 'SUMMARY_EOF_MARKER'
-            } >> $GITHUB_OUTPUT
+            # Store in variables for debugging
+            FINAL_STATUS="${{ needs.api-review.outputs.review_status }}"
+            FINAL_COUNT="${{ needs.api-review.outputs.critical_issues_count }}"
             
-            echo "review_status=${{ needs.api-review.outputs.review_status }}" >> $GITHUB_OUTPUT
-            echo "critical_issues_count=${{ needs.api-review.outputs.critical_issues_count }}" >> $GITHUB_OUTPUT
+            echo "🐛 DEBUG: Setting final outputs:"
+            echo "🐛   final review_status: '$FINAL_STATUS'"
+            echo "🐛   final critical_issues_count: '$FINAL_COUNT'"
+            
+            echo "review_status=$FINAL_STATUS" >> $GITHUB_OUTPUT
+            echo "critical_issues_count=$FINAL_COUNT" >> $GITHUB_OUTPUT
           else
             echo "❌ Using outputs from version error handler"
-            
-            {
-              echo 'summary_content<<SUMMARY_EOF_MARKER'
-              cat << 'SUMMARY_EOF'
-          ${{ needs.handle-unsupported-version.outputs.summary_content }}
-          SUMMARY_EOF
-              echo 'SUMMARY_EOF_MARKER'
-            } >> $GITHUB_OUTPUT
-            
             echo "review_status=error" >> $GITHUB_OUTPUT
             echo "critical_issues_count=N/A" >> $GITHUB_OUTPUT
           fi
