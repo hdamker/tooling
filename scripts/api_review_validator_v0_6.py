@@ -1077,10 +1077,10 @@ class CAMARAAPIValidator:
                                     if isinstance(scopes, list):
                                         for scope_name in scopes:
                                             # Check kebab-case pattern for scopes
-                                            if not re.match(r'^[a-z0-9-]+:[a-z0-9-]+$', scope_name):
+                                            if not re.match(r'^[a-z0-9-]+:[a-z0-9-]+(?::[a-z0-9-]+)?$', scope_name):
                                                 result.issues.append(ValidationIssue(
                                                     Severity.MEDIUM, "Scope Naming",
-                                                    f"Scope name should follow pattern `api-name:operation`: `{scope_name}`",
+                                                    f"Scope name should follow pattern `api-name:[resource:]action`: `{scope_name}`",
                                                     f"{method.upper()} {path}.security"
                                                 ))
 
