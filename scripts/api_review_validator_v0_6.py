@@ -2260,9 +2260,13 @@ def main():
     print(f"Total Medium Issues: {total_medium}")
     print(f"Total Low Issues: {total_low}")
     
-    # Always exit successfully - we are a reporter, not a judge
-    print("\n📋 Analysis complete with comprehensive validation coverage.")
-    sys.exit(0)
+    # Exit with appropriate code based on critical issues found
+    if total_critical > 0:
+        print(f"\n⚠️ Exiting with code 1 due to {total_critical} critical issue(s) found")
+        sys.exit(1)  # Critical issues found - workflow will show "X critical issue(s) found"
+    else:
+        print("\n✅ Exiting with code 0 - no critical issues found")
+        sys.exit(0)  # No critical issues - workflow will show "No critical issues found"
 
 if __name__ == "__main__":
     main()
