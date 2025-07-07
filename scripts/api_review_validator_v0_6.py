@@ -663,6 +663,9 @@ class CAMARAAPIValidator:
                 operation_name
             ))
 
+        # Additional security validation for callbacks and OpenID Connect
+        self._validate_operation_security(operation, operation_name, result)
+
     def _validate_responses(self, responses: dict, operation_name: str, result: ValidationResult):
         """Validate response definitions"""
         # Check for success response
@@ -789,6 +792,9 @@ class CAMARAAPIValidator:
             ))
             return
         
+        # Store api_spec reference for cross-method validation
+        self.api_spec = api_spec
+
         # Check schemas
         schemas = components.get('schemas', {})
         self._validate_schemas(schemas, result)
@@ -848,38 +854,172 @@ class CAMARAAPIValidator:
 
     def _validate_security_schemes_section(self, security_schemes: dict, result: ValidationResult):
         """Validate security schemes section"""
+        # Use existing API type detection
+        api_type = self._detect_api_type(self.api_spec)
+        is_subscription_api = api_type in [APIType.IMPLICIT_SUBSCRIPTION, APIType.EXPLICIT_SUBSCRIPTION]
+        
+        # Check for required openId scheme
+        if 'openId' not in security_schemes:
+            result.issues.append(ValidationIssue(
+                Severity.CRITICAL, "Security Schemes",
+                "Missing required 'openId' security scheme",
+                "components.securitySchemes",
+                "Add openId scheme with type: openIdConnect"
+            ))
+        
+        # For subscription APIs, check for notificationsBearerAuth
+        if is_subscription_api and 'notificationsBearerAuth' not in security_schemes:
+            result.issues.append(ValidationIssue(
+                Severity.CRITICAL, "Security Schemes",
+                "Subscription APIs must include 'notificationsBearerAuth' security scheme",
+                "components.securitySchemes",
+                "Add notificationsBearerAuth scheme for callback authentication"
+            ))
+        
         for scheme_name, scheme_def in security_schemes.items():
             if isinstance(scheme_def, dict):
                 scheme_type = scheme_def.get('type')
-                if scheme_type == 'oauth2':
-                    self._validate_oauth2_scheme(scheme_def, scheme_name, result)
+                
+                if scheme_type == 'openIdConnect':
+                    self._validate_openid_connect_scheme(scheme_def, scheme_name, result)
+                    
+                    # Check naming convention
+                    if scheme_name != 'openId':
+                        result.issues.append(ValidationIssue(
+                            Severity.MEDIUM, "Security Schemes",
+                            f"OpenID Connect scheme should be named 'openId', found '{scheme_name}'",
+                            f"components.securitySchemes.{scheme_name}"
+                        ))
+                
+                elif scheme_type == 'http' and scheme_name == 'notificationsBearerAuth':
+                    self._validate_notifications_bearer_auth_scheme(scheme_def, scheme_name, result)
+                
+                elif scheme_type == 'oauth2':
+                    result.issues.append(ValidationIssue(
+                        Severity.CRITICAL, "Security Schemes",
+                        f"Use 'openIdConnect' type instead of 'oauth2' for scheme '{scheme_name}'",
+                        f"components.securitySchemes.{scheme_name}.type",
+                        "CAMARA requires OpenID Connect, not OAuth2"
+                    ))
+                
+                elif scheme_type not in ['openIdConnect', 'http']:
+                    result.issues.append(ValidationIssue(
+                        Severity.MEDIUM, "Security Schemes",
+                        f"Unexpected security scheme type '{scheme_type}' for '{scheme_name}'",
+                        f"components.securitySchemes.{scheme_name}.type"
+                    ))
 
-    def _validate_oauth2_scheme(self, scheme_def: dict, scheme_name: str, result: ValidationResult):
-        """Validate OAuth2 security scheme"""
-        flows = scheme_def.get('flows', {})
-        if not flows:
+
+    def _validate_openid_connect_scheme(self, scheme_def: dict, scheme_name: str, result: ValidationResult):
+        """Validate OpenID Connect security scheme"""
+        # Check for required openIdConnectUrl
+        if 'openIdConnectUrl' not in scheme_def:
             result.issues.append(ValidationIssue(
                 Severity.CRITICAL, "Security Schemes",
-                f"OAuth2 scheme `{scheme_name}` missing flows",
-                f"components.securitySchemes.{scheme_name}.flows"
+                f"OpenID Connect scheme `{scheme_name}` missing openIdConnectUrl",
+                f"components.securitySchemes.{scheme_name}.openIdConnectUrl"
             ))
             return
         
-        # Check for client credentials flow (common in CAMARA)
-        client_credentials = flows.get('clientCredentials', {})
-        if client_credentials:
-            if 'tokenUrl' not in client_credentials:
+        # Validate URL format
+        connect_url = scheme_def.get('openIdConnectUrl', '')
+        if not connect_url.startswith(('https://', 'http://')):
+            result.issues.append(ValidationIssue(
+                Severity.MEDIUM, "Security Schemes",
+                f"OpenID Connect URL should use HTTPS: `{connect_url}`",
+                f"components.securitySchemes.{scheme_name}.openIdConnectUrl"
+            ))
+        
+        # Check for well-known endpoint pattern
+        if '.well-known/openid-configuration' not in connect_url:
+            result.issues.append(ValidationIssue(
+                Severity.MEDIUM, "Security Schemes",
+                f"OpenID Connect URL should point to well-known configuration: `{connect_url}`",
+                f"components.securitySchemes.{scheme_name}.openIdConnectUrl"
+            ))
+
+    def _validate_notifications_bearer_auth_scheme(self, scheme_def: dict, scheme_name: str, result: ValidationResult):
+        """Validate notificationsBearerAuth security scheme for subscription APIs"""
+        # Check type
+        if scheme_def.get('type') != 'http':
+            result.issues.append(ValidationIssue(
+                Severity.CRITICAL, "Security Schemes",
+                f"Notifications Bearer Auth scheme `{scheme_name}` must have type 'http'",
+                f"components.securitySchemes.{scheme_name}.type"
+            ))
+        
+        # Check scheme
+        if scheme_def.get('scheme') != 'bearer':
+            result.issues.append(ValidationIssue(
+                Severity.CRITICAL, "Security Schemes",
+                f"Notifications Bearer Auth scheme `{scheme_name}` must have scheme 'bearer'",
+                f"components.securitySchemes.{scheme_name}.scheme"
+            ))
+        
+        # Check bearerFormat (should reference sinkCredential)
+        bearer_format = scheme_def.get('bearerFormat', '')
+        if 'sinkCredential' not in bearer_format:
+            result.issues.append(ValidationIssue(
+                Severity.MEDIUM, "Security Schemes",
+                f"Notifications Bearer Auth scheme `{scheme_name}` should reference sinkCredential in bearerFormat",
+                f"components.securitySchemes.{scheme_name}.bearerFormat"
+            ))
+
+    def _validate_operation_security(self, operation: dict, operation_name: str, result: ValidationResult):
+        """Validate operation-level security requirements for callbacks and OpenID Connect usage"""
+        security = operation.get('security')
+        
+        # Check if this is a callback operation (different security rules)
+        is_callback = 'callbacks' in operation_name.lower() or 'notification' in operation_name.lower()
+        
+        if is_callback:
+            # Callback operations MUST support notificationsBearerAuth and MAY have empty security
+            if security is None:
                 result.issues.append(ValidationIssue(
-                    Severity.CRITICAL, "Security Schemes",
-                    f"OAuth2 clientCredentials flow missing tokenUrl",
-                    f"components.securitySchemes.{scheme_name}.flows.clientCredentials"
+                    Severity.CRITICAL, "Operation Security",
+                    f"Callback operation must have security requirements with notificationsBearerAuth: {operation_name}",
+                    f"{operation_name}.security"
                 ))
+            else:
+                has_notifications_bearer_auth = False
+                has_empty_security = False
+                
+                for security_req in security:
+                    if isinstance(security_req, dict):
+                        if not security_req:  # Empty security object
+                            has_empty_security = True
+                        elif 'notificationsBearerAuth' in security_req:
+                            has_notifications_bearer_auth = True
+                
+                # MUST have notificationsBearerAuth
+                if not has_notifications_bearer_auth:
+                    result.issues.append(ValidationIssue(
+                        Severity.CRITICAL, "Operation Security",
+                        f"Callback operation must include notificationsBearerAuth: {operation_name}",
+                        f"{operation_name}.security",
+                        "Add notificationsBearerAuth to security requirements"
+                    ))
+                
+                # Validate that it's not ONLY empty security
+                if has_empty_security and not has_notifications_bearer_auth:
+                    result.issues.append(ValidationIssue(
+                        Severity.CRITICAL, "Operation Security",
+                        f"Callback operation cannot have only empty security, must include notificationsBearerAuth: {operation_name}",
+                        f"{operation_name}.security"
+                    ))
+        elif security:
+            # For regular operations with security, validate they use openId
+            has_openid = False
+            for security_req in security:
+                if isinstance(security_req, dict) and 'openId' in security_req:
+                    has_openid = True
+                    break
             
-            if 'scopes' not in client_credentials:
+            if not has_openid:
                 result.issues.append(ValidationIssue(
-                    Severity.MEDIUM, "Security Schemes",
-                    f"OAuth2 clientCredentials flow missing scopes",
-                    f"components.securitySchemes.{scheme_name}.flows.clientCredentials"
+                    Severity.MEDIUM, "Operation Security",
+                    f"Operation should use 'openId' security scheme: {operation_name}",
+                    f"{operation_name}.security"
                 ))
 
     def _validate_security_schemes(self, api_spec: dict, result: ValidationResult):
@@ -910,19 +1050,39 @@ class CAMARAAPIValidator:
         security_schemes = components.get('securitySchemes', {})
         
         for scheme_name, scheme_def in security_schemes.items():
-            if isinstance(scheme_def, dict) and scheme_def.get('type') == 'oauth2':
-                flows = scheme_def.get('flows', {})
-                for flow_name, flow_def in flows.items():
-                    if isinstance(flow_def, dict):
-                        scopes = flow_def.get('scopes', {})
-                        for scope_name in scopes.keys():
-                            # Check kebab-case pattern
-                            if not re.match(r'^[a-z0-9-]+:[a-z0-9-]+$', scope_name):
-                                result.issues.append(ValidationIssue(
-                                    Severity.MEDIUM, "Scope Naming",
-                                    f"Scope name should follow pattern `api-name:operation`: `{scope_name}`",
-                                    f"components.securitySchemes.{scheme_name}.flows.{flow_name}.scopes"
-                                ))
+            if isinstance(scheme_def, dict):
+                scheme_type = scheme_def.get('type')
+                
+                if scheme_type == 'openIdConnect':
+                    # OpenID Connect doesn't define scopes in the scheme itself
+                    # Scope validation happens at operation level through security requirements
+                    continue
+                elif scheme_type == 'oauth2':
+                    # Direct OAuth2 schemes are not used in CAMARA (OpenID Connect is used instead)
+                    # This will be flagged as critical error in security schemes validation
+                    # Skip scope validation for OAuth2 schemes
+                    continue
+                # For other scheme types (like 'http' for notificationsBearerAuth), no scope validation needed
+        
+        # Validate scopes at operation level instead
+        paths = api_spec.get('paths', {})
+        for path, path_obj in paths.items():
+            if isinstance(path_obj, dict):
+                for method, operation in path_obj.items():
+                    if method in ['get', 'post', 'put', 'delete', 'patch'] and isinstance(operation, dict):
+                        security = operation.get('security', [])
+                        for security_req in security:
+                            if isinstance(security_req, dict):
+                                for scheme_name, scopes in security_req.items():
+                                    if isinstance(scopes, list):
+                                        for scope_name in scopes:
+                                            # Check kebab-case pattern for scopes
+                                            if not re.match(r'^[a-z0-9-]+:[a-z0-9-]+$', scope_name):
+                                                result.issues.append(ValidationIssue(
+                                                    Severity.MEDIUM, "Scope Naming",
+                                                    f"Scope name should follow pattern `api-name:operation`: `{scope_name}`",
+                                                    f"{method.upper()} {path}.security"
+                                                ))
 
     def _extract_api_name_from_servers(self, api_spec: dict) -> Optional[str]:
         """Extract api-name from servers[*].url property
@@ -1621,8 +1781,6 @@ class CAMARAAPIValidator:
                     test_file,
                     "Update test scenarios to use proper version references"
                 ))
-    
-    # Check for version in Feature line (can be line 1 or 2)
         
         # Check for version in Feature line (can be line 1 or 2)
         feature_line = None
