@@ -216,7 +216,7 @@ jobs:
           
           # Run the validator and capture exit code WITHOUT failing the step
           python3 "$VALIDATOR_SCRIPT" \
-            --repo-path "." \
+            "." \
             --output "../review-output" \
             --repo-name "${{ inputs.repo_name }}" \
             --issue-number "${{ inputs.issue_number }}" \
