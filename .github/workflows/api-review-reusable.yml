@@ -178,35 +178,56 @@ jobs:
             exit 1
           fi
 
-      - name: Run API Review
+      - name: Run API Review Validation
         id: review
         run: |
-          echo "🔍 Starting API validation..."
+          # Remove 'set -e' temporarily to handle non-zero exit codes
+          set +e  # Allow script to continue even if validator fails
+          
+          echo "🚀 Starting API validation..."
           
           VALIDATION_START_TIME=$(date +%s)
-          mkdir -p ./review-output
           
-          # Count API files
-          if [[ -d "target-repo/code/API_definitions" ]]; then
-            API_DEF_COUNT=$(find target-repo/code/API_definitions -name "*.yaml" -o -name "*.yml" | wc -l)
+          # Set up validation environment
+          export PYTHONPATH="${PYTHONPATH}:./review-tools"
+          cd target-repo
+          
+          VALIDATOR_SCRIPT="../review-tools/scripts/${{ needs.validate-commonalities-version.outputs.validator_script }}"
+          
+          if [[ ! -f "$VALIDATOR_SCRIPT" ]]; then
+            echo "❌ Validator script not found: $VALIDATOR_SCRIPT"
+            exit 1
+          fi
+          
+          echo "✅ Using validator: $VALIDATOR_SCRIPT"
+          
+          # Create output directory
+          mkdir -p ../review-output
+          
+          # Count API files for reporting
+          API_DEF_DIR="./code/API_definitions"
+          if [[ -d "$API_DEF_DIR" ]]; then
+            API_DEF_COUNT=$(find "$API_DEF_DIR" -name "*.yaml" -o -name "*.yml" | wc -l)
           else
             API_DEF_COUNT=0
           fi
           
-          echo "APIs found: $API_DEF_COUNT"
+          echo "📁 Found $API_DEF_COUNT API definition files"
           
-          # Run validation with updated parameter name
-          set +e
-          python api_review_validator.py \
-            "./target-repo" \
-            --output "./review-output" \
+          # Run the validator and capture exit code WITHOUT failing the step
+          python3 "$VALIDATOR_SCRIPT" \
+            --repo-path "." \
+            --output "../review-output" \
             --repo-name "${{ inputs.repo_name }}" \
             --issue-number "${{ inputs.issue_number }}" \
             --commonalities-version "${{ inputs.commonalities_version }}" \
             --review-type "${{ inputs.review_type }}" \
             --verbose
           
+          # Capture the exit code AFTER the command completes
           VALIDATION_EXIT_CODE=$?
+          
+          # Re-enable strict error checking for the rest of the step
           set -e
           
           VALIDATION_END_TIME=$(date +%s)
@@ -214,18 +235,32 @@ jobs:
           
           echo "📊 Validation completed in ${VALIDATION_DURATION}s with exit code: $VALIDATION_EXIT_CODE"
           
-          # Determine review status
+          # Determine review status based on exit code
           if [[ $VALIDATION_EXIT_CODE -eq 0 ]]; then
             echo "review_status=success" >> $GITHUB_OUTPUT
+            echo "✅ No critical issues found"
           elif [[ $VALIDATION_EXIT_CODE -eq 1 ]]; then
             echo "review_status=has_critical_issues" >> $GITHUB_OUTPUT
+            echo "⚠️ Critical issues detected"
           else
             echo "review_status=error" >> $GITHUB_OUTPUT
+            echo "❌ Validation error occurred"
+          fi
+          
+          # Extract critical issues count from output if available
+          CRITICAL_COUNT="0"
+          if [[ -f "../review-output/summary.md" ]]; then
+            # Try to extract critical count from summary
+            CRITICAL_LINE=$(grep -E "🔴 Critical: [0-9]+" "../review-output/summary.md" || echo "")
+            if [[ -n "$CRITICAL_LINE" ]]; then
+              CRITICAL_COUNT=$(echo "$CRITICAL_LINE" | grep -oE "[0-9]+")
+            fi
           fi
           
           echo "validation_exit_code=$VALIDATION_EXIT_CODE" >> $GITHUB_OUTPUT
           echo "validation_duration=$VALIDATION_DURATION" >> $GITHUB_OUTPUT
           echo "apis_found_count=$API_DEF_COUNT" >> $GITHUB_OUTPUT
+          echo "critical_issues=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
 
       - name: Find Generated Report File
         id: find-report
