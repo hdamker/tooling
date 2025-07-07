@@ -352,7 +352,9 @@ class CAMARAAPIValidator:
     def _validate_info_object(self, api_spec: dict, result: ValidationResult):
         """Validate the info object with comprehensive checks"""
         result.checks_performed.append("Info object validation")
-        
+        result.checks_performed.append("Authorization template validation") 
+        result.checks_performed.append("Error responses template validation")
+                
         info = api_spec.get('info', {})
         if not info:
             result.issues.append(ValidationIssue(
@@ -402,7 +404,12 @@ class CAMARAAPIValidator:
                 "Incorrect license URL",
                 "info.license.url"
             ))
-        
+
+        # Mandatory template validations
+        description = info.get('description', '')
+        self._validate_authorization_template(description, result)
+        self._validate_error_responses_template(description, result)
+
         # Commonalities version
         commonalities = info.get('x-camara-commonalities')
         if str(commonalities) != self.expected_commonalities_version:
@@ -416,9 +423,113 @@ class CAMARAAPIValidator:
         if 'termsOfService' in info:
             result.issues.append(ValidationIssue(
                 Severity.MEDIUM, "Info Object",
-                "`termsOfService` field is forbidden",
+                "`termsOfService` should not be in the API definition",
                 "info.termsOfService",
                 "Remove `termsOfService` field"
+            ))
+
+    def _normalize_text_for_template_check(self, text: str) -> str:
+        """Normalize text for template comparison (remove extra whitespace, make lowercase)"""
+        # Remove extra whitespace, normalize line breaks, make lowercase
+        normalized = re.sub(r'\s+', ' ', text.strip().lower())
+        # Remove common markdown formatting that might vary
+        normalized = re.sub(r'[*_`]', '', normalized)
+        return normalized
+
+    def _validate_authorization_template(self, description: str, result: ValidationResult):
+        """Validate mandatory authorization template in info.description"""
+        if not description:
+            result.issues.append(ValidationIssue(
+                Severity.CRITICAL, "Authorization Template",
+                "Missing info.description - required for authorization template",
+                "info.description"
+            ))
+            return
+        
+        # Required authorization template components
+        required_components = [
+            "# Authorization and authentication",
+            "Camara Security and Interoperability Profile",
+            "Identity and Consent Management",
+            "github.com/camaraproject/IdentityAndConsentManagement",
+            "authorization flows to be used will be agreed upon during the onboarding process",
+            "three-legged access tokens is mandatory",
+            "privacy regulations"
+        ]
+        
+        # Normalize description for checking
+        normalized_desc = self._normalize_text_for_template_check(description)
+        
+        missing_components = []
+        for component in required_components:
+            normalized_component = self._normalize_text_for_template_check(component)
+            if normalized_component not in normalized_desc:
+                missing_components.append(component)
+        
+        if missing_components:
+            result.issues.append(ValidationIssue(
+                Severity.CRITICAL, "Authorization Template",
+                f"Missing required authorization template components: {', '.join(missing_components)}",
+                "info.description",
+                "Add the mandatory authorization template as specified in CAMARA-API-access-and-user-consent.md"
+            ))
+        
+        # Check for required header specifically
+        if not re.search(r'#\s*Authorization\s+and\s+authentication', description, re.IGNORECASE):
+            result.issues.append(ValidationIssue(
+                Severity.CRITICAL, "Authorization Template",
+                "Missing required '# Authorization and authentication' header",
+                "info.description"
+            ))
+
+    def _validate_error_responses_template(self, description: str, result: ValidationResult):
+        """Validate mandatory error responses template in info.description (new in v0.6)"""
+        if not description:
+            # Already reported in authorization template check
+            return
+        
+        # Only check this template for v0.6 and above
+        try:
+            current_version = float(self.expected_commonalities_version)
+            if current_version < 0.6:
+                return  # Not required for versions before 0.6
+        except (ValueError, AttributeError):
+            pass  # If version parsing fails, include the check
+        
+        # Required error responses template components
+        required_components = [
+            "# Additional CAMARA error responses",
+            "not exhaustive",
+            "CAMARA API Design Guide",
+            "CAMARA_common.yaml",
+            "Commonalities Release",
+            "API Readiness Checklist",
+            "501 - NOT_IMPLEMENTED"
+        ]
+        
+        # Normalize description for checking
+        normalized_desc = self._normalize_text_for_template_check(description)
+        
+        missing_components = []
+        for component in required_components:
+            normalized_component = self._normalize_text_for_template_check(component)
+            if normalized_component not in normalized_desc:
+                missing_components.append(component)
+        
+        if missing_components:
+            result.issues.append(ValidationIssue(
+                Severity.CRITICAL, "Error Responses Template",
+                f"Missing required error responses template components: {', '.join(missing_components)}",
+                "info.description",
+                "Add the mandatory 'Additional CAMARA error responses' template as specified in CAMARA API Design Guide v0.6"
+            ))
+        
+        # Check for required header specifically
+        if not re.search(r'#\s*Additional\s+CAMARA\s+error\s+responses', description, re.IGNORECASE):
+            result.issues.append(ValidationIssue(
+                Severity.CRITICAL, "Error Responses Template",
+                "Missing required '# Additional CAMARA error responses' header",
+                "info.description"
             ))
 
     def _validate_external_docs(self, api_spec: dict, result: ValidationResult):
