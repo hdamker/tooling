@@ -1328,9 +1328,101 @@ class CAMARAAPIValidator:
                     "Ensure all files use the same commonalities version"
                 ))
 
-    def validate_test_alignment(self, api_file: str, test_dir: str) -> TestAlignmentResult:
-        """Validate test definitions alignment with API specs"""
+    def map_and_validate_test_files_to_apis(self, api_files: List[str], test_dir: str) -> List[TestAlignmentResult]:
+        """Map test files to APIs and validate each pair"""
+        test_results = []
+        
+        # Extract all API names first
+        all_api_names = []
+        for api_file in api_files:
+            try:
+                with open(api_file, 'r', encoding='utf-8') as f:
+                    api_spec = yaml.safe_load(f)
+                
+                # Extract api-name from servers URL
+                api_name = self._extract_api_name_from_servers(api_spec)
+                
+                # Fallback to filename if servers extraction fails
+                if not api_name:
+                    api_name = Path(api_file).stem
+                
+                all_api_names.append(api_name)
+            except Exception:
+                # If we can't load the API file, use filename as fallback
+                all_api_names.append(Path(api_file).stem)
+        
+        # Find all test files
+        test_path = Path(test_dir)
+        if not test_path.exists():
+            # No test directory - create empty results for each API
+            for api_file in api_files:
+                result = TestAlignmentResult(api_file=api_file)
+                result.checks_performed.append("Test alignment validation")
+                result.issues.append(ValidationIssue(
+                    Severity.CRITICAL, "Test Directory",
+                    f"Test directory does not exist: {test_dir}",
+                    test_dir
+                ))
+                test_results.append(result)
+            return test_results
+        
+        all_test_files = [f.stem for f in test_path.glob("*.feature")]
+        
+        # Simple assignment logic: test_file_stem -> api_name
+        test_file_assignments = {}
+        
+        for api_name in all_api_names:
+            for test_file_stem in all_test_files:
+                # Check for match (exact or prefix)
+                is_exact_match = (test_file_stem == api_name)
+                is_prefix_match = test_file_stem.startswith(f"{api_name}-")
+                
+                if is_exact_match or is_prefix_match:
+                    current_assignment = test_file_assignments.get(test_file_stem)
+                    
+                    if current_assignment is None:
+                        # No assignment yet - assign it
+                        test_file_assignments[test_file_stem] = api_name
+                    elif len(api_name) > len(current_assignment):
+                        # Longer prefix wins - reassign
+                        test_file_assignments[test_file_stem] = api_name
+        
+        # Create reverse mapping: api_name -> [test_file_paths]
+        api_to_test_files = {api_name: [] for api_name in all_api_names}
+        for test_file_stem, api_name in test_file_assignments.items():
+            test_file_path = str(test_path / f"{test_file_stem}.feature")
+            api_to_test_files[api_name].append(test_file_path)
+        
+        # Find orphan test files
+        orphan_test_files = []
+        for test_file_stem in all_test_files:
+            if test_file_stem not in test_file_assignments:
+                orphan_test_files.append(f"{test_file_stem}.feature")
+        
+        # Validate each API with its assigned test files
+        for api_file in api_files:
+            api_name = all_api_names[api_files.index(api_file)]
+            assigned_test_files = api_to_test_files[api_name]
+            
+            result = self.validate_test_alignment_single(api_file, api_name, assigned_test_files)
+            test_results.append(result)
+        
+        # Report orphan test files as issues in the first API result
+        if orphan_test_files and test_results:
+            for orphan_file in orphan_test_files:
+                test_results[0].issues.append(ValidationIssue(
+                    Severity.MEDIUM, "Orphan Test Files",
+                    f"Test file `{orphan_file}` does not match any API",
+                    f"{test_dir}/{orphan_file}",
+                    f"Rename to match an API: {', '.join(all_api_names)}"
+                ))
+        
+        return test_results
+
+    def validate_test_alignment_single(self, api_file: str, api_name: str, assigned_test_files: List[str]) -> TestAlignmentResult:
+        """Validate test alignment for a single API with its assigned test files"""
         result = TestAlignmentResult(api_file=api_file)
+        result.test_files = assigned_test_files
         result.checks_performed.append("Test alignment validation")
         
         # Load API spec
@@ -1350,28 +1442,11 @@ class CAMARAAPIValidator:
         api_version = api_info.get('version', '')
         api_title = api_info.get('title', '')
         
-        # Extract api-name from servers URL (correct method)
-        api_name = self._extract_api_name_from_servers(api_spec)
-        
-        # Fallback to filename if servers extraction fails
-        if not api_name:
-            api_name = Path(api_file).stem
-            result.issues.append(ValidationIssue(
-                Severity.MEDIUM, "API Configuration",
-                "Using filename as api-name fallback due to invalid servers[*].url format",
-                "servers",
-                "Ensure servers[*].url follows format: {apiRoot}/<api-name>/<api-version>"
-            ))
-        
-        # Find test files
-        test_files = self._find_test_files(test_dir, api_name)
-        result.test_files = test_files
-        
-        if not test_files:
+        if not assigned_test_files:
             result.issues.append(ValidationIssue(
                 Severity.CRITICAL, "Test Files",
                 f"No test files found for API `{api_name}`",
-                test_dir,
+                "test directory",
                 f"Create either `{api_name}.feature` or `{api_name}-<operationId>.feature` files"
             ))
             return result
@@ -1379,31 +1454,12 @@ class CAMARAAPIValidator:
         # Extract operation IDs from API
         api_operations = self._extract_operation_ids(api_spec)
         
-        # Validate each test file
-        for test_file in test_files:
+        # Validate each assigned test file
+        for test_file in assigned_test_files:
             self._validate_test_file(test_file, api_name, api_version, api_title, 
-                                   api_operations, result)
+                                api_operations, result)
         
         return result
-
-    def _find_test_files(self, test_dir: str, api_name: str) -> List[str]:
-        """Find test files for the given API"""
-        test_files = []
-        test_path = Path(test_dir)
-        
-        if not test_path.exists():
-            return test_files
-        
-        # Look for api-name.feature
-        main_test = test_path / f"{api_name}.feature"
-        if main_test.exists():
-            test_files.append(str(main_test))
-        
-        # Look for api-name-*.feature files
-        for test_file in test_path.glob(f"{api_name}-*.feature"):
-            test_files.append(str(test_file))
-        
-        return test_files
 
     def _extract_operation_ids(self, api_spec: dict) -> List[str]:
         """Extract all operation IDs from API spec"""
@@ -2023,18 +2079,19 @@ def main():
     if os.path.exists(test_dir):
         if args.verbose:
             print(f"\n🧪 Performing test alignment validation...")
-        for api_file in api_files:
-            try:
-                test_result = validator.validate_test_alignment(api_file, test_dir)
-                test_results.append(test_result)
-                
-                if args.verbose:
+        try:
+            # Use the simplified two-level validation approach
+            test_results = validator.map_and_validate_test_files_to_apis(api_files, test_dir)
+            
+            if args.verbose:
+                for test_result in test_results:
+                    api_name = Path(test_result.api_file).stem
                     test_critical = len([i for i in test_result.issues if i.severity == Severity.CRITICAL])
                     test_medium = len([i for i in test_result.issues if i.severity == Severity.MEDIUM])
                     test_low = len([i for i in test_result.issues if i.severity == Severity.LOW])
-                    print(f"  📋 {Path(api_file).stem}: {len(test_result.test_files)} test files, {test_critical} critical, {test_medium} medium, {test_low} low")
-            except Exception as e:
-                print(f"  ❌ Error in test validation for {api_file}: {str(e)}")
+                    print(f"  📋 {api_name}: {len(test_result.test_files)} test files, {test_critical} critical, {test_medium} medium, {test_low} low")
+        except Exception as e:
+            print(f"  ❌ Error in test validation: {str(e)}")
     
     # Generate reports
     try:
