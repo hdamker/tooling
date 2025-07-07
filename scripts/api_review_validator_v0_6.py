@@ -279,6 +279,7 @@ class CAMARAAPIValidator:
     def _get_manual_checks_for_type(self, api_type: APIType) -> List[str]:
         """Get manual checks needed based on API type"""
         common_checks = [
+            "Info.description for device or phone number (if applicable)",
             "Business logic appropriateness review",
             "Documentation quality assessment", 
             "API design patterns validation",
