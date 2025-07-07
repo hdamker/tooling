@@ -344,9 +344,11 @@ jobs:
 
           **Workflow Run:** [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
             
+          # Output as base64
             {
               echo 'summary_content<<SUMMARY_EOF_MARKER'
-              echo "$ERROR_SUMMARY"
+              echo "$ERROR_SUMMARY" | base64 -w 0
+              echo ''
               echo 'SUMMARY_EOF_MARKER'
             } >> $GITHUB_OUTPUT
           fi
@@ -393,10 +395,12 @@ jobs:
 
           **Workflow Run:** [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
           
+          # Output as base64
           {
-            echo 'summary_content<<EOF'
-            echo "$ERROR_SUMMARY"
-            echo 'EOF'
+            echo 'summary_content<<SUMMARY_EOF_MARKER'
+            echo "$ERROR_SUMMARY" | base64 -w 0
+            echo ''
+            echo 'SUMMARY_EOF_MARKER'
           } >> $GITHUB_OUTPUT
 
   provide-outputs:
