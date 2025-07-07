@@ -1746,18 +1746,12 @@ def generate_report(results: List[ValidationResult], output_dir: str, repo_name:
             f.write("❌ **No API definition files found**\n\n")
             f.write("Please ensure YAML files are located in `/code/API_definitions/`\n")
             return report_filename
-        
-        # Helper function to sanitize descriptions for single-line output
+
+        # No need for special sanitization - just ensure single lines
         def sanitize_for_summary(text: str) -> str:
-            """Sanitize text for safe single-line markdown output"""
-            # Replace newlines and multiple spaces with single space
-            text = ' '.join(text.split())
-            # Escape backticks to prevent markdown issues
-            text = text.replace('`', '\\`')
-            # Limit length for readability
-            if len(text) > 200:
-                text = text[:197] + "..."
-            return text
+            """Ensure text is on a single line"""
+            # Replace all whitespace (including newlines) with single spaces
+            return ' '.join(text.split())        
 
         # Helper function to sanitize descriptions for single-line output
         def sanitize_for_summary(text: str) -> str:

@@ -485,7 +485,10 @@ jobs:
           echo "" >> results_content.md
           
           # Write summary content safely using printf
-          printf '%s\n' '${{ needs.call-review-workflow.outputs.summary_content }}' >> results_content.md
+          # printf '%s\n' '${{ needs.call-review-workflow.outputs.summary_content }}' >> results_content.md
+
+          # Write summary content using base64 to avoid any shell interpretation
+          echo "${{ needs.call-review-workflow.outputs.summary_content }}" | base64 -d >> results_content.md
           
           echo "" >> results_content.md
           echo "### Next Steps" >> results_content.md

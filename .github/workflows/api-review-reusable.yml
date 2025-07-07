@@ -316,11 +316,14 @@ jobs:
             echo "- APIs Found: ${{ steps.review.outputs.apis_found_count }}" >> "./review-output/summary.md"
             echo "- Workflow Run: [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> "./review-output/summary.md"
             
+            # Output as base64 to avoid shell interpretation issues
             {
               echo 'summary_content<<SUMMARY_EOF_MARKER'
-              cat ./review-output/summary.md
+              base64 -w 0 ./review-output/summary.md
+              echo ''
               echo 'SUMMARY_EOF_MARKER'
             } >> $GITHUB_OUTPUT
+
           else
             echo "❌ No summary file found"
             
