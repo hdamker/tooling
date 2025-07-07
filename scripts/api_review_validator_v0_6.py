@@ -1752,32 +1752,6 @@ def generate_report(results: List[ValidationResult], output_dir: str, repo_name:
             """Ensure text is on a single line"""
             # Replace all whitespace (including newlines) with single spaces
             return ' '.join(text.split())        
-
-        # Helper function to sanitize descriptions for single-line output
-        def sanitize_for_summary(text: str) -> str:
-            """Sanitize text for safe single-line markdown output"""
-            # First, replace all types of newlines and carriage returns
-            text = text.replace('\r\n', ' ')
-            text = text.replace('\n', ' ')
-            text = text.replace('\r', ' ')
-            
-            # Replace multiple spaces with single space
-            text = re.sub(r'\s+', ' ', text)
-            
-            # HTML-encode angle brackets to prevent HTML interpretation
-            text = text.replace('<', '&lt;').replace('>', '&gt;')
-            
-            # Now we can safely remove backticks since HTML interpretation is prevented
-            text = text.replace('`', '')
-            
-            # Strip leading/trailing whitespace
-            text = text.strip()
-            
-            # Limit length for readability
-            if len(text) > 200:
-                text = text[:197] + "..."
-            
-            return text
    
         # Overall status
         if total_critical == 0:
