@@ -70,7 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       validator_script: ${{ steps.determine-validator.outputs.validator_script }}
-      validator_type: ${{ steps.validate.outputs.validator_type }}
+      validator_type: ${{ steps.determine-validator.outputs.validator_type }}
       version_supported: ${{ steps.determine-validator.outputs.version_supported }}
       error_message: ${{ steps.determine-validator.outputs.error_message }}
     steps:
