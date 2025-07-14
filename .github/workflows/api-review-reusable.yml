@@ -39,6 +39,11 @@ on:
         required: true
         type: string
         description: "CAMARA Commonalities version to validate against"
+      legacy_validator:
+        description: 'Use legacy monolithic validator (default: true for compatibility)'
+        required: false
+        type: boolean
+        default: true
       tooling_repository:
         required: false
         type: string
@@ -60,6 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       validator_script: ${{ steps.determine-validator.outputs.validator_script }}
+      validator_type: ${{ steps.validate.outputs.validator_type }}
       version_supported: ${{ steps.determine-validator.outputs.version_supported }}
       error_message: ${{ steps.determine-validator.outputs.error_message }}
     steps:
@@ -91,6 +97,15 @@ jobs:
               ;;
           esac
 
+          # Set validator type based on legacy parameter
+          if [[ "${{ inputs.legacy_validator }}" == "true" ]]; then
+            echo "validator_type=legacy" >> $GITHUB_OUTPUT
+            echo "📦 Using legacy monolithic validator"
+          else
+            echo "validator_type=modular" >> $GITHUB_OUTPUT
+            echo "📦 Using new modular validator"
+          fi
+
   api-review:
     runs-on: ubuntu-latest
     needs: validate-commonalities-version
@@ -98,10 +113,10 @@ jobs:
     timeout-minutes: 15
     outputs:
       summary_content: ${{ steps.prepare-summary.outputs.summary_content }}
-      review_status: ${{ steps.review.outputs.review_status }}
-      critical_issues_count: ${{ steps.review.outputs.critical_issues }}
-      validation_duration: ${{ steps.review.outputs.validation_duration }}
-      apis_found_count: ${{ steps.review.outputs.apis_found_count }}
+      review_status: ${{ steps.check_api_dir.outputs.api_found == 'true' && steps.review.outputs.review_status || steps.no_apis.outputs.review_status }}
+      critical_issues_count: ${{ steps.check_api_dir.outputs.api_found == 'true' && steps.review.outputs.critical_issues || '0' }}
+      validation_duration: ${{ steps.check_api_dir.outputs.api_found == 'true' && steps.review.outputs.validation_duration || '0' }}
+      apis_found_count: ${{ steps.check_api_dir.outputs.api_found == 'true' && steps.review.outputs.apis_found_count || '0' }}
     steps:
       - name: Setup Review Environment
         run: |
@@ -161,6 +176,19 @@ jobs:
           pip install --upgrade pip
           pip install pyyaml>=6.0 jsonschema>=4.0 openapi-spec-validator>=0.5 requests>=2.28
 
+      - name: Check for API Directory
+        id: check_api_dir
+        run: |
+          cd target-repo
+          if [[ -d "code/API_definitions" ]] && find code/API_definitions -name "*.yaml" -o -name "*.yml" | grep -q .; then
+            echo "api_found=true" >> $GITHUB_OUTPUT
+            API_COUNT=$(find code/API_definitions -name "*.yaml" -o -name "*.yml" | wc -l)
+            echo "✅ API definitions directory found with $API_COUNT YAML files"
+          else
+            echo "api_found=false" >> $GITHUB_OUTPUT
+            echo "⚠️ No API definitions found in code/API_definitions/"
+          fi
+
       - name: Locate Validator Script
         run: |
           VALIDATOR_SCRIPT="${{ needs.validate-commonalities-version.outputs.validator_script }}"
@@ -178,14 +206,15 @@ jobs:
             exit 1
           fi
 
-      - name: Run API Review Validation
-        id: review
+      - name: Run Legacy Validator
+        if: steps.check_api_dir.outputs.api_found == 'true' && needs.validate-commonalities-version.outputs.validator_type == 'legacy'
+        id: legacy_review
         run: |
           # Remove 'set -e' temporarily to handle non-zero exit codes
-          set +e  # Allow script to continue even if validator fails
-          
-          echo "🚀 Starting API validation..."
-          
+          set +e  # Allow script to continue even if validator fails          
+
+          echo "🚀 Starting API validation with legacy validator..."
+
           VALIDATION_START_TIME=$(date +%s)
           
           # Set up validation environment
@@ -234,8 +263,7 @@ jobs:
           VALIDATION_DURATION=$((VALIDATION_END_TIME - VALIDATION_START_TIME))
           
           echo "📊 Validation completed in ${VALIDATION_DURATION}s with exit code: $VALIDATION_EXIT_CODE"
-          
-          # Determine review status based on exit code
+
           if [[ $VALIDATION_EXIT_CODE -eq 0 ]]; then
             echo "review_status=success" >> $GITHUB_OUTPUT
             echo "✅ No critical issues found"
@@ -257,10 +285,127 @@ jobs:
             fi
           fi
           
-          echo "validation_exit_code=$VALIDATION_EXIT_CODE" >> $GITHUB_OUTPUT
           echo "validation_duration=$VALIDATION_DURATION" >> $GITHUB_OUTPUT
           echo "apis_found_count=$API_DEF_COUNT" >> $GITHUB_OUTPUT
           echo "critical_issues=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
+          echo "validation_exit_code=${VALIDATION_EXIT_CODE:-0}" >> $GITHUB_OUTPUT
+
+      - name: Run New Modular Validator  
+        if: steps.check_api_dir.outputs.api_found == 'true' && needs.validate-commonalities-version.outputs.validator_type == 'modular'
+        id: modular_review
+        run: |
+          echo "🚀 Starting API validation with new modular validator..."
+          
+          VALIDATION_START_TIME=$(date +%s)
+          
+          # Install the modular validator package
+          pip install ./review-tools/scripts/camara-validator
+          
+          cd target-repo
+          mkdir -p ../review-output
+          
+          # Count API files for reporting
+          API_DEF_COUNT=$(find code/API_definitions -name "*.yaml" -o -name "*.yml" | wc -l)
+          echo "📁 Found $API_DEF_COUNT API definition files"
+          
+          # Run with the new CLI interface
+          set +e  # Allow script to continue even if validator fails
+          
+          camara-validate \
+            "." \
+            --version "${{ inputs.commonalities_version }}" \
+            --output "../review-output" \
+            --repo-name "${{ inputs.repo_name }}" \
+            --pr-number "${{ inputs.issue_number }}"
+          
+          VALIDATION_EXIT_CODE=$?
+          set -e
+          
+          VALIDATION_END_TIME=$(date +%s)
+          VALIDATION_DURATION=$((VALIDATION_END_TIME - VALIDATION_START_TIME))
+          
+          echo "📊 Validation completed in ${VALIDATION_DURATION}s with exit code: $VALIDATION_EXIT_CODE"
+          
+          # Determine review status based on exit code
+          if [[ $VALIDATION_EXIT_CODE -eq 0 ]]; then
+            echo "review_status=success" >> $GITHUB_OUTPUT
+            echo "✅ No critical issues found"
+          elif [[ $VALIDATION_EXIT_CODE -eq 1 ]]; then
+            echo "review_status=has_critical_issues" >> $GITHUB_OUTPUT
+            echo "⚠️ Critical issues detected"
+          else
+            echo "review_status=error" >> $GITHUB_OUTPUT
+            echo "❌ Validation error occurred"
+          fi
+          
+          # Extract critical issues count from output if available
+          CRITICAL_COUNT="0"
+          if [[ -f "../review-output/summary.md" ]]; then
+            CRITICAL_LINE=$(grep -E "🔴 Critical: [0-9]+" "../review-output/summary.md" || echo "")
+            if [[ -n "$CRITICAL_LINE" ]]; then
+              CRITICAL_COUNT=$(echo "$CRITICAL_LINE" | grep -oE "[0-9]+")
+            fi
+          fi
+          
+          echo "validation_exit_code=${VALIDATION_EXIT_CODE:-0}" >> $GITHUB_OUTPUT
+          echo "validation_duration=$VALIDATION_DURATION" >> $GITHUB_OUTPUT
+          echo "apis_found_count=$API_DEF_COUNT" >> $GITHUB_OUTPUT
+          echo "critical_issues=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Determine Review Status
+        id: review
+        if: steps.check_api_dir.outputs.api_found == 'true'
+        run: |
+          echo "📊 Determining final review status..."
+          
+          # Get outputs from the validator that actually ran
+          if [[ "${{ needs.validate-commonalities-version.outputs.validator_type }}" == "legacy" ]]; then
+            echo "Using results from legacy validator"
+            REVIEW_STATUS="${{ steps.legacy_review.outputs.review_status }}"
+            CRITICAL_ISSUES="${{ steps.legacy_review.outputs.critical_issues }}"
+            VALIDATION_DURATION="${{ steps.legacy_review.outputs.validation_duration }}"
+            APIS_FOUND="${{ steps.legacy_review.outputs.apis_found_count }}"
+          else
+            echo "Using results from modular validator"
+            REVIEW_STATUS="${{ steps.modular_review.outputs.review_status }}"
+            CRITICAL_ISSUES="${{ steps.modular_review.outputs.critical_issues }}"
+            VALIDATION_DURATION="${{ steps.modular_review.outputs.validation_duration }}"
+            APIS_FOUND="${{ steps.modular_review.outputs.apis_found_count }}"
+          fi
+          
+          # Output the final results
+          echo "review_status=${REVIEW_STATUS:-error}" >> $GITHUB_OUTPUT
+          echo "critical_issues=${CRITICAL_ISSUES:-0}" >> $GITHUB_OUTPUT
+          echo "validation_duration=${VALIDATION_DURATION:-0}" >> $GITHUB_OUTPUT
+          echo "apis_found_count=${APIS_FOUND:-0}" >> $GITHUB_OUTPUT
+          
+          echo "✅ Final status: $REVIEW_STATUS with $CRITICAL_ISSUES critical issues"
+
+      - name: Handle No APIs Found
+        if: steps.check_api_dir.outputs.api_found == 'false'
+        id: no_apis
+        run: |
+          echo "⚠️ No API definitions found to validate"
+          
+          # Create a summary for no APIs case
+          mkdir -p review-output
+          cat > review-output/summary.md << EOF
+          ## ⚠️ No API Definitions Found
+          
+          The validator could not find any API definitions in the expected location.
+          
+          **Expected location**: \`/code/API_definitions/\`
+          
+          **Next steps**:
+          1. Ensure your API definitions are in the correct directory
+          2. Check that files have .yaml or .yml extension
+          3. Verify the repository structure matches CAMARA standards
+          EOF
+          
+          echo "review_status=error" >> $GITHUB_OUTPUT
+          echo "critical_issues=0" >> $GITHUB_OUTPUT
+          echo "validation_duration=0" >> $GITHUB_OUTPUT
+          echo "apis_found_count=0" >> $GITHUB_OUTPUT
 
       - name: Find Generated Report File
         id: find-report
