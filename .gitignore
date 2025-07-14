@@ -1,1 +1,67 @@
 .DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+.ENV/
+
+# Development
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+
+# Package Building
+build/
+dist/
+*.egg-info/
+*.egg
+MANIFEST
+.eggs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Project Specific
+test-output/
+benchmark-output/
+reports/
+output/
+api_review_*.md
+summary.md
+validator-comparison-report.md
+
+# Logs
+*.log
+logs/
+
+# Local development files
+.env
+.env.local
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# But keep these test outputs for CI
+!scripts/camara-validator/tests/fixtures/expected-outputs/

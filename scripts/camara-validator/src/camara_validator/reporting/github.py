@@ -1,0 +1,1 @@
+"""GitHub-specific report formatting."""

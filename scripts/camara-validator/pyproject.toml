@@ -1,0 +1,116 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "camara-validator"
+version = "0.1.0"
+description = "CAMARA API validation tool with modular rule-based architecture"
+authors = [
+    {name = "CAMARA Project", email = "camara-project@example.com"}
+]
+maintainers = [
+    {name = "CAMARA Project", email = "camara-project@example.com"}
+]
+readme = "README.md"
+license = {text = "Apache 2.0"}
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+]
+keywords = ["camara", "api", "validation", "openapi", "telecom"]
+requires-python = ">=3.8"
+dependencies = [
+    "pyyaml>=6.0",
+    "jsonschema>=4.0",
+    "openapi-spec-validator>=0.5",
+    "requests>=2.28",
+    "click>=8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "isort>=5.0",
+    "mypy>=1.0",
+    "flake8>=6.0",
+    "pre-commit>=3.0",
+]
+test = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "pytest-mock>=3.0",
+]
+
+[project.scripts]
+camara-validate = "camara_validator.cli:main"
+
+[project.urls]
+"Homepage" = "https://github.com/camaraproject/tooling"
+"Bug Tracker" = "https://github.com/camaraproject/tooling/issues"
+"Documentation" = "https://github.com/camaraproject/tooling/wiki"
+"Source Code" = "https://github.com/camaraproject/tooling"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+camara_validator = ["py.typed"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38', 'py39', 'py310', 'py311']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = [
+    "--cov=camara_validator",
+    "--cov-report=html",
+    "--cov-report=term-missing",
+    "--verbose",
+]
+
+[tool.coverage.run]
+source = ["src/camara_validator"]
+omit = ["*/tests/*", "*/__init__.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
