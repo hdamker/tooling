@@ -492,6 +492,7 @@ jobs:
     uses: camaraproject/tooling/.github/workflows/api-review-reusable.yml@main
     with:
       tooling_repository: "camaraproject/tooling"  # ← repository where the validator script will be expected
+      tooling_branch: "main" # <- branch within the tooling repository
       repo_owner: ${{ needs.validate-input.outputs.repo_owner }}
       repo_name: ${{ needs.validate-input.outputs.repo_name }}
       issue_number: ${{ needs.validate-input.outputs.issue_number }}
@@ -527,7 +528,7 @@ jobs:
           else
             TRIGGER_INFO="**Triggered by**: Manual workflow dispatch"
           fi
-          
+
           # Add validator information for manual dispatch
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.validator_choice }}" ]]; then
             echo "**Validator**: ${{ github.event.inputs.validator_choice }}" >> results_content.md

@@ -49,6 +49,11 @@ on:
         type: string
         default: "camaraproject/tooling"
         description: "Repository containing validation scripts"
+      tooling_branch:
+        required: false
+        type: string
+        default: "main"
+        description: "Branch of tooling repository to use"
     outputs:
       summary_content:
         description: "The review summary content for posting to issues"
@@ -131,6 +136,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.tooling_repository }}
+          ref: ${{ inputs.tooling_branch }}
           path: review-tools
           token: ${{ secrets.GITHUB_TOKEN }}
 
