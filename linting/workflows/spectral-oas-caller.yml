@@ -3,7 +3,7 @@ name: Caller for Spectral linting with CAMARA ruleset
 # This workflow calls the reusable workflow from the tooling repository
 # initial version
 
-on: 
+on:
   workflow_dispatch:
 
 concurrency:
@@ -19,6 +19,6 @@ jobs:
   spectral:
     uses: camaraproject/tooling/.github/workflows/spectral-oas.yml@main
 # This workflow calls the reusable workflow from the tooling repository
-# Tools configuration from the tooling repository branch indicated by `configurations` variable    
+# Tools configuration from the tooling repository branch indicated by `configurations` variable
 #    with:
 #      configurations: staging

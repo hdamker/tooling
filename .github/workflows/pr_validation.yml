@@ -70,36 +70,36 @@ jobs:
  # Job that runs only when changelog is updated
   changelog-changed-job:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
         fetch-depth: 2
-    
+
     - name: Check if changelog was updated
       id: changelog-changed
-      uses: tj-actions/changed-files@ed68ef82c095e0d48ec87eccea555d944a631a4c # v46 
+      uses: tj-actions/changed-files@ed68ef82c095e0d48ec87eccea555d944a631a4c # v46
       with:
         files: |
           CHANGELOG.MD
           CHANGELOG.md
-    
+
     - name: Custom job logic
       if: steps.changelog-changed.outputs.any_changed == 'true'
       run: |
         echo "🚀 Changelog was updated! Running custom job..."
-        
+
         # Add your custom logic here
         echo "Performing custom actions:"
         echo "✅ Step 1: Custom processing"
         echo "✅ Step 2: Your business logic"
         echo "✅ Step 3: Additional operations"
-        
+
         # Example: Parse changelog for latest entry
         echo "Latest changelog entry:"
         head -20 CHANGELOG.md || head -20 CHANGELOG.md || echo "No changelog found"
-    
+
     - name: Skip message
       if: steps.changelog-changed.outputs.any_changed != 'true'
       run: |

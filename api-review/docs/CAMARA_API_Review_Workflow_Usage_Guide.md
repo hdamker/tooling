@@ -10,7 +10,7 @@ This guide provides instructions for using the automated CAMARA API review workf
 1. **Prepare issue**: Ensure your release review issue has the PR URL on line 3 or 4:
    ```markdown
    # Release Review for MyAPI v1.0.0-rc.1
-   
+
    https://github.com/camaraproject/MyAPI/pull/123
    ```
 
@@ -45,7 +45,7 @@ Comment: /rc-api-review
 ```markdown
 # WIP Review Request
 
-Comment: /wip-api-review  
+Comment: /wip-api-review
 → Reviews: Current repository's main branch
 ```
 
@@ -83,7 +83,7 @@ The CAMARA API Review system uses a distributed architecture:
 ### Deployment Flexibility
 The trigger workflow can be deployed in:
 - `camaraproject/ReleaseManagement` - For centralized release reviews
-- `camaraproject/QualityOnDemand` - For API-specific PR reviews  
+- `camaraproject/QualityOnDemand` - For API-specific PR reviews
 - Any CAMARA API repository - For repository-specific validation
 
 ---
@@ -118,7 +118,7 @@ Trigger Repository (ReleaseManagement or API Repository)
 │  api-review-trigger.yml                 │
 │  - Validates inputs                     │
 │  - Checks comment triggers              │
-│  - Calls reusable workflow              │  
+│  - Calls reusable workflow              │
 │  - Posts results to issue/summary       │
 └─────────────────────────────────────────┘
     ↓ Calls workflow from tooling
@@ -418,9 +418,9 @@ If results aren't posted to the issue:
 **Example of correct format:**
 ```markdown
 Line 1: # Release Review Title
-Line 2: 
+Line 2:
 Line 3: https://github.com/camaraproject/QualityOnDemand/pull/456
-Line 4: 
+Line 4:
 ```
 
 #### "Comment does not start with '/rc-api-review' or '/wip-api-review'"
@@ -493,7 +493,7 @@ Line 4:
 
 ## Best Practices
 
-1. **Deploy Strategically**: 
+1. **Deploy Strategically**:
    - Use ReleaseManagement for formal release reviews
    - Deploy in API repositories for continuous PR validation
 2. **Version Alignment**: Specify commonalities version 0.6 for all reviews

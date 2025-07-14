@@ -1,6 +1,6 @@
 name: Execute Spectral with CAMARA ruleset
 # A reusable action for validating PRs using tools configuration from branch indicated by input `configurations` variable
-# CAMARA Project - Github Action 
+# CAMARA Project - Github Action
 # initial version
 
 on:
@@ -38,4 +38,3 @@ jobs:
         run: npm install -g @stoplight/spectral-functions
       - name: Run Spectral linting
         run: spectral lint code/API_definitions/*.yaml --verbose --ruleset ${{ github.workspace }}/.spectral.yaml
-        

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide focuses on implementing caller workflows in CAMARA API repositories that utilize reusable liniting workflows from the `tooling` repository. 
+This guide focuses on implementing caller workflows in CAMARA API repositories that utilize reusable liniting workflows from the `tooling` repository.
 For comprehensive information about reusable workflows, refer to the official GitHub documentation: [Reusing workflows](https://docs.github.com/en/actions/sharing-automations/reusing-workflows).
 
 
@@ -74,10 +74,10 @@ Caller workflows need to be placed in  the `.github/workflows` folder of the API
 API-repository/
 ├── .github/workflows/
    ├── pr_validation_caller.yml
-   └── spectral-oas-caller.yml 
+   └── spectral-oas-caller.yml
 ```
-    
-The job input parameter `configurations` in caller workflows allows to specify the branch of the `tooling` repository from which the configuration files stored in `/linting/config/` are applied in the reusable workflows. 
+
+The job input parameter `configurations` in caller workflows allows to specify the branch of the `tooling` repository from which the configuration files stored in `/linting/config/` are applied in the reusable workflows.
 By default, the main branch of tooling is used.
 
 ```yaml

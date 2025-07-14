@@ -18,12 +18,12 @@ Repository to develop and provide tooling across the CAMARA project and its API 
 ## Scope
 
 * Tooling for CAMARA API Repositories to accelerate and simplify the development, testing and validation of CAMARA APIs
-* The repository provides the API repositories with :  
+* The repository provides the API repositories with :
   * Github Actions caller workflows to be added to `.github/workflows` folder of the API repository.
   * Github Actions [reusable workflows](https://docs.github.com/en/actions/sharing-automations/reusing-workflows) for linting API specifications and test definitions, along with other automations.
   * Configuration files and documentation for the reusable workflows.
 * Started: February 2025
-<!-- * Incubated since: §incubation date$ --> 
+<!-- * Incubated since: §incubation date$ -->
 
 ## Release Information
 
@@ -35,7 +35,7 @@ The repository has no (pre)releases yet, work in progress is within the main bra
 <!-- For changes see [CHANGELOG.md](https://github.com/camaraproject/§repo_name§/blob/main/CHANGELOG.md) -->
 
 ## Contributing
-* Meetings of the working group are held virtually 
+* Meetings of the working group are held virtually
     * Schedule: see [Commonalities Working Group wiki page](https://lf-camaraproject.atlassian.net/wiki/x/_QPe)
     * [Registration / Join](https://zoom-lfx.platform.linuxfoundation.org/meeting/91016460698?password=d031b0e3-8d49-49ae-958f-af3213b1e547)
     * Minutes: Access [meeting minutes](https://lf-camaraproject.atlassian.net/wiki/x/2AD7Aw)

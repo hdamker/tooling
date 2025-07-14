@@ -93,7 +93,7 @@ class MyNewRule(ValidationRule):
     @property
     def name(self) -> str:
         return "My New Rule"
-    
+
     def validate(self, context, result):
         # Add validation logic
         pass

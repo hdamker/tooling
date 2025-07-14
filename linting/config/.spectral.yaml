@@ -162,7 +162,7 @@ rules:
       field: description
       function: truthy
     recommended: true  # Set to true/false to enable/disable this rule
-    
+
   camara-parameters-descriptions:
     message: "Parameter description is missing or empty: {{error}}"
     severity: warn
@@ -174,7 +174,7 @@ rules:
       field: description
       function: truthy
     recommended: true  # Set to true/false to enable/disable this rule
-    
+
   camara-response-descriptions:
     message: "Parameter description is missing or empty: {{error}}"
     severity: warn
@@ -199,7 +199,7 @@ rules:
       field: description
       function: truthy
     recommended: true  # Set to true/false to enable/disable this rule
-    
+
   camara-operation-summary:
     message: "Operation Summary Warning: Each operation should include a short summary for better understanding."
     severity: warn

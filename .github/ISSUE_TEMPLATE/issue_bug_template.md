@@ -26,7 +26,7 @@ assignees: ''
 **Environment:**
 <!-- - Network Capability Provider: [e.g. NEF, proprietary function]
  - Vendor: [e.g. Nokia, Ericsson]
- - Version [e.g. 22] 
+ - Version [e.g. 22]
  - -->
 
 **Additional context**

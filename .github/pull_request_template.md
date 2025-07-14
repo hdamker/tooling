@@ -33,7 +33,7 @@ Fixes #
 
 ```
 
-#### Additional documentation 
+#### Additional documentation
 
 This section can be blank.
 

@@ -1,7 +1,7 @@
 # .github/workflows/api-review-reusable.yml
-# 
+#
 # CAMARA API Review - Reusable Workflow
-# 
+#
 # Purpose: Performs automated validation of CAMARA API definitions against compliance checklist.
 # Called by: api-review-trigger.yml workflow
 
@@ -78,9 +78,9 @@ jobs:
         id: determine-validator
         run: |
           COMMONALITIES_VERSION="${{ inputs.commonalities_version }}"
-          
+
           echo "🔍 Validating Commonalities version: $COMMONALITIES_VERSION"
-          
+
           case "$COMMONALITIES_VERSION" in
             "0.6")
               echo "✅ Commonalities 0.6 is supported"
@@ -152,18 +152,18 @@ jobs:
         run: |
           echo "🔍 Verifying checkout..."
           cd target-repo
-          
+
           CURRENT_SHA=$(git rev-parse HEAD)
           echo "Current SHA: $CURRENT_SHA"
           echo "Expected SHA: ${{ inputs.pr_head_sha }}"
-          
+
           if [[ "$CURRENT_SHA" == "${{ inputs.pr_head_sha }}" ]]; then
             echo "✅ Successfully checked out commit"
           else
             echo "❌ SHA mismatch!"
             exit 1
           fi
-          
+
           if [[ -d "code/API_definitions" ]]; then
             API_COUNT=$(find code/API_definitions -name "*.yaml" -o -name "*.yml" | wc -l)
             echo "✅ API definitions directory found with $API_COUNT YAML files"
@@ -198,9 +198,9 @@ jobs:
       - name: Locate Validator Script
         run: |
           VALIDATOR_SCRIPT="${{ needs.validate-commonalities-version.outputs.validator_script }}"
-          
+
           echo "🔍 Locating validator script: $VALIDATOR_SCRIPT"
-          
+
           if [[ -f "review-tools/scripts/$VALIDATOR_SCRIPT" ]]; then
             echo "✅ Found validator script"
             cp "review-tools/scripts/$VALIDATOR_SCRIPT" ./api_review_validator.py
@@ -217,28 +217,28 @@ jobs:
         id: legacy_review
         run: |
           # Remove 'set -e' temporarily to handle non-zero exit codes
-          set +e  # Allow script to continue even if validator fails          
+          set +e  # Allow script to continue even if validator fails
 
           echo "🚀 Starting API validation with legacy validator..."
 
           VALIDATION_START_TIME=$(date +%s)
-          
+
           # Set up validation environment
           export PYTHONPATH="${PYTHONPATH}:./review-tools"
           cd target-repo
-          
+
           VALIDATOR_SCRIPT="../review-tools/scripts/${{ needs.validate-commonalities-version.outputs.validator_script }}"
-          
+
           if [[ ! -f "$VALIDATOR_SCRIPT" ]]; then
             echo "❌ Validator script not found: $VALIDATOR_SCRIPT"
             exit 1
           fi
-          
+
           echo "✅ Using validator: $VALIDATOR_SCRIPT"
-          
+
           # Create output directory
           mkdir -p ../review-output
-          
+
           # Count API files for reporting
           API_DEF_DIR="./code/API_definitions"
           if [[ -d "$API_DEF_DIR" ]]; then
@@ -246,9 +246,9 @@ jobs:
           else
             API_DEF_COUNT=0
           fi
-          
+
           echo "📁 Found $API_DEF_COUNT API definition files"
-          
+
           # Run the validator and capture exit code WITHOUT failing the step
           python3 "$VALIDATOR_SCRIPT" \
             "." \
@@ -258,16 +258,16 @@ jobs:
             --commonalities-version "${{ inputs.commonalities_version }}" \
             --review-type "${{ inputs.review_type }}" \
             --verbose
-          
+
           # Capture the exit code AFTER the command completes
           VALIDATION_EXIT_CODE=$?
-          
+
           # Re-enable strict error checking for the rest of the step
           set -e
-          
+
           VALIDATION_END_TIME=$(date +%s)
           VALIDATION_DURATION=$((VALIDATION_END_TIME - VALIDATION_START_TIME))
-          
+
           echo "📊 Validation completed in ${VALIDATION_DURATION}s with exit code: $VALIDATION_EXIT_CODE"
 
           if [[ $VALIDATION_EXIT_CODE -eq 0 ]]; then
@@ -280,7 +280,7 @@ jobs:
             echo "review_status=error" >> $GITHUB_OUTPUT
             echo "❌ Validation error occurred"
           fi
-          
+
           # Extract critical issues count from output if available
           CRITICAL_COUNT="0"
           if [[ -f "../review-output/summary.md" ]]; then
@@ -290,48 +290,48 @@ jobs:
               CRITICAL_COUNT=$(echo "$CRITICAL_LINE" | grep -oE "[0-9]+")
             fi
           fi
-          
+
           echo "validation_duration=$VALIDATION_DURATION" >> $GITHUB_OUTPUT
           echo "apis_found_count=$API_DEF_COUNT" >> $GITHUB_OUTPUT
           echo "critical_issues=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
           echo "validation_exit_code=${VALIDATION_EXIT_CODE:-0}" >> $GITHUB_OUTPUT
 
-      - name: Run New Modular Validator  
+      - name: Run New Modular Validator
         if: steps.check_api_dir.outputs.api_found == 'true' && needs.validate-commonalities-version.outputs.validator_type == 'modular'
         id: modular_review
         run: |
           echo "🚀 Starting API validation with new modular validator..."
-          
+
           VALIDATION_START_TIME=$(date +%s)
-          
+
           # Install the modular validator package
           pip install ./review-tools/scripts/camara-validator
-          
+
           cd target-repo
           mkdir -p ../review-output
-          
+
           # Count API files for reporting
           API_DEF_COUNT=$(find code/API_definitions -name "*.yaml" -o -name "*.yml" | wc -l)
           echo "📁 Found $API_DEF_COUNT API definition files"
-          
+
           # Run with the new CLI interface
           set +e  # Allow script to continue even if validator fails
-          
+
           camara-validate \
             "." \
             --version "${{ inputs.commonalities_version }}" \
             --output "../review-output" \
             --repo-name "${{ inputs.repo_name }}" \
             --pr-number "${{ inputs.issue_number }}"
-          
+
           VALIDATION_EXIT_CODE=$?
           set -e
-          
+
           VALIDATION_END_TIME=$(date +%s)
           VALIDATION_DURATION=$((VALIDATION_END_TIME - VALIDATION_START_TIME))
-          
+
           echo "📊 Validation completed in ${VALIDATION_DURATION}s with exit code: $VALIDATION_EXIT_CODE"
-          
+
           # Determine review status based on exit code
           if [[ $VALIDATION_EXIT_CODE -eq 0 ]]; then
             echo "review_status=success" >> $GITHUB_OUTPUT
@@ -343,7 +343,7 @@ jobs:
             echo "review_status=error" >> $GITHUB_OUTPUT
             echo "❌ Validation error occurred"
           fi
-          
+
           # Extract critical issues count from output if available
           CRITICAL_COUNT="0"
           if [[ -f "../review-output/summary.md" ]]; then
@@ -352,7 +352,7 @@ jobs:
               CRITICAL_COUNT=$(echo "$CRITICAL_LINE" | grep -oE "[0-9]+")
             fi
           fi
-          
+
           echo "validation_exit_code=${VALIDATION_EXIT_CODE:-0}" >> $GITHUB_OUTPUT
           echo "validation_duration=$VALIDATION_DURATION" >> $GITHUB_OUTPUT
           echo "apis_found_count=$API_DEF_COUNT" >> $GITHUB_OUTPUT
@@ -363,7 +363,7 @@ jobs:
         if: steps.check_api_dir.outputs.api_found == 'true'
         run: |
           echo "📊 Determining final review status..."
-          
+
           # Get outputs from the validator that actually ran
           if [[ "${{ needs.validate-commonalities-version.outputs.validator_type }}" == "legacy" ]]; then
             echo "Using results from legacy validator"
@@ -378,13 +378,13 @@ jobs:
             VALIDATION_DURATION="${{ steps.modular_review.outputs.validation_duration }}"
             APIS_FOUND="${{ steps.modular_review.outputs.apis_found_count }}"
           fi
-          
+
           # Output the final results
           echo "review_status=${REVIEW_STATUS:-error}" >> $GITHUB_OUTPUT
           echo "critical_issues=${CRITICAL_ISSUES:-0}" >> $GITHUB_OUTPUT
           echo "validation_duration=${VALIDATION_DURATION:-0}" >> $GITHUB_OUTPUT
           echo "apis_found_count=${APIS_FOUND:-0}" >> $GITHUB_OUTPUT
-          
+
           echo "✅ Final status: $REVIEW_STATUS with $CRITICAL_ISSUES critical issues"
 
       - name: Handle No APIs Found
@@ -392,22 +392,22 @@ jobs:
         id: no_apis
         run: |
           echo "⚠️ No API definitions found to validate"
-          
+
           # Create a summary for no APIs case
           mkdir -p review-output
           cat > review-output/summary.md << EOF
           ## ⚠️ No API Definitions Found
-          
+
           The validator could not find any API definitions in the expected location.
-          
+
           **Expected location**: \`/code/API_definitions/\`
-          
+
           **Next steps**:
           1. Ensure your API definitions are in the correct directory
           2. Check that files have .yaml or .yml extension
           3. Verify the repository structure matches CAMARA standards
           EOF
-          
+
           echo "review_status=error" >> $GITHUB_OUTPUT
           echo "critical_issues=0" >> $GITHUB_OUTPUT
           echo "validation_duration=0" >> $GITHUB_OUTPUT
@@ -418,7 +418,7 @@ jobs:
         if: always()
         run: |
           echo "🔍 Searching for generated report..."
-          
+
           REPORT_FILE=""
 
           # Replace in api-review-reusable.yml "Find Generated Report File" step:
@@ -426,11 +426,11 @@ jobs:
           if [[ -z "$REPORT_FILE" ]]; then
             REPORT_FILE=$(find ./review-output -name "api_review_v*.md" -type f | head -1)
           fi
-          
+
           if [[ -z "$REPORT_FILE" ]]; then
             REPORT_FILE=$(find ./review-output -name "*report*.md" -type f | head -1)
           fi
-          
+
           if [[ -n "$REPORT_FILE" ]]; then
             REPORT_FILENAME=$(basename "$REPORT_FILE")
             echo "✅ Found report: $REPORT_FILENAME"
@@ -456,20 +456,20 @@ jobs:
         if: always()
         run: |
           echo "📋 Preparing summary output..."
-          
+
           if [[ -f "./review-output/summary.md" ]]; then
             echo "✅ Summary file found"
-            
+
             # Add direct artifact download link to summary
             if [[ "${{ steps.upload-detailed-report.outputs.artifact-url }}" != "" ]]; then
               echo "🔗 Adding direct artifact link to summary..."
-              
+
               ARTIFACT_URL="${{ steps.upload-detailed-report.outputs.artifact-url }}"
               DETAILED_REPORT_NAME="${{ steps.find-report.outputs.report_filename }}"
-              
+
               # Replace the detailed report line with a direct download link
               sed -i.bak "s|📄 \*\*Detailed Report\*\*:.*|📄 **Detailed Report**: [\`${DETAILED_REPORT_NAME}\`](${ARTIFACT_URL}) - Direct download|g" "./review-output/summary.md"
-              
+
               # Add fallback if sed didn't match
               if ! grep -q "Direct download" "./review-output/summary.md"; then
                 echo "" >> "./review-output/summary.md"
@@ -478,11 +478,11 @@ jobs:
             else
               echo "⚠️ No artifact URL available, keeping original summary"
             fi
-            
+
             # Check file size (GitHub Actions limit)
             FILE_SIZE=$(stat -f%z "./review-output/summary.md" 2>/dev/null || stat -c%s "./review-output/summary.md" 2>/dev/null || echo "0")
             MAX_SIZE=1048576  # 1MB
-            
+
             if [[ "$FILE_SIZE" -gt "$MAX_SIZE" ]]; then
               echo "⚠️ Summary too large, truncating..."
               head -c 900000 "./review-output/summary.md" > summary_truncated.md
@@ -492,7 +492,7 @@ jobs:
               echo "The summary was truncated due to size limits." >> summary_truncated.md
               mv summary_truncated.md "./review-output/summary.md"
             fi
-            
+
             # Add workflow metadata
             echo "" >> "./review-output/summary.md"
             echo "---" >> "./review-output/summary.md"
@@ -501,7 +501,7 @@ jobs:
             echo "- Duration: ${{ steps.review.outputs.validation_duration }}s" >> "./review-output/summary.md"
             echo "- APIs Found: ${{ steps.review.outputs.apis_found_count }}" >> "./review-output/summary.md"
             echo "- Workflow Run: [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> "./review-output/summary.md"
-            
+
             # Output as base64 to avoid shell interpretation issues
             {
               echo 'summary_content<<SUMMARY_EOF_MARKER'
@@ -512,7 +512,7 @@ jobs:
 
           else
             echo "❌ No summary file found"
-            
+
             ERROR_SUMMARY="❌ **API Review Failed**
 
           The automated review could not be completed.
@@ -529,7 +529,7 @@ jobs:
           3. Ensure validator script is properly deployed
 
           **Workflow Run:** [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
-            
+
           # Output as base64
             {
               echo 'summary_content<<SUMMARY_EOF_MARKER'
@@ -561,7 +561,7 @@ jobs:
         run: |
           COMMONALITIES_VERSION="${{ inputs.commonalities_version }}"
           ERROR_MESSAGE="${{ needs.validate-commonalities-version.outputs.error_message }}"
-          
+
           ERROR_SUMMARY="❌ **Unsupported Commonalities Version**
 
           **Error**: $ERROR_MESSAGE
@@ -576,11 +576,11 @@ jobs:
 
           **Version Roadmap:**
           - 📅 Commonalities 0.7: Planned
-          - 📅 Commonalities 0.8: Planned  
+          - 📅 Commonalities 0.8: Planned
           - 📅 Commonalities 1.0: Planned
 
           **Workflow Run:** [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
-          
+
           # Output as base64
           {
             echo 'summary_content<<SUMMARY_EOF_MARKER'
@@ -602,10 +602,10 @@ jobs:
         id: determine-outputs
         run: |
           echo "🔍 Determining final outputs..."
-          
+
           if [[ "${{ needs.validate-commonalities-version.outputs.version_supported }}" == "true" ]]; then
             echo "✅ Using outputs from API review"
-            
+
             {
               echo 'summary_content<<SUMMARY_EOF_MARKER'
               cat << 'SUMMARY_EOF'
@@ -613,12 +613,12 @@ jobs:
           SUMMARY_EOF
               echo 'SUMMARY_EOF_MARKER'
             } >> $GITHUB_OUTPUT
-            
+
             echo "review_status=${{ needs.api-review.outputs.review_status }}" >> $GITHUB_OUTPUT
             echo "critical_issues_count=${{ needs.api-review.outputs.critical_issues_count }}" >> $GITHUB_OUTPUT
           else
             echo "❌ Using outputs from version error handler"
-            
+
             {
               echo 'summary_content<<SUMMARY_EOF_MARKER'
               cat << 'SUMMARY_EOF'
@@ -626,7 +626,7 @@ jobs:
           SUMMARY_EOF
               echo 'SUMMARY_EOF_MARKER'
             } >> $GITHUB_OUTPUT
-            
+
             echo "review_status=error" >> $GITHUB_OUTPUT
             echo "critical_issues_count=N/A" >> $GITHUB_OUTPUT
           fi

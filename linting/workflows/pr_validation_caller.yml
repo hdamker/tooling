@@ -9,7 +9,7 @@ on:
     branches: main
   # manual workflow triggering
   workflow_dispatch:
-  
+
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
@@ -24,6 +24,6 @@ jobs:
     uses: camaraproject/tooling/.github/workflows/pr_validation.yml@main
     secrets: inherit
 # This workflow calls the reusable workflow from tooling repository
-# Tools configuration from the tooling repository branch indicated by `configurations` variable    
+# Tools configuration from the tooling repository branch indicated by `configurations` variable
 #    with:
 #      configurations: staging

@@ -42,9 +42,9 @@
   "only-one-when": "off",
   "allowed-tags": ["on", {
   "patterns": [
-    "^@watch$",                        
-    "^@wip$",                                            
-    "^@.*$"                                   
+    "^@watch$",
+    "^@wip$",
+    "^@.*$"
   ]
  }],
   "file-name": ["off", {"style": "kebab-case"}],

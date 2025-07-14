@@ -79,19 +79,19 @@ from camara_validator.models import ValidationContext, ValidationResult, Validat
 
 class MyNewRule(ValidationRule):
     """Description of what this rule validates"""
-    
+
     @property
     def name(self) -> str:
         return "My New Rule"
-    
+
     @property
     def category(self) -> str:
         return "My Category"
-    
+
     def applies_to(self, context: ValidationContext) -> bool:
         # Determine if this rule applies to the API
         return True
-    
+
     def validate(self, context: ValidationContext, result: ValidationResult) -> None:
         # Implement validation logic
         if some_condition:
