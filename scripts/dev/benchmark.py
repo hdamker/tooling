@@ -92,7 +92,7 @@ def main():
         print(f"⏱️  New validator: {new_time:.2f} seconds")
 
         # Compare results
-        print(f"\n📊 Performance comparison:")
+        print("\n📊 Performance comparison:")
         print(f"   Legacy: {legacy_time:.2f}s")
         print(f"   New:    {new_time:.2f}s")
 
