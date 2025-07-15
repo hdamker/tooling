@@ -1,0 +1,22 @@
+openapi: 3.0.3
+info:
+  title: Missing Security Test
+  version: 0.1.0
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+paths:
+  /secure:
+    get:
+      security:
+      - openId:
+        - scope:read
+      responses:
+        '200':
+          description: OK
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key

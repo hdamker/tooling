@@ -1,0 +1,36 @@
+openapi: 3.0.3
+info:
+  title: Wrong Error Code Test
+  version: 0.1.0
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+paths:
+  /test:
+    get:
+      responses:
+        '200':
+          description: OK
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorInfo'
+components:
+  schemas:
+    ErrorInfo:
+      type: object
+      required:
+      - status
+      - code
+      - message
+      properties:
+        status:
+          type: integer
+        code:
+          type: string
+          enum:
+          - AUTHENTICATION_REQUIRED
+        message:
+          type: string

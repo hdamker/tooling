@@ -1,0 +1,20 @@
+openapi: 3.0.3
+info:
+  title: XCorrelator Pattern Test
+  version: 0.1.0
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+paths:
+  /test:
+    get:
+      parameters:
+      - name: X-Correlator
+        in: header
+        required: false
+        schema:
+          type: string
+          pattern: ^[0-9]{8}.*$
+      responses:
+        '200':
+          description: OK

@@ -1,0 +1,16 @@
+openapi: 3.0.3
+info:
+  title: Invalid Server URL Test
+  version: 0.1.0
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+servers:
+- url: http://api.example.com/v1
+  description: Production server
+paths:
+  /test:
+    get:
+      responses:
+        '200':
+          description: OK
