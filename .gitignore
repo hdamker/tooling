@@ -1,11 +1,5 @@
 .DS_Store
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
 
 # Virtual Environment
 venv/
@@ -48,6 +42,17 @@ output/
 api_review_*.md
 summary.md
 validator-comparison-report.md
+comparison-report.py
+
+# Test Data - External sources
+test-data/from-camara/
+
+# Test Results
+test-results-*/
+test-original/
+test-wrapped/
+temp-legacy/
+infrastructure-test-*/
 
 # Logs
 *.log
