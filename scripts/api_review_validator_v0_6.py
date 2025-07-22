@@ -2067,35 +2067,8 @@ class CAMARAAPIValidator:
         # Process matches - each match is (api_name_part, version_part, rest_of_path)
         found_urls = [(match[0], match[1], match[2] if len(match) > 2 else '') for match in matches]
         
-        # Determine expected URL suffix based on version
-        if api_version == 'wip':
-            expected_suffix = '/vwip'
-        elif api_version and re.match(r'^\d+\.\d+\.\d+(-rc\.\d+|-alpha\.\d+)?
-        
-        # Determine expected URL suffix based on version
-        if api_version == 'wip':
-            expected_suffix = '/vwip'
-        elif api_version and re.match(r'^\d+\.\d+\.\d+(-rc\.\d+|-alpha\.\d+)?$', api_version):
-            # Same logic as in version-URL consistency check
-            version_parts = api_version.split('.')
-            major = int(version_parts[0])
-            minor = int(version_parts[1])
-            
-            if major == 0:
-                base_version = f"v{major}.{minor}"
-            else:
-                base_version = f"v{major}"
-            
-            if '-rc.' in api_version:
-                rc_num = api_version.split('-rc.')[1]
-                expected_suffix = f"/{base_version}rc{rc_num}"
-            elif '-alpha.' in api_version:
-                alpha_num = api_version.split('-alpha.')[1]
-                expected_suffix = f"/{base_version}alpha{alpha_num}"
-            else:
-                expected_suffix = f"/{base_version}"
-        else:
-            return  # Invalid version, skip URL validation
+        # Get expected URL suffix using the helper function
+        expected_suffix = self._get_expected_url_suffix(api_version)
         
         # Check each found URL
         for url_api_name, url_version, rest_of_path in found_urls:
