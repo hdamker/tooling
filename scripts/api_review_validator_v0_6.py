@@ -1481,14 +1481,14 @@ class CAMARAAPIValidator:
                 if server_url.endswith('/wip'):
                     result.issues.append(ValidationIssue(
                         Severity.CRITICAL, "Server URL",
-                        f"Invalid work-in-progress URL suffix `/wip` (should be `/vwip` for WIP versions)",
+                        f"Invalid work-in-progress URL suffix `/wip`",
                         "servers[0].url",
-                        f"For release version `{version}`, use `{expected_suffix}`"
+                        f"For version `{version}`, use `{expected_suffix}`"
                     ))
                 elif server_url.endswith('/vwip'):
                     result.issues.append(ValidationIssue(
                         Severity.CRITICAL, "Server URL",
-                        f"Release version `{version}` cannot use work-in-progress URL suffix `/vwip`",
+                        f"Version `{version}` cannot use work-in-progress URL suffix `/vwip`",
                         "servers[0].url",
                         f"Update server URL to end with `{expected_suffix}`"
                     ))
