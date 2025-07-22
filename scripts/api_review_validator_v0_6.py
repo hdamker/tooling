@@ -2049,9 +2049,19 @@ class CAMARAAPIValidator:
         """Validate that URLs in test files match the expected API name and version format"""
         
         # Find URLs in test content (looking for patterns like /api-name/version/endpoint)
-        # Common patterns: And the resource "/brand-registration/v0.1rc1/registrations"
+        # Common patterns: 
+        #   And the resource "/brand-registration/v0.1rc1/registrations"
+        #   And the resource "qos-profiles/vwip/retrieve-qos-profiles"
+        #   Given the resource "{apiroot}/geofencing-subscriptions/v0.5rc1/"
+        # Regex pattern explanation:
+        #   - (?:\{[^}]+\}/)? - optional template variable like {apiRoot}/ or {apiroot}/
+        #   - /? - optional leading slash
+        #   - ([a-zA-Z0-9_-]+) - captures API name
+        #   - \/ - literal slash
+        #   - (vwip|wip|v\d+...) - captures version
+        #   - (\/[^"\']*)?  - optionally captures rest of path
         # Captures: (api-name, version, rest-of-path)
-        url_pattern = r'["\']\/([a-zA-Z0-9_-]+)\/(vwip|wip|v\d+(?:\.\d+)?(?:rc\d+|alpha\d+)?)(\/[^"\']*)?["\']'
+        url_pattern = r'["\'](?:\{[^}]+\}/)?/?([a-zA-Z0-9_-]+)\/(vwip|wip|v\d+(?:\.\d+)?(?:rc\d+|alpha\d+)?)(\/[^"\']*)?["\']'
         matches = re.findall(url_pattern, content)
         
         if not matches:
@@ -2060,9 +2070,15 @@ class CAMARAAPIValidator:
                 Severity.CRITICAL, "Test URLs",
                 "No API resource URLs found in test file",
                 test_file,
-                f"Add resource URLs like: And the resource \"/{api_name}/<version>/endpoint\""
+                f'Add resource URLs like: And the resource "/{api_name}/<version>/endpoint" or "{{apiRoot}}/{api_name}/<version>/endpoint"'
             ))
             return
+        
+        # Also check for URLs without leading slash (for style recommendation)
+        # This pattern specifically looks for URLs without template variables and without leading slash
+        # We don't flag URLs with template variables as they're typically root-relative already
+        no_slash_pattern = r'["\'](?!\{[^}]+\}/)([a-zA-Z0-9_-]+\/(vwip|wip|v\d+(?:\.\d+)?(?:rc\d+|alpha\d+)?)(?:\/[^"\']*)?)["\']'
+        no_slash_matches = re.findall(no_slash_pattern, content)
         
         # Process matches - each match is (api_name_part, version_part, rest_of_path)
         found_urls = [(match[0], match[1], match[2] if len(match) > 2 else '') for match in matches]
@@ -2087,14 +2103,14 @@ class CAMARAAPIValidator:
             elif expected_suffix and url_version == 'wip':
                 result.issues.append(ValidationIssue(
                     Severity.CRITICAL, "Test URLs",
-                    f"Test file uses invalid `/wip` suffix (should be `/vwip` for WIP versions)",
+                    f"Test file uses invalid `/wip` suffix",
                     f"{test_file}: URL '{full_url}'",
                     f"Update to use `{expected_suffix}`"
                 ))
             elif expected_suffix and api_version != 'wip' and url_version == 'vwip':
                 result.issues.append(ValidationIssue(
                     Severity.CRITICAL, "Test URLs",
-                    f"Test file uses `/vwip` for non-WIP version `{api_version}`",
+                    f"Test file uses work-in-progress URL suffix `/vwip` for version `{api_version}`",
                     f"{test_file}: URL '{full_url}'",
                     f"Update to use `{expected_suffix}`"
                 ))
@@ -2104,6 +2120,17 @@ class CAMARAAPIValidator:
                     f"Test file URL version `/{url_version}` doesn't match API version `{api_version}`",
                     f"{test_file}: URL '{full_url}'",
                     f"Expected: `{expected_suffix}`"
+                ))
+        
+        # Report URLs without leading slash as low priority style issue
+        if no_slash_matches:
+            for url_match in no_slash_matches:
+                url_str = url_match[0] if isinstance(url_match, tuple) else url_match
+                result.issues.append(ValidationIssue(
+                    Severity.LOW, "Test URL Style",
+                    f"Resource URL without leading slash: `\"{url_str}\"`",
+                    test_file,
+                    f"Consider using root-relative path with leading slash: `\"/{url_str}\"`"
                 ))
 
     def _validate_test_version_line(self, feature_line: str, api_version: str, api_title: str) -> bool:
