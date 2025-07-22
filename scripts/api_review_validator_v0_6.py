@@ -173,6 +173,43 @@ class CAMARAAPIValidator:
         
         return current if isinstance(current, dict) else {}
 
+    def _get_expected_url_suffix(self, version: str) -> Optional[str]:
+        """Convert API version to expected URL suffix according to CAMARA conventions
+        
+        Returns:
+            Expected URL suffix (e.g., '/vwip', '/v0.1rc1', '/v1') or None if version is invalid
+        """
+        if version == 'wip':
+            return '/vwip'
+        
+        # Validate version format
+        if not re.match(r'^\d+\.\d+\.\d+(-rc\.\d+|-alpha\.\d+)?$', version):
+            return None
+        
+        # Parse version components
+        version_parts = version.split('.')
+        major = int(version_parts[0])
+        minor = int(version_parts[1])
+        
+        # Determine base URL version based on major version
+        if major == 0:
+            # For 0.x versions, use v{major}.{minor}
+            base_version = f"v{major}.{minor}"
+        else:
+            # For 1.x and above, use v{major} only
+            base_version = f"v{major}"
+        
+        # Handle pre-release suffixes
+        if '-rc.' in version:
+            rc_num = version.split('-rc.')[1]
+            return f"/{base_version}rc{rc_num}"
+        elif '-alpha.' in version:
+            alpha_num = version.split('-alpha.')[1]
+            return f"/{base_version}alpha{alpha_num}"
+        else:
+            # Stable version
+            return f"/{base_version}"
+        
     def _check_version_mismatch(self, api_spec: dict, result: ValidationResult):
         """Add warning if validating against different version than requested"""
         if self.expected_commonalities_version != self.implemented_version:
@@ -243,9 +280,9 @@ class CAMARAAPIValidator:
             self._validate_paths(api_spec, result)
             self._validate_components(api_spec, result)
             self._validate_security_schemes(api_spec, result)
+            self._check_version_url_consistency(api_spec, result)
             
             # Checks for Commonalities 0.6
-            self._check_work_in_progress_version(api_spec, result)
             self._check_updated_generic401(api_spec, result)
             
             # Consistency checks
@@ -1391,11 +1428,22 @@ class CAMARAAPIValidator:
                         "Consider aligning filename with API title (as fallback when api-name unavailable)"
                     ))
 
-    def _check_work_in_progress_version(self, api_spec: dict, result: ValidationResult):
-        """Check work-in-progress versions based on review type"""
-        result.checks_performed.append("Work-in-progress version validation")
+    def _check_version_url_consistency(self, api_spec: dict, result: ValidationResult):
+        """Check consistency between API version and server URL suffix"""
+        result.checks_performed.append("Version-URL consistency validation")
         
         version = api_spec.get('info', {}).get('version', '')
+        servers = api_spec.get('servers', [])
+        
+        if not servers:
+            return
+            
+        server_url = servers[0].get('url', '')
+        
+        # Extract the version part from the server URL
+        # Expected formats: {apiRoot}/api-name/version
+        url_parts = server_url.split('/')
+        url_version = url_parts[-1] if url_parts else ''
         
         if self.review_type == "wip":
             # For WIP reviews, expect "wip" version
@@ -1407,19 +1455,16 @@ class CAMARAAPIValidator:
                     "Use version `wip` for work-in-progress development"
                 ))
             
-            # Check server URL should contain vwip
-            servers = api_spec.get('servers', [])
-            if servers:
-                server_url = servers[0].get('url', '')
-                if 'vwip' not in server_url:
-                    result.issues.append(ValidationIssue(
-                        Severity.MEDIUM, "Server URL",
-                        "WIP review expects server URL to contain `vwip`",
-                        "servers[0].url",
-                        "Use `vwip` in server URL for work-in-progress development"
-                    ))
+            # Check server URL should end with /vwip
+            if not server_url.endswith('/vwip'):
+                result.issues.append(ValidationIssue(
+                    Severity.MEDIUM, "Server URL",
+                    "WIP review expects server URL to end with `/vwip`",
+                    "servers[0].url",
+                    "Use `/vwip` suffix in server URL for work-in-progress development"
+                ))
         else:
-            # For release-candidate and other reviews, forbid "wip" version
+            # For release-candidate and other reviews
             if version == 'wip':
                 result.issues.append(ValidationIssue(
                     Severity.CRITICAL, "Version",
@@ -1428,29 +1473,32 @@ class CAMARAAPIValidator:
                     "Update to proper semantic version (e.g., `0.1.0-rc.1`)"
                 ))
             
-            # Check server URL for vwip
-            servers = api_spec.get('servers', [])
-            if servers:
-                server_url = servers[0].get('url', '')
-                if 'vwip' in server_url:
+            # Check server URL matches version type using helper
+            expected_suffix = self._get_expected_url_suffix(version)
+            
+            if expected_suffix and not server_url.endswith(expected_suffix):
+                # Check for common mistakes
+                if server_url.endswith('/wip'):
                     result.issues.append(ValidationIssue(
                         Severity.CRITICAL, "Server URL",
-                        "Work-in-progress server URL (`vwip`) cannot be used in release",
+                        f"Invalid work-in-progress URL suffix `/wip` (should be `/vwip` for WIP versions)",
                         "servers[0].url",
-                        "Update to production server URL"
+                        f"For release version `{version}`, use `{expected_suffix}`"
                     ))
-        
-        # Check server URL for vwip
-        servers = api_spec.get('servers', [])
-        if servers:
-            server_url = servers[0].get('url', '')
-            if 'vwip' in server_url:
-                result.issues.append(ValidationIssue(
-                    Severity.CRITICAL, "Server URL",
-                    "Work-in-progress server URL (`vwip`) cannot be used in release",
-                    "servers[0].url",
-                    "Update to production server URL"
-                ))
+                elif server_url.endswith('/vwip'):
+                    result.issues.append(ValidationIssue(
+                        Severity.CRITICAL, "Server URL",
+                        f"Release version `{version}` cannot use work-in-progress URL suffix `/vwip`",
+                        "servers[0].url",
+                        f"Update server URL to end with `{expected_suffix}`"
+                    ))
+                else:
+                    result.issues.append(ValidationIssue(
+                        Severity.CRITICAL, "Server URL",
+                        f"Server URL version `{url_version}` doesn't match API version `{version}`",
+                        "servers[0].url",
+                        f"Update server URL to end with `{expected_suffix}`"
+                    ))
 
     def _check_updated_generic401(self, api_spec: dict, result: ValidationResult):
         """Check for updated generic 401 error handling in Commonalities 0.6"""
@@ -1941,25 +1989,8 @@ class CAMARAAPIValidator:
         
         lines = content.split('\n')
     
-        # Check WIP expectations based on review type
-        if self.review_type == "wip":
-            # For WIP reviews, expect "wip" in test content
-            if 'wip' not in content.lower():
-                result.issues.append(ValidationIssue(
-                    Severity.MEDIUM, "Test Files",
-                    "WIP review expects test files to reference `wip` version",
-                    test_file,
-                    "Update test scenarios to use `wip` version references"
-                ))
-        else:
-            # For release reviews, forbid "wip" in test files  
-            if 'wip' in content.lower():
-                result.issues.append(ValidationIssue(
-                    Severity.CRITICAL, "Test Files",
-                    "Release review should not contain `wip` references in test files",
-                    test_file,
-                    "Update test scenarios to use proper version references"
-                ))
+        # Validate URLs in test files match expected API name and version format
+        self._validate_test_file_urls(content, api_name, api_version, test_file, result)
         
         # Check for version in Feature line (can be line 1 or 2)
         feature_line = None
@@ -2012,6 +2043,94 @@ class CAMARAAPIValidator:
                     f"Test file suggests operation `{expected_operation}` but it doesn't exist in API",
                     test_file,
                     f"Check if test file naming is as intended, consider to use valid operation from: `{', '.join(api_operations)}`"
+                ))
+
+    def _validate_test_file_urls(self, content: str, api_name: str, api_version: str, test_file: str, result: TestAlignmentResult):
+        """Validate that URLs in test files match the expected API name and version format"""
+        
+        # Find URLs in test content (looking for patterns like /api-name/version/endpoint)
+        # Common patterns: And the resource "/brand-registration/v0.1rc1/registrations"
+        # Captures: (api-name, version, rest-of-path)
+        url_pattern = r'["\']\/([a-zA-Z0-9_-]+)\/(vwip|wip|v\d+(?:\.\d+)?(?:rc\d+|alpha\d+)?)(\/[^"\']*)?["\']'
+        matches = re.findall(url_pattern, content)
+        
+        if not matches:
+            # No URLs found - this is a critical error for API test files
+            result.issues.append(ValidationIssue(
+                Severity.CRITICAL, "Test URLs",
+                "No API resource URLs found in test file",
+                test_file,
+                f"Add resource URLs like: And the resource \"/{api_name}/<version>/endpoint\""
+            ))
+            return
+        
+        # Process matches - each match is (api_name_part, version_part, rest_of_path)
+        found_urls = [(match[0], match[1], match[2] if len(match) > 2 else '') for match in matches]
+        
+        # Determine expected URL suffix based on version
+        if api_version == 'wip':
+            expected_suffix = '/vwip'
+        elif api_version and re.match(r'^\d+\.\d+\.\d+(-rc\.\d+|-alpha\.\d+)?
+        
+        # Determine expected URL suffix based on version
+        if api_version == 'wip':
+            expected_suffix = '/vwip'
+        elif api_version and re.match(r'^\d+\.\d+\.\d+(-rc\.\d+|-alpha\.\d+)?$', api_version):
+            # Same logic as in version-URL consistency check
+            version_parts = api_version.split('.')
+            major = int(version_parts[0])
+            minor = int(version_parts[1])
+            
+            if major == 0:
+                base_version = f"v{major}.{minor}"
+            else:
+                base_version = f"v{major}"
+            
+            if '-rc.' in api_version:
+                rc_num = api_version.split('-rc.')[1]
+                expected_suffix = f"/{base_version}rc{rc_num}"
+            elif '-alpha.' in api_version:
+                alpha_num = api_version.split('-alpha.')[1]
+                expected_suffix = f"/{base_version}alpha{alpha_num}"
+            else:
+                expected_suffix = f"/{base_version}"
+        else:
+            return  # Invalid version, skip URL validation
+        
+        # Check each found URL
+        for url_api_name, url_version, rest_of_path in found_urls:
+            full_url = f"/{url_api_name}/{url_version}{rest_of_path}"
+            
+            # First check API name consistency
+            if url_api_name != api_name:
+                result.issues.append(ValidationIssue(
+                    Severity.CRITICAL, "Test URLs",
+                    f"Test file uses incorrect API name `{url_api_name}` (should be `{api_name}`)",
+                    f"{test_file}: URL '{full_url}'",
+                    f"Update to use correct API name: `{api_name}`"
+                ))
+            
+            # Then check version suffix - but only if API name is correct and we have a valid expected suffix
+            elif expected_suffix and url_version == 'wip':
+                result.issues.append(ValidationIssue(
+                    Severity.CRITICAL, "Test URLs",
+                    f"Test file uses invalid `/wip` suffix (should be `/vwip` for WIP versions)",
+                    f"{test_file}: URL '{full_url}'",
+                    f"Update to use `{expected_suffix}`"
+                ))
+            elif expected_suffix and api_version != 'wip' and url_version == 'vwip':
+                result.issues.append(ValidationIssue(
+                    Severity.CRITICAL, "Test URLs",
+                    f"Test file uses `/vwip` for non-WIP version `{api_version}`",
+                    f"{test_file}: URL '{full_url}'",
+                    f"Update to use `{expected_suffix}`"
+                ))
+            elif expected_suffix and url_version != expected_suffix.lstrip('/'):
+                result.issues.append(ValidationIssue(
+                    Severity.MEDIUM, "Test URLs",
+                    f"Test file URL version `/{url_version}` doesn't match API version `{api_version}`",
+                    f"{test_file}: URL '{full_url}'",
+                    f"Expected: `{expected_suffix}`"
                 ))
 
     def _validate_test_version_line(self, feature_line: str, api_version: str, api_title: str) -> bool:
