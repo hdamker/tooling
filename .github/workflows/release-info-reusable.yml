@@ -1,6 +1,6 @@
 # .github/workflows/release-info-reusable.yml
 #
-# CAMARA Release Information - Reusable Workflow (Simplified)
+# CAMARA Release Information - Reusable Workflow (Fixed)
 #
 # Purpose: Generates release information markdown for CAMARA API repository README files.
 # Called by: release-info-trigger.yml workflow or any other workflow
@@ -380,6 +380,267 @@ jobs:
           EOF
           
           chmod +x scripts/compare_versions.sh
+          
+          # Create Pre-release Formatter Script
+          cat > scripts/format_prerelease.sh << 'EOF'
+          #!/bin/bash
+          TAG="$1"
+          APIS="$2"
+          IS_NEW="$3"
+          
+          OUTPUT_FILE="release_info.md"
+          
+          # Start the pre-release line
+          if [[ "$IS_NEW" == "NEW" ]]; then
+            echo -n "**NEW**: Pre-release [$TAG](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases/tag/$TAG) with " >> "$OUTPUT_FILE"
+          else
+            echo -n "Pre-release [$TAG](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases/tag/$TAG) with " >> "$OUTPUT_FILE"
+          fi
+          
+          # Count APIs
+          IFS=';' read -ra API_LIST <<< "$APIS"
+          API_COUNT=0
+          for api in "${API_LIST[@]}"; do
+            if [[ -n "$api" ]]; then
+              ((API_COUNT++))
+            fi
+          done
+          
+          # Format based on count
+          if [[ $API_COUNT -eq 1 ]]; then
+            # Single API - inline format
+            for api in "${API_LIST[@]}"; do
+              if [[ -n "$api" ]]; then
+                IFS=':' read -r name version <<< "$api"
+                echo "${name} ${version} is available." >> "$OUTPUT_FILE"
+              fi
+            done
+          elif [[ $API_COUNT -eq 2 ]]; then
+            # Two APIs - inline format with "and"
+            first=""
+            second=""
+            for api in "${API_LIST[@]}"; do
+              if [[ -n "$api" ]]; then
+                IFS=':' read -r name version <<< "$api"
+                if [[ -z "$first" ]]; then
+                  first="${name} ${version}"
+                else
+                  second="${name} ${version}"
+                fi
+              fi
+            done
+            echo "${first} and ${second} is available." >> "$OUTPUT_FILE"
+          else
+            # Multiple APIs (3+) - list format
+            echo ":" >> "$OUTPUT_FILE"
+            for api in "${API_LIST[@]}"; do
+              if [[ -n "$api" ]]; then
+                IFS=':' read -r name version <<< "$api"
+                echo "  - ${name} ${version}" >> "$OUTPUT_FILE"
+              fi
+            done
+          fi
+          EOF
+          
+          chmod +x scripts/format_prerelease.sh
+          
+          # Create Variant 1 Generator (Latest release and pre-release)
+          cat > scripts/generate_variant1.sh << 'EOF'
+          #!/bin/bash
+          OUTPUT_FILE="release_info.md"
+          
+          # Generate public release section
+          echo "### Latest Public Release" >> "$OUTPUT_FILE"
+          echo "" >> "$OUTPUT_FILE"
+          
+          # Public release content
+          if [[ "$IS_PR" == "true" && "$PR_RELEASE_TYPE" == "public" && "$LATEST_PUBLIC" == "$PR_RELEASE_TAG" ]]; then
+            echo "The latest public release is [$PR_RELEASE_TAG](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases/tag/$PR_RELEASE_TAG) and contains the following API definitions:" >> "$OUTPUT_FILE"
+            echo "" >> "$OUTPUT_FILE"
+            
+            # Parse PR APIs
+            IFS=';' read -ra API_LIST <<< "$PR_APIS"
+            for api in "${API_LIST[@]}"; do
+              if [[ -n "$api" ]]; then
+                IFS=':' read -r name version <<< "$api"
+                BASE_URL="https://raw.githubusercontent.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/$PR_RELEASE_TAG/code/API_definitions"
+                YAML_URL="${BASE_URL}/${name}.yaml"
+                SWAGGER_URL="https://camaraproject.github.io/swagger-ui/?url=${YAML_URL}"
+                REDOC_URL="https://redocly.github.io/redoc/?url=${YAML_URL}"
+                
+                echo "* **${name}** ${version} ([Swagger UI](${SWAGGER_URL}) | [Redoc](${REDOC_URL}) | [YAML](${YAML_URL}))" >> "$OUTPUT_FILE"
+              fi
+            done
+          else
+            # Existing latest release
+            RELEASE_URL="https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases/tag/$LATEST_PUBLIC"
+            echo "The latest public release is [$LATEST_PUBLIC]($RELEASE_URL) and contains the following API definitions:" >> "$OUTPUT_FILE"
+            echo "" >> "$OUTPUT_FILE"
+            
+            # Extract APIs from latest release
+            APIS=$(./scripts/extract_apis.sh "$LATEST_PUBLIC" "${{ steps.parse.outputs.repo_owner }}" "${{ steps.parse.outputs.repo_name }}")
+            
+            IFS=';' read -ra API_LIST <<< "$APIS"
+            for api in "${API_LIST[@]}"; do
+              if [[ -n "$api" ]]; then
+                IFS=':' read -r name version <<< "$api"
+                BASE_URL="https://raw.githubusercontent.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/$LATEST_PUBLIC/code/API_definitions"
+                YAML_URL="${BASE_URL}/${name}.yaml"
+                SWAGGER_URL="https://camaraproject.github.io/swagger-ui/?url=${YAML_URL}"
+                REDOC_URL="https://redocly.github.io/redoc/?url=${YAML_URL}"
+                
+                echo "* **${name}** ${version} ([Swagger UI](${SWAGGER_URL}) | [Redoc](${REDOC_URL}) | [YAML](${YAML_URL}))" >> "$OUTPUT_FILE"
+              fi
+            done
+          fi
+          
+          echo "" >> "$OUTPUT_FILE"
+          echo "For detailed information, see the [CHANGELOG.md](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/blob/main/CHANGELOG.md) and [Releases](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases)." >> "$OUTPUT_FILE"
+          echo "" >> "$OUTPUT_FILE"
+          echo "### Pre-release" >> "$OUTPUT_FILE"
+          echo "" >> "$OUTPUT_FILE"
+          
+          # Pre-release content
+          if [[ "$IS_PR" == "true" && "$PR_RELEASE_TYPE" == "prerelease" && "$NEWEST_PRERELEASE" == "$PR_RELEASE_TAG" ]]; then
+            ./scripts/format_prerelease.sh "$PR_RELEASE_TAG" "$PR_APIS" "NEW"
+          else
+            # Check if newest prerelease is recent
+            IS_RECENT="false"
+            for recent in $RECENT_PRERELEASES; do
+              if [[ "$recent" == "$NEWEST_PRERELEASE" ]]; then
+                IS_RECENT="true"
+                break
+              fi
+            done
+            
+            APIS=$(./scripts/extract_apis.sh "$NEWEST_PRERELEASE" "${{ steps.parse.outputs.repo_owner }}" "${{ steps.parse.outputs.repo_name }}")
+            
+            if [[ "$IS_RECENT" == "true" ]]; then
+              ./scripts/format_prerelease.sh "$NEWEST_PRERELEASE" "$APIS" "NEW"
+            else
+              ./scripts/format_prerelease.sh "$NEWEST_PRERELEASE" "$APIS" ""
+            fi
+          fi
+          
+          echo "" >> "$OUTPUT_FILE"
+          echo "For previous releases and pre-releases see the [CHANGELOG.md](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/blob/main/CHANGELOG.md) and [Releases](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases)" >> "$OUTPUT_FILE"
+          EOF
+          
+          chmod +x scripts/generate_variant1.sh
+          
+          # Create Variant 2 Generator (Latest release and no current pre-release)
+          cat > scripts/generate_variant2.sh << 'EOF'
+          #!/bin/bash
+          OUTPUT_FILE="release_info.md"
+          
+          echo "For detailed information, see the [CHANGELOG.md](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/blob/main/CHANGELOG.md) and [Releases](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases)." >> "$OUTPUT_FILE"
+          echo "" >> "$OUTPUT_FILE"
+          echo "### Latest Public Release" >> "$OUTPUT_FILE"
+          echo "" >> "$OUTPUT_FILE"
+          
+          # Same public release logic as variant 1
+          if [[ "$IS_PR" == "true" && "$PR_RELEASE_TYPE" == "public" && "$LATEST_PUBLIC" == "$PR_RELEASE_TAG" ]]; then
+            echo "The latest public release is [$PR_RELEASE_TAG](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases/tag/$PR_RELEASE_TAG) and contains the following API definitions:" >> "$OUTPUT_FILE"
+            echo "" >> "$OUTPUT_FILE"
+            
+            IFS=';' read -ra API_LIST <<< "$PR_APIS"
+            for api in "${API_LIST[@]}"; do
+              if [[ -n "$api" ]]; then
+                IFS=':' read -r name version <<< "$api"
+                BASE_URL="https://raw.githubusercontent.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/$PR_RELEASE_TAG/code/API_definitions"
+                YAML_URL="${BASE_URL}/${name}.yaml"
+                SWAGGER_URL="https://camaraproject.github.io/swagger-ui/?url=${YAML_URL}"
+                REDOC_URL="https://redocly.github.io/redoc/?url=${YAML_URL}"
+                
+                echo "* **${name}** ${version} ([Swagger UI](${SWAGGER_URL}) | [Redoc](${REDOC_URL}) | [YAML](${YAML_URL}))" >> "$OUTPUT_FILE"
+              fi
+            done
+          else
+            RELEASE_URL="https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases/tag/$LATEST_PUBLIC"
+            echo "The latest public release is [$LATEST_PUBLIC]($RELEASE_URL) and contains the following API definitions:" >> "$OUTPUT_FILE"
+            echo "" >> "$OUTPUT_FILE"
+            
+            APIS=$(./scripts/extract_apis.sh "$LATEST_PUBLIC" "${{ steps.parse.outputs.repo_owner }}" "${{ steps.parse.outputs.repo_name }}")
+            
+            IFS=';' read -ra API_LIST <<< "$APIS"
+            for api in "${API_LIST[@]}"; do
+              if [[ -n "$api" ]]; then
+                IFS=':' read -r name version <<< "$api"
+                BASE_URL="https://raw.githubusercontent.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/$LATEST_PUBLIC/code/API_definitions"
+                YAML_URL="${BASE_URL}/${name}.yaml"
+                SWAGGER_URL="https://camaraproject.github.io/swagger-ui/?url=${YAML_URL}"
+                REDOC_URL="https://redocly.github.io/redoc/?url=${YAML_URL}"
+                
+                echo "* **${name}** ${version} ([Swagger UI](${SWAGGER_URL}) | [Redoc](${REDOC_URL}) | [YAML](${YAML_URL}))" >> "$OUTPUT_FILE"
+              fi
+            done
+          fi
+          
+          echo "" >> "$OUTPUT_FILE"
+          echo "### Pre-releases" >> "$OUTPUT_FILE"
+          echo "" >> "$OUTPUT_FILE"
+          echo "There is no current pre-release, please refer to the latest release above. For previous releases and pre-releases see the [CHANGELOG.md](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/blob/main/CHANGELOG.md) and [Releases](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases)" >> "$OUTPUT_FILE"
+          EOF
+          
+          chmod +x scripts/generate_variant2.sh
+          
+          # Create Variant 3 Generator (Pre-release only)
+          cat > scripts/generate_variant3.sh << 'EOF'
+          #!/bin/bash
+          OUTPUT_FILE="release_info.md"
+          
+          echo "### Latest Public Release" >> "$OUTPUT_FILE"
+          echo "" >> "$OUTPUT_FILE"
+          echo "The repository has not yet a public release." >> "$OUTPUT_FILE"
+          echo "" >> "$OUTPUT_FILE"
+          echo "### Pre-release" >> "$OUTPUT_FILE"
+          echo "" >> "$OUTPUT_FILE"
+          
+          if [[ "$IS_PR" == "true" && "$PR_RELEASE_TYPE" == "prerelease" ]]; then
+            ./scripts/format_prerelease.sh "$PR_RELEASE_TAG" "$PR_APIS" "NEW"
+          else
+            # Check if newest prerelease is recent
+            IS_RECENT="false"
+            for recent in $RECENT_PRERELEASES; do
+              if [[ "$recent" == "$NEWEST_PRERELEASE" ]]; then
+                IS_RECENT="true"
+                break
+              fi
+            done
+            
+            APIS=$(./scripts/extract_apis.sh "$NEWEST_PRERELEASE" "${{ steps.parse.outputs.repo_owner }}" "${{ steps.parse.outputs.repo_name }}")
+            
+            if [[ "$IS_RECENT" == "true" ]]; then
+              ./scripts/format_prerelease.sh "$NEWEST_PRERELEASE" "$APIS" "NEW"
+            else
+              ./scripts/format_prerelease.sh "$NEWEST_PRERELEASE" "$APIS" ""
+            fi
+          fi
+          
+          echo "" >> "$OUTPUT_FILE"
+          echo "For previous releases and pre-releases see the [CHANGELOG.md](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/blob/main/CHANGELOG.md) and [Releases](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases)" >> "$OUTPUT_FILE"
+          EOF
+          
+          chmod +x scripts/generate_variant3.sh
+          
+          # Create Variant 4 Generator (No releases)
+          cat > scripts/generate_variant4.sh << 'EOF'
+          #!/bin/bash
+          OUTPUT_FILE="release_info.md"
+          
+          echo "### Latest Public Release" >> "$OUTPUT_FILE"
+          echo "" >> "$OUTPUT_FILE"
+          echo "The repository has no public releases yet" >> "$OUTPUT_FILE"
+          echo "" >> "$OUTPUT_FILE"
+          echo "### Pre-release" >> "$OUTPUT_FILE"
+          echo "" >> "$OUTPUT_FILE"
+          echo "The repository has no pre-release yet. For work in progress see the content of the main branch and in open pull requests." >> "$OUTPUT_FILE"
+          EOF
+          
+          chmod +x scripts/generate_variant4.sh
+          
+          echo "✅ All generation scripts created successfully"
+          ls -la scripts/
 
       - name: Prepare Generation Data
         id: prep_data
@@ -486,269 +747,6 @@ jobs:
             echo "❌ Failed to generate release information"
             exit 1
           fi
-
-      - name: Create Variant 1 Generator
-        if: env.HAS_PUBLIC == 'true' && (env.RECENT_PRERELEASES != '' || (env.IS_PR == 'true' && env.PR_RELEASE_TYPE == 'prerelease'))
-        run: |
-          cat > scripts/generate_variant1.sh << 'EOF'
-          #!/bin/bash
-          OUTPUT_FILE="release_info.md"
-          
-          # Generate public release section
-          echo "### Latest Public Release" >> "$OUTPUT_FILE"
-          echo "" >> "$OUTPUT_FILE"
-          
-          # Public release content
-          if [[ "$IS_PR" == "true" && "$PR_RELEASE_TYPE" == "public" && "$LATEST_PUBLIC" == "$PR_RELEASE_TAG" ]]; then
-            echo "The latest public release is [$PR_RELEASE_TAG](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases/tag/$PR_RELEASE_TAG) and contains the following API definitions:" >> "$OUTPUT_FILE"
-            echo "" >> "$OUTPUT_FILE"
-            
-            # Parse PR APIs
-            IFS=';' read -ra API_LIST <<< "$PR_APIS"
-            for api in "${API_LIST[@]}"; do
-              if [[ -n "$api" ]]; then
-                IFS=':' read -r name version <<< "$api"
-                BASE_URL="https://raw.githubusercontent.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/$PR_RELEASE_TAG/code/API_definitions"
-                YAML_URL="${BASE_URL}/${name}.yaml"
-                SWAGGER_URL="https://camaraproject.github.io/swagger-ui/?url=${YAML_URL}"
-                REDOC_URL="https://redocly.github.io/redoc/?url=${YAML_URL}"
-                
-                echo "* **${name}** ${version} ([Swagger UI](${SWAGGER_URL}) | [Redoc](${REDOC_URL}) | [YAML](${YAML_URL}))" >> "$OUTPUT_FILE"
-              fi
-            done
-          else
-            # Existing latest release
-            RELEASE_URL="https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases/tag/$LATEST_PUBLIC"
-            echo "The latest public release is [$LATEST_PUBLIC]($RELEASE_URL) and contains the following API definitions:" >> "$OUTPUT_FILE"
-            echo "" >> "$OUTPUT_FILE"
-            
-            # Extract APIs from latest release
-            APIS=$(./scripts/extract_apis.sh "$LATEST_PUBLIC" "${{ steps.parse.outputs.repo_owner }}" "${{ steps.parse.outputs.repo_name }}")
-            
-            IFS=';' read -ra API_LIST <<< "$APIS"
-            for api in "${API_LIST[@]}"; do
-              if [[ -n "$api" ]]; then
-                IFS=':' read -r name version <<< "$api"
-                BASE_URL="https://raw.githubusercontent.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/$LATEST_PUBLIC/code/API_definitions"
-                YAML_URL="${BASE_URL}/${name}.yaml"
-                SWAGGER_URL="https://camaraproject.github.io/swagger-ui/?url=${YAML_URL}"
-                REDOC_URL="https://redocly.github.io/redoc/?url=${YAML_URL}"
-                
-                echo "* **${name}** ${version} ([Swagger UI](${SWAGGER_URL}) | [Redoc](${REDOC_URL}) | [YAML](${YAML_URL}))" >> "$OUTPUT_FILE"
-              fi
-            done
-          fi
-          
-          echo "" >> "$OUTPUT_FILE"
-          echo "For detailed information, see the [CHANGELOG.md](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/blob/main/CHANGELOG.md) and [Releases](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases)." >> "$OUTPUT_FILE"
-          echo "" >> "$OUTPUT_FILE"
-          echo "### Pre-release" >> "$OUTPUT_FILE"
-          echo "" >> "$OUTPUT_FILE"
-          
-          # Pre-release content
-          if [[ "$IS_PR" == "true" && "$PR_RELEASE_TYPE" == "prerelease" && "$NEWEST_PRERELEASE" == "$PR_RELEASE_TAG" ]]; then
-            ./scripts/format_prerelease.sh "$PR_RELEASE_TAG" "$PR_APIS" "NEW"
-          else
-            # Check if newest prerelease is recent
-            IS_RECENT="false"
-            for recent in $RECENT_PRERELEASES; do
-              if [[ "$recent" == "$NEWEST_PRERELEASE" ]]; then
-                IS_RECENT="true"
-                break
-              fi
-            done
-            
-            APIS=$(./scripts/extract_apis.sh "$NEWEST_PRERELEASE" "${{ steps.parse.outputs.repo_owner }}" "${{ steps.parse.outputs.repo_name }}")
-            
-            if [[ "$IS_RECENT" == "true" ]]; then
-              ./scripts/format_prerelease.sh "$NEWEST_PRERELEASE" "$APIS" "NEW"
-            else
-              ./scripts/format_prerelease.sh "$NEWEST_PRERELEASE" "$APIS" ""
-            fi
-          fi
-          
-          echo "" >> "$OUTPUT_FILE"
-          echo "For previous releases and pre-releases see the [CHANGELOG.md](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/blob/main/CHANGELOG.md) and [Releases](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases)" >> "$OUTPUT_FILE"
-          EOF
-          
-          chmod +x scripts/generate_variant1.sh
-
-      - name: Create Pre-release Formatter
-        run: |
-          cat > scripts/format_prerelease.sh << 'EOF'
-          #!/bin/bash
-          TAG="$1"
-          APIS="$2"
-          IS_NEW="$3"
-          
-          OUTPUT_FILE="release_info.md"
-          
-          # Start the pre-release line
-          if [[ "$IS_NEW" == "NEW" ]]; then
-            echo -n "**NEW**: Pre-release [$TAG](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases/tag/$TAG) with " >> "$OUTPUT_FILE"
-          else
-            echo -n "Pre-release [$TAG](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases/tag/$TAG) with " >> "$OUTPUT_FILE"
-          fi
-          
-          # Count APIs
-          IFS=';' read -ra API_LIST <<< "$APIS"
-          API_COUNT=0
-          for api in "${API_LIST[@]}"; do
-            if [[ -n "$api" ]]; then
-              ((API_COUNT++))
-            fi
-          done
-          
-          # Format based on count
-          if [[ $API_COUNT -eq 1 ]]; then
-            # Single API - inline format
-            for api in "${API_LIST[@]}"; do
-              if [[ -n "$api" ]]; then
-                IFS=':' read -r name version <<< "$api"
-                echo "${name} ${version} is available." >> "$OUTPUT_FILE"
-              fi
-            done
-          elif [[ $API_COUNT -eq 2 ]]; then
-            # Two APIs - inline format with "and"
-            first=""
-            second=""
-            for api in "${API_LIST[@]}"; do
-              if [[ -n "$api" ]]; then
-                IFS=':' read -r name version <<< "$api"
-                if [[ -z "$first" ]]; then
-                  first="${name} ${version}"
-                else
-                  second="${name} ${version}"
-                fi
-              fi
-            done
-            echo "${first} and ${second} is available." >> "$OUTPUT_FILE"
-          else
-            # Multiple APIs (3+) - list format
-            echo ":" >> "$OUTPUT_FILE"
-            for api in "${API_LIST[@]}"; do
-              if [[ -n "$api" ]]; then
-                IFS=':' read -r name version <<< "$api"
-                echo "  - ${name} ${version}" >> "$OUTPUT_FILE"
-              fi
-            done
-          fi
-          EOF
-          
-          chmod +x scripts/format_prerelease.sh
-
-      - name: Create Other Variant Generators
-        run: |
-          # Variant 2: Latest release and no current pre-release
-          cat > scripts/generate_variant2.sh << 'EOF'
-          #!/bin/bash
-          OUTPUT_FILE="release_info.md"
-          
-          echo "For detailed information, see the [CHANGELOG.md](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/blob/main/CHANGELOG.md) and [Releases](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases)." >> "$OUTPUT_FILE"
-          echo "" >> "$OUTPUT_FILE"
-          echo "### Latest Public Release" >> "$OUTPUT_FILE"
-          echo "" >> "$OUTPUT_FILE"
-          
-          # Same public release logic as variant 1
-          if [[ "$IS_PR" == "true" && "$PR_RELEASE_TYPE" == "public" && "$LATEST_PUBLIC" == "$PR_RELEASE_TAG" ]]; then
-            echo "The latest public release is [$PR_RELEASE_TAG](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases/tag/$PR_RELEASE_TAG) and contains the following API definitions:" >> "$OUTPUT_FILE"
-            echo "" >> "$OUTPUT_FILE"
-            
-            IFS=';' read -ra API_LIST <<< "$PR_APIS"
-            for api in "${API_LIST[@]}"; do
-              if [[ -n "$api" ]]; then
-                IFS=':' read -r name version <<< "$api"
-                BASE_URL="https://raw.githubusercontent.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/$PR_RELEASE_TAG/code/API_definitions"
-                YAML_URL="${BASE_URL}/${name}.yaml"
-                SWAGGER_URL="https://camaraproject.github.io/swagger-ui/?url=${YAML_URL}"
-                REDOC_URL="https://redocly.github.io/redoc/?url=${YAML_URL}"
-                
-                echo "* **${name}** ${version} ([Swagger UI](${SWAGGER_URL}) | [Redoc](${REDOC_URL}) | [YAML](${YAML_URL}))" >> "$OUTPUT_FILE"
-              fi
-            done
-          else
-            RELEASE_URL="https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases/tag/$LATEST_PUBLIC"
-            echo "The latest public release is [$LATEST_PUBLIC]($RELEASE_URL) and contains the following API definitions:" >> "$OUTPUT_FILE"
-            echo "" >> "$OUTPUT_FILE"
-            
-            APIS=$(./scripts/extract_apis.sh "$LATEST_PUBLIC" "${{ steps.parse.outputs.repo_owner }}" "${{ steps.parse.outputs.repo_name }}")
-            
-            IFS=';' read -ra API_LIST <<< "$APIS"
-            for api in "${API_LIST[@]}"; do
-              if [[ -n "$api" ]]; then
-                IFS=':' read -r name version <<< "$api"
-                BASE_URL="https://raw.githubusercontent.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/$LATEST_PUBLIC/code/API_definitions"
-                YAML_URL="${BASE_URL}/${name}.yaml"
-                SWAGGER_URL="https://camaraproject.github.io/swagger-ui/?url=${YAML_URL}"
-                REDOC_URL="https://redocly.github.io/redoc/?url=${YAML_URL}"
-                
-                echo "* **${name}** ${version} ([Swagger UI](${SWAGGER_URL}) | [Redoc](${REDOC_URL}) | [YAML](${YAML_URL}))" >> "$OUTPUT_FILE"
-              fi
-            done
-          fi
-          
-          echo "" >> "$OUTPUT_FILE"
-          echo "### Pre-releases" >> "$OUTPUT_FILE"
-          echo "" >> "$OUTPUT_FILE"
-          echo "There is no current pre-release, please refer to the latest release above. For previous releases and pre-releases see the [CHANGELOG.md](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/blob/main/CHANGELOG.md) and [Releases](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases)" >> "$OUTPUT_FILE"
-          EOF
-          
-          chmod +x scripts/generate_variant2.sh
-          
-          # Variant 3: Pre-release only
-          cat > scripts/generate_variant3.sh << 'EOF'
-          #!/bin/bash
-          OUTPUT_FILE="release_info.md"
-          
-          echo "### Latest Public Release" >> "$OUTPUT_FILE"
-          echo "" >> "$OUTPUT_FILE"
-          echo "The repository has not yet a public release." >> "$OUTPUT_FILE"
-          echo "" >> "$OUTPUT_FILE"
-          echo "### Pre-release" >> "$OUTPUT_FILE"
-          echo "" >> "$OUTPUT_FILE"
-          
-          if [[ "$IS_PR" == "true" && "$PR_RELEASE_TYPE" == "prerelease" ]]; then
-            ./scripts/format_prerelease.sh "$PR_RELEASE_TAG" "$PR_APIS" "NEW"
-          else
-            # Check if newest prerelease is recent
-            IS_RECENT="false"
-            for recent in $RECENT_PRERELEASES; do
-              if [[ "$recent" == "$NEWEST_PRERELEASE" ]]; then
-                IS_RECENT="true"
-                break
-              fi
-            done
-            
-            APIS=$(./scripts/extract_apis.sh "$NEWEST_PRERELEASE" "${{ steps.parse.outputs.repo_owner }}" "${{ steps.parse.outputs.repo_name }}")
-            
-            if [[ "$IS_RECENT" == "true" ]]; then
-              ./scripts/format_prerelease.sh "$NEWEST_PRERELEASE" "$APIS" "NEW"
-            else
-              ./scripts/format_prerelease.sh "$NEWEST_PRERELEASE" "$APIS" ""
-            fi
-          fi
-          
-          echo "" >> "$OUTPUT_FILE"
-          echo "For previous releases and pre-releases see the [CHANGELOG.md](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/blob/main/CHANGELOG.md) and [Releases](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases)" >> "$OUTPUT_FILE"
-          EOF
-          
-          chmod +x scripts/generate_variant3.sh
-          
-          # Variant 4: No releases
-          cat > scripts/generate_variant4.sh << 'EOF'
-          #!/bin/bash
-          OUTPUT_FILE="release_info.md"
-          
-          echo "### Latest Public Release" >> "$OUTPUT_FILE"
-          echo "" >> "$OUTPUT_FILE"
-          echo "The repository has no public releases yet" >> "$OUTPUT_FILE"
-          echo "" >> "$OUTPUT_FILE"
-          echo "### Pre-release" >> "$OUTPUT_FILE"
-          echo "" >> "$OUTPUT_FILE"
-          echo "The repository has no pre-release yet. For work in progress see the content of the main branch and in open pull requests." >> "$OUTPUT_FILE"
-          EOF
-          
-          chmod +x scripts/generate_variant4.sh
 
       - name: Finalize and Output Results
         id: finalize
