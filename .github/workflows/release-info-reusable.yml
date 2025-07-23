@@ -1,0 +1,466 @@
+# .github/workflows/release-info-reusable.yml
+#
+# CAMARA Release Information - Reusable Workflow
+#
+# Purpose: Generates release information markdown for CAMARA API repository README files.
+# Called by: release-info-trigger.yml workflow or any other workflow
+#
+# Exit codes:
+#   0 - Success: Release information generated successfully
+#   1 - Error: Failed to generate release information
+#
+# Outputs:
+#   release_info_content - Base64 encoded markdown content (for preserving formatting)
+#   generation_status - 'success' or 'error'
+#   error_message - Error details if generation failed
+
+name: 'CAMARA Release Information - Reusable'
+
+on:
+  workflow_call:
+    inputs:
+      target_url:
+        required: true
+        type: string
+        description: "Repository URL or Release PR URL"
+    outputs:
+      release_info_content:
+        description: "Generated release information markdown (base64 encoded)"
+        value: ${{ jobs.generate-release-info.outputs.release_info_content }}
+      generation_status:
+        description: "Status of the generation: 'success' or 'error'"
+        value: ${{ jobs.generate-release-info.outputs.generation_status }}
+      error_message:
+        description: "Error message if generation failed"
+        value: ${{ jobs.generate-release-info.outputs.error_message }}
+
+jobs:
+  generate-release-info:
+    runs-on: ubuntu-latest
+    outputs:
+      release_info_content: ${{ steps.generate.outputs.release_info_content }}
+      generation_status: ${{ steps.generate.outputs.generation_status }}
+      error_message: ${{ steps.generate.outputs.error_message }}
+    steps:
+      - name: Parse and Validate Input
+        id: parse
+        run: |
+          TARGET_URL="${{ inputs.target_url }}"
+          
+          echo "🔍 Parsing input URL: $TARGET_URL"
+          
+          # Check if it's a PR URL
+          if [[ "$TARGET_URL" =~ ^https://github\.com/([^/]+)/([^/]+)/pull/([0-9]+)$ ]]; then
+            REPO_OWNER="${BASH_REMATCH[1]}"
+            REPO_NAME="${BASH_REMATCH[2]}"
+            PR_NUMBER="${BASH_REMATCH[3]}"
+            
+            echo "✅ Detected PR URL"
+            echo "  Owner: $REPO_OWNER"
+            echo "  Repository: $REPO_NAME"
+            echo "  PR Number: $PR_NUMBER"
+            
+            echo "input_type=pull_request" >> $GITHUB_OUTPUT
+            echo "repo_owner=$REPO_OWNER" >> $GITHUB_OUTPUT
+            echo "repo_name=$REPO_NAME" >> $GITHUB_OUTPUT
+            echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+            
+          # Check if it's a repository URL
+          elif [[ "$TARGET_URL" =~ ^https://github\.com/([^/]+)/([^/]+)/?$ ]]; then
+            REPO_OWNER="${BASH_REMATCH[1]}"
+            REPO_NAME="${BASH_REMATCH[2]}"
+            
+            echo "✅ Detected Repository URL"
+            echo "  Owner: $REPO_OWNER"
+            echo "  Repository: $REPO_NAME"
+            
+            echo "input_type=repository" >> $GITHUB_OUTPUT
+            echo "repo_owner=$REPO_OWNER" >> $GITHUB_OUTPUT
+            echo "repo_name=$REPO_NAME" >> $GITHUB_OUTPUT
+            echo "pr_number=" >> $GITHUB_OUTPUT
+            
+          else
+            echo "❌ Invalid URL format: $TARGET_URL"
+            echo "Expected formats:"
+            echo "  - Repository: https://github.com/camaraproject/QualityOnDemand"
+            echo "  - Pull Request: https://github.com/camaraproject/QualityOnDemand/pull/123"
+            exit 1
+          fi
+          
+          # Validate CAMARA organization
+          if [[ "$REPO_OWNER" != "camaraproject" ]]; then
+            echo "⚠️ Warning: Repository is not from camaraproject organization"
+            echo "  Found: $REPO_OWNER"
+            echo "  Expected: camaraproject"
+            # Not failing here to allow testing with forks
+          fi
+
+      - name: Get PR Details
+        id: pr_details
+        if: steps.parse.outputs.input_type == 'pull_request'
+        run: |
+          REPO_OWNER="${{ steps.parse.outputs.repo_owner }}"
+          REPO_NAME="${{ steps.parse.outputs.repo_name }}"
+          PR_NUMBER="${{ steps.parse.outputs.pr_number }}"
+          
+          echo "🔍 Fetching PR details for $REPO_OWNER/$REPO_NAME#$PR_NUMBER"
+          
+          # Get PR details using GitHub API
+          PR_DATA=$(gh api repos/$REPO_OWNER/$REPO_NAME/pulls/$PR_NUMBER 2>/dev/null) || {
+            echo "❌ Failed to fetch PR details"
+            exit 1
+          }
+          
+          # Extract PR head SHA and repository
+          PR_HEAD_SHA=$(echo "$PR_DATA" | jq -r '.head.sha')
+          PR_HEAD_REPO=$(echo "$PR_DATA" | jq -r '.head.repo.full_name')
+          PR_STATE=$(echo "$PR_DATA" | jq -r '.state')
+          
+          echo "PR State: $PR_STATE"
+          echo "PR Head SHA: $PR_HEAD_SHA"
+          echo "PR Head Repo: $PR_HEAD_REPO"
+          
+          if [[ "$PR_STATE" != "open" ]]; then
+            echo "⚠️ Warning: PR is not open (state: $PR_STATE)"
+          fi
+          
+          echo "pr_head_sha=$PR_HEAD_SHA" >> $GITHUB_OUTPUT
+          echo "pr_head_repo=$PR_HEAD_REPO" >> $GITHUB_OUTPUT
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch Repository Releases
+        id: fetch_releases
+        run: |
+          echo "📦 Fetching releases from ${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}"
+          
+          # Try to fetch the latest release using GitHub's latest release functionality
+          LATEST_RELEASE_JSON=$(gh api repos/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases/latest 2>/dev/null || echo "null")
+          
+          if [[ "$LATEST_RELEASE_JSON" != "null" ]]; then
+            # Check if it has rx.y tag format
+            LATEST_TAG=$(echo "$LATEST_RELEASE_JSON" | jq -r '.tag_name')
+            if [[ "$LATEST_TAG" =~ ^r[0-9]+\.[0-9]+$ ]]; then
+              echo "Latest release (via GitHub): $LATEST_TAG"
+              echo "latest_public_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+              echo "$LATEST_RELEASE_JSON" > latest_release.json
+            else
+              echo "Latest release tag '$LATEST_TAG' doesn't match rx.y format"
+              echo "latest_public_tag=" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "No latest release found via GitHub API"
+            echo "latest_public_tag=" >> $GITHUB_OUTPUT
+          fi
+          
+          # Fetch all releases for pre-release checking
+          RELEASES_JSON=$(gh api repos/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases --paginate 2>/dev/null) || {
+            echo "❌ Failed to fetch releases"
+            exit 1
+          }
+          
+          # Filter releases with rx.y tags
+          VALID_RELEASES=$(echo "$RELEASES_JSON" | jq '[.[] | select(.tag_name | test("^r[0-9]+\\.[0-9]+$"))]')
+          
+          # Count releases
+          RELEASE_COUNT=$(echo "$VALID_RELEASES" | jq 'length')
+          echo "Found $RELEASE_COUNT releases with rx.y tags"
+          
+          # Save for next steps
+          echo "$VALID_RELEASES" > releases.json
+          
+          # Find pre-releases newer than 45 days
+          CUTOFF_DATE=$(date -u -d "45 days ago" +%Y-%m-%dT%H:%M:%SZ)
+          echo "Checking for pre-releases newer than: $CUTOFF_DATE"
+          
+          RECENT_PRERELEASES=$(echo "$VALID_RELEASES" | jq --arg cutoff "$CUTOFF_DATE" '[.[] | select(.prerelease == true and .published_at > $cutoff)] | sort_by(.published_at) | reverse')
+          PRERELEASE_COUNT=$(echo "$RECENT_PRERELEASES" | jq 'length')
+          
+          echo "Found $PRERELEASE_COUNT recent pre-releases"
+          echo "$RECENT_PRERELEASES" > recent_prereleases.json
+          
+          echo "release_count=$RELEASE_COUNT" >> $GITHUB_OUTPUT
+          echo "recent_prerelease_count=$PRERELEASE_COUNT" >> $GITHUB_OUTPUT
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Analyze PR Content
+        id: analyze_pr
+        if: steps.parse.outputs.input_type == 'pull_request'
+        run: |
+          echo "🔍 Analyzing PR content"
+          
+          # Create a temporary directory for PR checkout
+          mkdir -p pr-content
+          cd pr-content
+          
+          # Clone the PR branch
+          git clone https://github.com/${{ steps.pr_details.outputs.pr_head_repo }}.git . 2>/dev/null || {
+            echo "❌ Failed to clone PR repository"
+            cd ..
+            exit 1
+          }
+          
+          git checkout ${{ steps.pr_details.outputs.pr_head_sha }} 2>/dev/null || {
+            echo "❌ Failed to checkout PR commit"
+            cd ..
+            exit 1
+          }
+          
+          # Check for API definitions
+          API_DIR="code/API_definitions"
+          if [[ -d "$API_DIR" ]]; then
+            echo "Found API definitions directory"
+            
+            # Look for API YAML files
+            API_FILES=$(find "$API_DIR" -name "*.yaml" -o -name "*.yml" | grep -v -E "(test|example|sample)" || true)
+            
+            if [[ -n "$API_FILES" ]]; then
+              echo "Found API files:"
+              echo "$API_FILES"
+              
+              # Extract versions from API files
+              PR_APIS=""
+              for file in $API_FILES; do
+                if [[ -f "$file" ]]; then
+                  API_NAME=$(basename "$file" .yaml | sed 's/\.yml$//')
+                  VERSION=$(grep -E "^\s*version:" "$file" | head -1 | sed 's/.*version:\s*//' | tr -d '"' | tr -d "'" || echo "unknown")
+                  
+                  if [[ -n "$VERSION" && "$VERSION" != "unknown" ]]; then
+                    PR_APIS="${PR_APIS}${API_NAME}:${VERSION};"
+                  fi
+                fi
+              done
+              
+              echo "PR APIs: $PR_APIS"
+              echo "pr_apis=$PR_APIS" >> $GITHUB_OUTPUT
+              
+              # Check if this looks like a release PR
+              if [[ "$PR_APIS" =~ -rc\.|alpha\. ]]; then
+                echo "PR contains release candidate or alpha versions"
+                echo "is_release_pr=true" >> $GITHUB_OUTPUT
+              else
+                echo "PR does not appear to be a release PR"
+                echo "is_release_pr=false" >> $GITHUB_OUTPUT
+              fi
+            else
+              echo "No API files found in PR"
+              echo "pr_apis=" >> $GITHUB_OUTPUT
+              echo "is_release_pr=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "No API definitions directory found"
+            echo "pr_apis=" >> $GITHUB_OUTPUT
+            echo "is_release_pr=false" >> $GITHUB_OUTPUT
+          fi
+          
+          cd ..
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate Release Information
+        id: generate
+        run: |
+          echo "📝 Generating release information"
+          
+          # Initialize output file
+          OUTPUT_FILE="release_info.md"
+          
+          {
+            echo "## Release Information"
+            echo ""
+            echo "*This section provides details about the latest releases and pre-releases of this API repository.*"
+            echo ""
+          } > "$OUTPUT_FILE"
+          
+          # Function to extract API info from a specific tag
+          extract_apis_from_tag() {
+            local tag=$1
+            local owner=$2
+            local repo=$3
+            
+            # Create temp directory
+            local temp_dir="temp_checkout_${tag//\//_}"
+            mkdir -p "$temp_dir"
+            cd "$temp_dir"
+            
+            # Clone at specific tag
+            git clone --depth 1 --branch "$tag" "https://github.com/${owner}/${repo}.git" . 2>/dev/null || {
+              cd ..
+              rm -rf "$temp_dir"
+              return 1
+            }
+            
+            # Find API files
+            local api_info=""
+            if [[ -d "code/API_definitions" ]]; then
+              for file in code/API_definitions/*.yaml code/API_definitions/*.yml; do
+                if [[ -f "$file" ]]; then
+                  local api_name=$(basename "$file" .yaml | sed 's/\.yml$//')
+                  local version=$(grep -E "^\s*version:" "$file" | head -1 | sed 's/.*version:\s*//' | tr -d '"' | tr -d "'" || echo "unknown")
+                  
+                  if [[ -n "$version" && "$version" != "unknown" ]]; then
+                    api_info="${api_info}${api_name}:${version};"
+                  fi
+                fi
+              done
+            fi
+            
+            cd ..
+            rm -rf "$temp_dir"
+            
+            echo "$api_info"
+          }
+          
+          # Check for recent pre-releases or PR content
+          RECENT_PRERELEASE_COUNT="${{ steps.fetch_releases.outputs.recent_prerelease_count }}"
+          IS_RELEASE_PR="${{ steps.analyze_pr.outputs.is_release_pr }}"
+          PR_APIS="${{ steps.analyze_pr.outputs.pr_apis }}"
+          
+          # Handle pre-release section
+          if [[ "$RECENT_PRERELEASE_COUNT" -gt 0 ]] || [[ "$IS_RELEASE_PR" == "true" ]]; then
+            echo "**New** 🆕" >> "$OUTPUT_FILE"
+            
+            # Add PR content if it's a release PR
+            if [[ "$IS_RELEASE_PR" == "true" && -n "$PR_APIS" ]]; then
+              echo "* The pull request #${{ steps.parse.outputs.pr_number }} contains:" >> "$OUTPUT_FILE"
+              
+              IFS=';' read -ra APIS <<< "$PR_APIS"
+              for api in "${APIS[@]}"; do
+                if [[ -n "$api" ]]; then
+                  IFS=':' read -r name version <<< "$api"
+                  echo "  - ${name} ${version}" >> "$OUTPUT_FILE"
+                fi
+              done
+            fi
+            
+            # Add recent pre-releases
+            if [[ "$RECENT_PRERELEASE_COUNT" -gt 0 ]]; then
+              # Process most recent pre-release
+              NEWEST_PRERELEASE=$(cat recent_prereleases.json | jq -r '.[0]')
+              if [[ "$NEWEST_PRERELEASE" != "null" ]]; then
+                TAG=$(echo "$NEWEST_PRERELEASE" | jq -r '.tag_name')
+                
+                # Extract APIs from this pre-release
+                APIS=$(extract_apis_from_tag "$TAG" "${{ steps.parse.outputs.repo_owner }}" "${{ steps.parse.outputs.repo_name }}")
+                
+                if [[ -n "$APIS" ]]; then
+                  echo "* The pre-release ${TAG} contains:" >> "$OUTPUT_FILE"
+                  
+                  IFS=';' read -ra API_LIST <<< "$APIS"
+                  for api in "${API_LIST[@]}"; do
+                    if [[ -n "$api" ]]; then
+                      IFS=':' read -r name version <<< "$api"
+                      echo "  - ${name} ${version}" >> "$OUTPUT_FILE"
+                    fi
+                  done
+                fi
+              fi
+            fi
+            
+            echo "* ⚠️ *Pre-releases are for evaluation only and subject to change*" >> "$OUTPUT_FILE"
+            echo "" >> "$OUTPUT_FILE"
+          fi
+          
+          # Handle latest public release
+          LATEST_PUBLIC_TAG="${{ steps.fetch_releases.outputs.latest_public_tag }}"
+          
+          if [[ -n "$LATEST_PUBLIC_TAG" ]]; then
+            RELEASE_URL="https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases/tag/${LATEST_PUBLIC_TAG}"
+            
+            echo "### Latest Release: [${LATEST_PUBLIC_TAG}](${RELEASE_URL})" >> "$OUTPUT_FILE"
+            echo "" >> "$OUTPUT_FILE"
+            echo "The latest public release contains the following API definitions:" >> "$OUTPUT_FILE"
+            echo "" >> "$OUTPUT_FILE"
+            
+            # Extract APIs from latest public release
+            APIS=$(extract_apis_from_tag "$LATEST_PUBLIC_TAG" "${{ steps.parse.outputs.repo_owner }}" "${{ steps.parse.outputs.repo_name }}")
+            
+            if [[ -n "$APIS" ]]; then
+              IFS=';' read -ra API_LIST <<< "$APIS"
+              for api in "${API_LIST[@]}"; do
+                if [[ -n "$api" ]]; then
+                  IFS=':' read -r name version <<< "$api"
+                  
+                  # Generate documentation links
+                  BASE_URL="https://raw.githubusercontent.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/${LATEST_PUBLIC_TAG}/code/API_definitions"
+                  YAML_URL="${BASE_URL}/${name}.yaml"
+                  SWAGGER_URL="https://camaraproject.github.io/swagger-ui/?url=${YAML_URL}"
+                  REDOC_URL="https://redocly.github.io/redoc/?url=${YAML_URL}"
+                  
+                  echo "* **${name}** ${version} ([Swagger UI](${SWAGGER_URL}) | [Redoc](${REDOC_URL}) | [YAML](${YAML_URL}))" >> "$OUTPUT_FILE"
+                fi
+              done
+              
+              echo "" >> "$OUTPUT_FILE"
+            else
+              echo "* No API definitions found in this release" >> "$OUTPUT_FILE"
+              echo "" >> "$OUTPUT_FILE"
+            fi
+            
+            echo "For detailed information, see the [CHANGELOG.md](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/blob/main/CHANGELOG.md) and [Releases](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases)." >> "$OUTPUT_FILE"
+            
+          elif [[ "${{ steps.fetch_releases.outputs.release_count }}" == "0" ]]; then
+            # No releases at all
+            echo "This repository has no releases yet." >> "$OUTPUT_FILE"
+          else
+            # Only pre-releases exist
+            echo "This repository has no public releases yet. Pre-releases may be available for evaluation." >> "$OUTPUT_FILE"
+            echo "" >> "$OUTPUT_FILE"
+            echo "For more information, see [Releases](https://github.com/${{ steps.parse.outputs.repo_owner }}/${{ steps.parse.outputs.repo_name }}/releases)." >> "$OUTPUT_FILE"
+          fi
+          
+          # Display the generated content
+          if [[ -f "$OUTPUT_FILE" ]]; then
+            echo "✅ Successfully generated release information"
+            echo ""
+            echo "================== Generated Markdown =================="
+            cat "$OUTPUT_FILE"
+            echo "========================================================"
+            
+            # Base64 encode the content for output
+            CONTENT_BASE64=$(base64 -w 0 < "$OUTPUT_FILE")
+            echo "release_info_content=$CONTENT_BASE64" >> $GITHUB_OUTPUT
+            echo "generation_status=success" >> $GITHUB_OUTPUT
+            echo "error_message=" >> $GITHUB_OUTPUT
+            
+            # Create GitHub step summary
+            {
+              echo "# Release Information Generated Successfully ✅"
+              echo ""
+              echo "**Target**: ${{ inputs.target_url }}"
+              echo ""
+              echo "## Generated Content:"
+              echo ""
+              echo '```markdown'
+              cat "$OUTPUT_FILE"
+              echo '```'
+              echo ""
+              echo "## Usage:"
+              echo "1. Copy the markdown content above"
+              echo "2. Update the Release Information section in your README.md"
+              echo "3. Commit the changes"
+            } >> $GITHUB_STEP_SUMMARY
+            
+          else
+            echo "❌ Failed to generate release information"
+            echo "::error::Failed to generate output file"
+            echo "release_info_content=" >> $GITHUB_OUTPUT
+            echo "generation_status=error" >> $GITHUB_OUTPUT
+            echo "error_message=Failed to generate output file" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-info-${{ steps.parse.outputs.repo_name }}-${{ github.run_id }}
+          path: |
+            release_info.md
+            releases.json
+            recent_prereleases.json
+            latest_release.json
+          retention-days: 7
