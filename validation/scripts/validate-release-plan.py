@@ -40,6 +40,9 @@ except ImportError:
 class ReleasePlanValidator:
     """Validator for CAMARA release-plan.yaml files."""
 
+    # Allowed meta-release values (update as new meta-releases are added)
+    ALLOWED_META_RELEASES = ['Fall25', 'Spring26', 'Fall26']
+
     def __init__(self, release_plan_file: Path, schema_file: Optional[Path] = None,
                  check_files: bool = False):
         self.release_plan_file = release_plan_file
@@ -114,6 +117,13 @@ class ReleasePlanValidator:
         elif release_track in ['none', 'independent'] and meta_release:
             self.warnings.append(
                 f"release_track is '{release_track}' but meta_release field is present"
+            )
+
+        # Validate meta_release value is in allowed list
+        if meta_release and meta_release not in self.ALLOWED_META_RELEASES:
+            self.errors.append(
+                f"meta_release '{meta_release}' is not valid. "
+                f"Allowed values: {', '.join(self.ALLOWED_META_RELEASES)}"
             )
 
     def _check_release_type_consistency(self, release_type: str, apis: List[Dict]) -> None:
