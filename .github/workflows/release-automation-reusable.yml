@@ -410,6 +410,7 @@ jobs:
               "command": "${{ needs.check-trigger.outputs.command }}",
               "user": "${{ needs.check-trigger.outputs.user }}",
               "state": "${{ needs.derive-state.outputs.state }}",
+              "release_tag": "${{ needs.check-trigger.outputs.release_tag }}",
               "error_message": "${{ needs.validate-command.outputs.error_message }}",
               "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             }
