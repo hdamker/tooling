@@ -1,0 +1,683 @@
+# Release Automation Reusable Workflow
+#
+# This reusable workflow orchestrates the CAMARA release automation process.
+# It handles:
+# - Slash commands: /create-snapshot, /discard-snapshot, /delete-draft, /sync-issue
+# - Issue events: close (with auto-reopen if needed), reopen
+# - PR merge events: on release-snapshot branches (draft creation)
+# - Manual dispatch: for testing and recovery
+#
+# Called by: release-automation-caller.yml in API repositories
+
+name: Release Automation
+
+on:
+  workflow_call:
+    inputs:
+      # Passed from caller for workflow_dispatch
+      command:
+        description: 'Command to execute (for workflow_dispatch)'
+        type: string
+        required: false
+        default: ''
+      reason:
+        description: 'Reason for discard/delete commands'
+        type: string
+        required: false
+        default: ''
+      trigger_pr:
+        description: 'PR number that triggered this workflow'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 1: Detect and classify trigger
+  # ─────────────────────────────────────────────────────────────────────────────
+  check-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      trigger_type: ${{ steps.detect.outputs.trigger_type }}
+      command: ${{ steps.detect.outputs.command }}
+      command_args: ${{ steps.detect.outputs.command_args }}
+      release_tag: ${{ steps.detect.outputs.release_tag }}
+      issue_number: ${{ steps.detect.outputs.issue_number }}
+      user: ${{ steps.detect.outputs.user }}
+      should_continue: ${{ steps.detect.outputs.should_continue }}
+    steps:
+      - name: Detect Trigger Type
+        id: detect
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const eventName = context.eventName;
+            let triggerType = 'unknown';
+            let command = '';
+            let commandArgs = '';
+            let releaseTag = '';
+            let issueNumber = '';
+            let user = '';
+            let shouldContinue = 'false';
+
+            console.log(`Event: ${eventName}`);
+            console.log(`Action: ${context.payload.action || 'N/A'}`);
+
+            // Helper: Extract release tag from labels
+            function extractReleaseTagFromLabels(labels) {
+              if (!labels) return '';
+              for (const label of labels) {
+                // Look for release-state:* labels, then extract tag from title
+                if (label.name && label.name.startsWith('release-state:')) {
+                  return ''; // Has state label but need tag from title
+                }
+              }
+              return '';
+            }
+
+            // Helper: Extract release tag from issue title
+            function extractReleaseTagFromTitle(title) {
+              if (!title) return '';
+              // Match "Release r4.1" or "Release r4.1 (RC)" patterns
+              const match = title.match(/Release\s+(r\d+\.\d+)/i);
+              return match ? match[1] : '';
+            }
+
+            // Helper: Check if issue has release-issue label
+            function isReleaseIssue(labels) {
+              if (!labels) return false;
+              return labels.some(l => l.name === 'release-issue');
+            }
+
+            // ─────────────────────────────────────────────────────────────────
+            // Event: issue_comment
+            // ─────────────────────────────────────────────────────────────────
+            if (eventName === 'issue_comment') {
+              const comment = context.payload.comment;
+              const issue = context.payload.issue;
+              const body = comment.body ? comment.body.trim() : '';
+
+              user = comment.user.login;
+              issueNumber = issue.number.toString();
+
+              // Check if this is a Release Issue
+              if (!isReleaseIssue(issue.labels)) {
+                console.log('Not a release issue, skipping');
+                core.setOutput('should_continue', 'false');
+                return;
+              }
+
+              // Extract release tag from title
+              releaseTag = extractReleaseTagFromTitle(issue.title);
+              if (!releaseTag) {
+                console.log('Could not extract release tag from issue title');
+                core.setOutput('should_continue', 'false');
+                return;
+              }
+
+              // Parse slash commands
+              if (body.startsWith('/create-snapshot')) {
+                triggerType = 'slash_command';
+                command = 'create-snapshot';
+                commandArgs = body.replace('/create-snapshot', '').trim();
+                shouldContinue = 'true';
+              } else if (body.startsWith('/discard-snapshot')) {
+                triggerType = 'slash_command';
+                command = 'discard-snapshot';
+                commandArgs = body.replace('/discard-snapshot', '').trim();
+                shouldContinue = 'true';
+              } else if (body.startsWith('/delete-draft')) {
+                triggerType = 'slash_command';
+                command = 'delete-draft';
+                commandArgs = body.replace('/delete-draft', '').trim();
+                shouldContinue = 'true';
+              } else if (body.startsWith('/sync-issue')) {
+                triggerType = 'slash_command';
+                command = 'sync-issue';
+                commandArgs = body.replace('/sync-issue', '').trim();
+                shouldContinue = 'true';
+              } else {
+                console.log('Comment is not a recognized slash command');
+              }
+            }
+
+            // ─────────────────────────────────────────────────────────────────
+            // Event: issues
+            // ─────────────────────────────────────────────────────────────────
+            else if (eventName === 'issues') {
+              const issue = context.payload.issue;
+              const action = context.payload.action;
+
+              user = issue.user.login;
+              issueNumber = issue.number.toString();
+
+              // Check if this is a Release Issue
+              if (!isReleaseIssue(issue.labels)) {
+                console.log('Not a release issue, skipping');
+                core.setOutput('should_continue', 'false');
+                return;
+              }
+
+              // Extract release tag from title
+              releaseTag = extractReleaseTagFromTitle(issue.title);
+
+              if (action === 'closed') {
+                triggerType = 'issue_close';
+                shouldContinue = 'true';
+              } else if (action === 'reopened') {
+                triggerType = 'issue_reopen';
+                shouldContinue = 'true';
+              }
+            }
+
+            // ─────────────────────────────────────────────────────────────────
+            // Event: pull_request
+            // ─────────────────────────────────────────────────────────────────
+            else if (eventName === 'pull_request') {
+              const pr = context.payload.pull_request;
+              const action = context.payload.action;
+
+              // Only handle merged PRs to release-snapshot branches
+              if (action === 'closed' && pr.merged) {
+                const baseBranch = pr.base.ref;
+
+                if (baseBranch.startsWith('release-snapshot/')) {
+                  triggerType = 'pr_merge';
+                  user = pr.merged_by ? pr.merged_by.login : pr.user.login;
+
+                  // Extract release tag from branch name: release-snapshot/r4.1-abc1234
+                  const match = baseBranch.match(/release-snapshot\/(r\d+\.\d+)/);
+                  releaseTag = match ? match[1] : '';
+
+                  shouldContinue = 'true';
+                }
+              }
+            }
+
+            // ─────────────────────────────────────────────────────────────────
+            // Event: workflow_dispatch
+            // ─────────────────────────────────────────────────────────────────
+            else if (eventName === 'workflow_dispatch') {
+              triggerType = 'workflow_dispatch';
+              command = '${{ inputs.command }}' || 'sync-issue';
+              commandArgs = '${{ inputs.reason }}' || '';
+              user = context.actor;
+
+              // For workflow_dispatch, we need release_tag from inputs or derive from branch
+              // For now, this will be populated by the derive-state step
+              shouldContinue = 'true';
+            }
+
+            // Output results
+            console.log(`Trigger type: ${triggerType}`);
+            console.log(`Command: ${command}`);
+            console.log(`Command args: ${commandArgs}`);
+            console.log(`Release tag: ${releaseTag}`);
+            console.log(`Issue number: ${issueNumber}`);
+            console.log(`User: ${user}`);
+            console.log(`Should continue: ${shouldContinue}`);
+
+            core.setOutput('trigger_type', triggerType);
+            core.setOutput('command', command);
+            core.setOutput('command_args', commandArgs);
+            core.setOutput('release_tag', releaseTag);
+            core.setOutput('issue_number', issueNumber);
+            core.setOutput('user', user);
+            core.setOutput('should_continue', shouldContinue);
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 2: Post interim comment (for slash commands only)
+  # ─────────────────────────────────────────────────────────────────────────────
+  post-interim:
+    needs: check-trigger
+    if: |
+      needs.check-trigger.outputs.should_continue == 'true' &&
+      needs.check-trigger.outputs.trigger_type == 'slash_command'
+    runs-on: ubuntu-latest
+    outputs:
+      comment_id: ${{ steps.post.outputs.comment_id }}
+    steps:
+      - name: Checkout tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          ref: release-automation-mvp
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+
+      - name: Post Processing Comment
+        id: post
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
+          release_tag: ${{ needs.check-trigger.outputs.release_tag }}
+          template: interim_processing
+          context: |
+            {
+              "command": "${{ needs.check-trigger.outputs.command }}",
+              "user": "${{ needs.check-trigger.outputs.user }}",
+              "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 3: Derive current state
+  # ─────────────────────────────────────────────────────────────────────────────
+  derive-state:
+    needs: check-trigger
+    if: needs.check-trigger.outputs.should_continue == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      state: ${{ steps.state.outputs.state }}
+      snapshot_id: ${{ steps.state.outputs.snapshot_id }}
+      snapshot_branch: ${{ steps.state.outputs.snapshot_branch }}
+      release_review_branch: ${{ steps.state.outputs.release_review_branch }}
+      release_pr_number: ${{ steps.state.outputs.release_pr_number }}
+      base_commit_sha: ${{ steps.state.outputs.base_commit_sha }}
+    steps:
+      - name: Checkout tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          ref: release-automation-mvp
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            shared-actions/derive-release-state
+
+      - name: Derive Release State
+        id: state
+        uses: ./_tooling/shared-actions/derive-release-state
+        with:
+          release_tag: ${{ needs.check-trigger.outputs.release_tag }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 4: Validate command (for slash commands only)
+  # ─────────────────────────────────────────────────────────────────────────────
+  validate-command:
+    needs: [check-trigger, derive-state]
+    if: |
+      needs.check-trigger.outputs.should_continue == 'true' &&
+      needs.check-trigger.outputs.trigger_type == 'slash_command'
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.validate.outputs.allowed }}
+      error_message: ${{ steps.validate.outputs.error_message }}
+    steps:
+      - name: Validate Command
+        id: validate
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const user = '${{ needs.check-trigger.outputs.user }}';
+            const command = '${{ needs.check-trigger.outputs.command }}';
+            const currentState = '${{ needs.derive-state.outputs.state }}';
+
+            console.log(`Validating command: /${command}`);
+            console.log(`Current state: ${currentState}`);
+            console.log(`User: ${user}`);
+
+            // Define allowed commands per state
+            const allowedCommands = {
+              'planned': ['create-snapshot', 'sync-issue'],
+              'snapshot-active': ['discard-snapshot', 'sync-issue'],
+              'draft-ready': ['delete-draft', 'sync-issue'],
+              'published': ['sync-issue'],
+              'cancelled': ['sync-issue']
+            };
+
+            // Check if command is allowed in current state
+            const allowed = allowedCommands[currentState] || [];
+            if (!allowed.includes(command)) {
+              const validCommands = allowed.length > 0
+                ? `Valid commands: ${allowed.map(c => '/' + c).join(', ')}`
+                : 'No commands available in this state';
+
+              core.setOutput('allowed', 'false');
+              core.setOutput('error_message', `Command /${command} is not allowed in state '${currentState}'. ${validCommands}`);
+              return;
+            }
+
+            // Check user permission (must be write or higher)
+            console.log('Checking user permission...');
+
+            try {
+              const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: user
+              });
+
+              const userPermission = permission.permission;
+              console.log(`User permission: ${userPermission}`);
+
+              const hasPermission = ['admin', 'maintain', 'write'].includes(userPermission);
+
+              if (!hasPermission) {
+                core.setOutput('allowed', 'false');
+                core.setOutput('error_message', `You must be a maintainer (write access or higher) to run release commands. Your current permission: ${userPermission}`);
+                return;
+              }
+            } catch (error) {
+              console.log(`Permission check failed: ${error.message}`);
+              // If we can't check permission, deny by default
+              core.setOutput('allowed', 'false');
+              core.setOutput('error_message', `Failed to verify permissions: ${error.message}`);
+              return;
+            }
+
+            // All checks passed
+            console.log('Command validated successfully');
+            core.setOutput('allowed', 'true');
+            core.setOutput('error_message', '');
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5a: Handle rejected command
+  # ─────────────────────────────────────────────────────────────────────────────
+  post-rejection:
+    needs: [check-trigger, derive-state, post-interim, validate-command]
+    if: |
+      needs.check-trigger.outputs.trigger_type == 'slash_command' &&
+      needs.validate-command.outputs.allowed == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          ref: release-automation-mvp
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+
+      - name: Post Rejection Comment
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
+          release_tag: ${{ needs.check-trigger.outputs.release_tag }}
+          template: command_rejected
+          context: |
+            {
+              "command": "${{ needs.check-trigger.outputs.command }}",
+              "user": "${{ needs.check-trigger.outputs.user }}",
+              "state": "${{ needs.derive-state.outputs.state }}",
+              "error_message": "${{ needs.validate-command.outputs.error_message }}",
+              "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+          comment_id: ${{ needs.post-interim.outputs.comment_id }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5b: Execute create-snapshot command
+  # ─────────────────────────────────────────────────────────────────────────────
+  create-snapshot:
+    needs: [check-trigger, derive-state, validate-command]
+    if: |
+      needs.check-trigger.outputs.command == 'create-snapshot' &&
+      needs.validate-command.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      success: ${{ steps.create.outputs.success }}
+      snapshot_id: ${{ steps.create.outputs.snapshot_id }}
+      snapshot_branch: ${{ steps.create.outputs.snapshot_branch }}
+      release_pr_number: ${{ steps.create.outputs.release_pr_number }}
+      error_message: ${{ steps.create.outputs.error_message }}
+    steps:
+      - name: Create Snapshot (Placeholder)
+        id: create
+        run: |
+          echo "::notice::create-snapshot command not yet implemented (WS4)"
+          echo "success=false" >> $GITHUB_OUTPUT
+          echo "error_message=create-snapshot command will be implemented in WS4 (Snapshot Creation workstream)" >> $GITHUB_OUTPUT
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5c: Execute discard-snapshot command
+  # ─────────────────────────────────────────────────────────────────────────────
+  discard-snapshot:
+    needs: [check-trigger, derive-state, validate-command]
+    if: |
+      needs.check-trigger.outputs.command == 'discard-snapshot' &&
+      needs.validate-command.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      success: ${{ steps.discard.outputs.success }}
+      error_message: ${{ steps.discard.outputs.error_message }}
+    steps:
+      - name: Discard Snapshot (Placeholder)
+        id: discard
+        run: |
+          echo "::notice::discard-snapshot command not yet implemented (WS5)"
+          echo "success=false" >> $GITHUB_OUTPUT
+          echo "error_message=discard-snapshot command will be implemented in WS5 (Additional Commands workstream)" >> $GITHUB_OUTPUT
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5d: Execute delete-draft command
+  # ─────────────────────────────────────────────────────────────────────────────
+  delete-draft:
+    needs: [check-trigger, derive-state, validate-command]
+    if: |
+      needs.check-trigger.outputs.command == 'delete-draft' &&
+      needs.validate-command.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      success: ${{ steps.delete.outputs.success }}
+      error_message: ${{ steps.delete.outputs.error_message }}
+    steps:
+      - name: Delete Draft (Placeholder)
+        id: delete
+        run: |
+          echo "::notice::delete-draft command not yet implemented (WS5)"
+          echo "success=false" >> $GITHUB_OUTPUT
+          echo "error_message=delete-draft command will be implemented in WS5 (Additional Commands workstream)" >> $GITHUB_OUTPUT
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5e: Handle PR merge (draft release creation)
+  # ─────────────────────────────────────────────────────────────────────────────
+  handle-pr-merge:
+    needs: [check-trigger, derive-state]
+    if: needs.check-trigger.outputs.trigger_type == 'pr_merge'
+    runs-on: ubuntu-latest
+    outputs:
+      success: ${{ steps.handle.outputs.success }}
+      draft_release_url: ${{ steps.handle.outputs.draft_release_url }}
+      error_message: ${{ steps.handle.outputs.error_message }}
+    steps:
+      - name: Handle PR Merge (Placeholder)
+        id: handle
+        run: |
+          echo "::notice::PR merge handler not yet implemented (WS5)"
+          echo "success=false" >> $GITHUB_OUTPUT
+          echo "error_message=PR merge handler will be implemented in WS5 (Additional Commands workstream)" >> $GITHUB_OUTPUT
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5f: Handle issue close/reopen events
+  # ─────────────────────────────────────────────────────────────────────────────
+  handle-issue-event:
+    needs: [check-trigger, derive-state]
+    if: |
+      needs.check-trigger.outputs.trigger_type == 'issue_close' ||
+      needs.check-trigger.outputs.trigger_type == 'issue_reopen'
+    runs-on: ubuntu-latest
+    outputs:
+      action_taken: ${{ steps.handle.outputs.action_taken }}
+    steps:
+      - name: Checkout tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          ref: release-automation-mvp
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+
+      - name: Handle Issue Event
+        id: handle
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const triggerType = '${{ needs.check-trigger.outputs.trigger_type }}';
+            const currentState = '${{ needs.derive-state.outputs.state }}';
+            const issueNumber = parseInt('${{ needs.check-trigger.outputs.issue_number }}');
+
+            console.log(`Handling ${triggerType} event`);
+            console.log(`Current state: ${currentState}`);
+
+            // States that block issue closure
+            const blockClosureStates = ['snapshot-active', 'draft-ready'];
+
+            if (triggerType === 'issue_close') {
+              // Check if we need to auto-reopen
+              if (blockClosureStates.includes(currentState)) {
+                console.log(`Auto-reopening issue - cannot close in state '${currentState}'`);
+
+                // Reopen the issue
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  state: 'open'
+                });
+
+                core.setOutput('action_taken', 'reopened');
+                console.log('Issue reopened successfully');
+              } else {
+                console.log(`Issue closure allowed in state '${currentState}'`);
+                core.setOutput('action_taken', 'allowed_close');
+              }
+            } else if (triggerType === 'issue_reopen') {
+              // Just log for now - no special handling needed
+              console.log('Issue was reopened');
+              core.setOutput('action_taken', 'noted_reopen');
+            }
+
+      - name: Post Auto-Reopen Comment
+        if: steps.handle.outputs.action_taken == 'reopened'
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
+          release_tag: ${{ needs.check-trigger.outputs.release_tag }}
+          template: issue_reopened
+          context: |
+            {
+              "state": "${{ needs.derive-state.outputs.state }}",
+              "snapshot_id": "${{ needs.derive-state.outputs.snapshot_id }}",
+              "reason": "Cannot close Release Issue while release is in progress"
+            }
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 6: Update issue state (after successful command)
+  # ─────────────────────────────────────────────────────────────────────────────
+  update-issue:
+    needs: [check-trigger, derive-state, create-snapshot, discard-snapshot, delete-draft]
+    if: |
+      always() &&
+      needs.check-trigger.outputs.should_continue == 'true' &&
+      needs.check-trigger.outputs.issue_number != '' &&
+      (
+        (needs.create-snapshot.result == 'success' && needs.create-snapshot.outputs.success == 'true') ||
+        (needs.discard-snapshot.result == 'success' && needs.discard-snapshot.outputs.success == 'true') ||
+        (needs.delete-draft.result == 'success' && needs.delete-draft.outputs.success == 'true')
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Issue State (Placeholder)
+        run: |
+          echo "::notice::Issue state update will be implemented when command handlers are complete"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 7: Post final result comment
+  # ─────────────────────────────────────────────────────────────────────────────
+  post-result:
+    needs: [check-trigger, post-interim, derive-state, validate-command, create-snapshot, discard-snapshot, delete-draft]
+    if: |
+      always() &&
+      needs.check-trigger.outputs.trigger_type == 'slash_command' &&
+      needs.validate-command.outputs.allowed == 'true' &&
+      needs.post-interim.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          ref: release-automation-mvp
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+
+      - name: Determine Result Template
+        id: template
+        run: |
+          COMMAND="${{ needs.check-trigger.outputs.command }}"
+
+          # Map command to success/failure templates
+          case "$COMMAND" in
+            create-snapshot)
+              if [ "${{ needs.create-snapshot.outputs.success }}" == "true" ]; then
+                echo "template=snapshot_created" >> $GITHUB_OUTPUT
+              else
+                echo "template=snapshot_failed" >> $GITHUB_OUTPUT
+              fi
+              ;;
+            discard-snapshot)
+              if [ "${{ needs.discard-snapshot.outputs.success }}" == "true" ]; then
+                echo "template=snapshot_discarded" >> $GITHUB_OUTPUT
+              else
+                echo "template=snapshot_failed" >> $GITHUB_OUTPUT
+              fi
+              ;;
+            delete-draft)
+              if [ "${{ needs.delete-draft.outputs.success }}" == "true" ]; then
+                echo "template=draft_revoked" >> $GITHUB_OUTPUT
+              else
+                echo "template=snapshot_failed" >> $GITHUB_OUTPUT
+              fi
+              ;;
+            sync-issue)
+              echo "template=interim_processing" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "template=command_rejected" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+      - name: Build Result Context
+        id: context
+        run: |
+          # Build JSON context based on command and results
+          CONTEXT='{
+            "command": "${{ needs.check-trigger.outputs.command }}",
+            "user": "${{ needs.check-trigger.outputs.user }}",
+            "state": "${{ needs.derive-state.outputs.state }}",
+            "release_tag": "${{ needs.check-trigger.outputs.release_tag }}",
+            "snapshot_id": "${{ needs.derive-state.outputs.snapshot_id }}",
+            "snapshot_branch": "${{ needs.derive-state.outputs.snapshot_branch }}",
+            "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }'
+
+          # For now, include error messages from placeholder commands
+          if [ "${{ needs.create-snapshot.outputs.success }}" == "false" ]; then
+            ERROR_MSG="${{ needs.create-snapshot.outputs.error_message }}"
+            CONTEXT=$(echo "$CONTEXT" | jq --arg err "$ERROR_MSG" '. + {error_message: $err}')
+          fi
+
+          echo "context<<EOF" >> $GITHUB_OUTPUT
+          echo "$CONTEXT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Post Result Comment
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
+          release_tag: ${{ needs.check-trigger.outputs.release_tag }}
+          template: ${{ steps.template.outputs.template }}
+          context: ${{ steps.context.outputs.context }}
+          comment_id: ${{ needs.post-interim.outputs.comment_id }}

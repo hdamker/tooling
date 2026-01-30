@@ -1,0 +1,83 @@
+# Release Automation Caller Workflow
+#
+# This workflow template should be copied to .github/workflows/ in API repositories
+# that want to use the CAMARA release automation.
+#
+# Copy this file as: .github/workflows/release-automation.yml
+#
+# Triggers:
+# - Slash commands: /create-snapshot, /discard-snapshot, /delete-draft, /sync-issue
+# - Issue events: close (with auto-reopen), reopen
+# - PR merge: on release-snapshot branches (creates draft release)
+# - Manual: workflow_dispatch for testing and recovery
+
+name: Release Automation
+
+on:
+  # Slash commands via issue comments
+  issue_comment:
+    types: [created]
+
+  # Issue close/reopen events
+  issues:
+    types: [closed, reopened]
+
+  # PR merge to snapshot branches
+  pull_request:
+    types: [closed]
+    branches:
+      - 'release-snapshot/**'
+
+  # Manual trigger for testing and recovery
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'Command to execute'
+        type: choice
+        default: 'sync-issue'
+        options:
+          - sync-issue
+          - create-snapshot
+          - discard-snapshot
+          - delete-draft
+      reason:
+        description: 'Reason (required for discard-snapshot and delete-draft)'
+        type: string
+        required: false
+      trigger_pr:
+        description: 'PR number that triggered this (for traceability)'
+        type: string
+        required: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release-automation:
+    # Skip if:
+    # - issue_comment but not a release command or not on a release issue
+    # - issues event but not a release issue
+    # - pull_request but not merged or not to a snapshot branch
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' &&
+       contains(github.event.issue.labels.*.name, 'release-issue') &&
+       (startsWith(github.event.comment.body, '/create-snapshot') ||
+        startsWith(github.event.comment.body, '/discard-snapshot') ||
+        startsWith(github.event.comment.body, '/delete-draft') ||
+        startsWith(github.event.comment.body, '/sync-issue'))) ||
+      (github.event_name == 'issues' &&
+       contains(github.event.issue.labels.*.name, 'release-issue')) ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.merged == true &&
+       startsWith(github.event.pull_request.base.ref, 'release-snapshot/'))
+
+    # For testing: use hdamker fork; production will use camaraproject/tooling
+    uses: hdamker/tooling/.github/workflows/release-automation-reusable.yml@release-automation-mvp
+    with:
+      command: ${{ github.event.inputs.command || '' }}
+      reason: ${{ github.event.inputs.reason || '' }}
+      trigger_pr: ${{ github.event.inputs.trigger_pr || '' }}
+    secrets: inherit
