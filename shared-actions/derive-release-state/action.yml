@@ -1,0 +1,100 @@
+name: derive-release-state
+description: |
+  Derives the current release state from repository artifacts.
+  Examines tags, branches, releases, and release-plan.yaml to determine
+  whether a release is planned, has an active snapshot, has a draft ready,
+  is published, or is cancelled.
+
+inputs:
+  release_tag:
+    description: 'Release tag to check (e.g., "r4.1")'
+    required: true
+
+outputs:
+  state:
+    description: 'Current release state (planned|snapshot-active|draft-ready|published|cancelled)'
+    value: ${{ steps.derive.outputs.state }}
+  snapshot_id:
+    description: 'Current snapshot ID if active (e.g., "r4.1-abc1234")'
+    value: ${{ steps.derive.outputs.snapshot_id }}
+  snapshot_branch:
+    description: 'Current snapshot branch name if active'
+    value: ${{ steps.derive.outputs.snapshot_branch }}
+  release_review_branch:
+    description: 'Current release-review branch name if active'
+    value: ${{ steps.derive.outputs.release_review_branch }}
+  release_pr_number:
+    description: 'Release PR number if exists'
+    value: ${{ steps.derive.outputs.release_pr_number }}
+  base_commit_sha:
+    description: 'Base commit SHA the snapshot was created from'
+    value: ${{ steps.derive.outputs.base_commit_sha }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install --quiet pyyaml
+
+    - name: Derive Release State
+      id: derive
+      shell: python
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        RELEASE_TAG: ${{ inputs.release_tag }}
+        REPO: ${{ github.repository }}
+        SCRIPTS_PATH: ${{ github.action_path }}/../../release_automation/scripts
+      run: |
+        import os
+        import sys
+
+        # Add scripts path to module search path
+        scripts_path = os.environ['SCRIPTS_PATH']
+        sys.path.insert(0, os.path.dirname(scripts_path))
+
+        from release_automation.scripts.state_manager import ReleaseStateManager
+        from release_automation.scripts.github_client import GitHubClient
+
+        # Initialize clients
+        repo = os.environ['REPO']
+        token = os.environ.get('GITHUB_TOKEN')
+        release_tag = os.environ['RELEASE_TAG']
+
+        gh = GitHubClient(repo=repo, token=token)
+        manager = ReleaseStateManager(github_client=gh)
+
+        # Derive state
+        state = manager.derive_state(release_tag)
+        snapshot = manager.get_current_snapshot(release_tag)
+
+        # Write outputs to GITHUB_OUTPUT
+        output_file = os.environ['GITHUB_OUTPUT']
+        with open(output_file, 'a') as f:
+            f.write(f"state={state.value}\n")
+
+            if snapshot:
+                f.write(f"snapshot_id={snapshot.snapshot_id}\n")
+                f.write(f"snapshot_branch={snapshot.snapshot_branch}\n")
+                f.write(f"release_review_branch={snapshot.release_review_branch}\n")
+                f.write(f"base_commit_sha={snapshot.base_commit_sha}\n")
+                pr_num = snapshot.release_pr_number if snapshot.release_pr_number else ''
+                f.write(f"release_pr_number={pr_num}\n")
+            else:
+                f.write("snapshot_id=\n")
+                f.write("snapshot_branch=\n")
+                f.write("release_review_branch=\n")
+                f.write("base_commit_sha=\n")
+                f.write("release_pr_number=\n")
+
+        # Log result for debugging
+        print(f"Release state for {release_tag}: {state.value}")
+        if snapshot:
+            print(f"  Snapshot ID: {snapshot.snapshot_id}")
+            print(f"  Snapshot branch: {snapshot.snapshot_branch}")
+            print(f"  Release PR: {snapshot.release_pr_number or 'None'}")

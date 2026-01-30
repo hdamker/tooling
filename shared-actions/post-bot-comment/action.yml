@@ -1,0 +1,163 @@
+name: post-bot-comment
+description: |
+  Posts or updates a bot comment on a GitHub issue.
+  Uses Mustache templates for message rendering and adds a release-specific
+  marker to identify bot comments for later updates.
+
+inputs:
+  issue_number:
+    description: 'Issue number to comment on'
+    required: true
+  release_tag:
+    description: 'Release tag for marker identification (e.g., "r4.1")'
+    required: true
+  template:
+    description: 'Template name (e.g., "snapshot_created", "command_rejected")'
+    required: true
+  context:
+    description: 'JSON string with template variables'
+    required: true
+  comment_id:
+    description: 'Existing comment ID to update (optional - will search by marker if not provided)'
+    required: false
+    default: ''
+
+outputs:
+  comment_id:
+    description: 'ID of the created or updated comment'
+    value: ${{ steps.post.outputs.comment_id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install --quiet pystache
+
+    - name: Render Template
+      id: render
+      shell: python
+      env:
+        TEMPLATE_NAME: ${{ inputs.template }}
+        CONTEXT_JSON: ${{ inputs.context }}
+        RELEASE_TAG: ${{ inputs.release_tag }}
+        SCRIPTS_PATH: ${{ github.action_path }}/../../release_automation/scripts
+      run: |
+        import json
+        import os
+        import sys
+
+        # Add scripts path to module search path
+        scripts_path = os.environ['SCRIPTS_PATH']
+        sys.path.insert(0, os.path.dirname(scripts_path))
+
+        from release_automation.scripts.bot_responder import BotResponder
+
+        # Parse context
+        context_json = os.environ['CONTEXT_JSON']
+        try:
+            context = json.loads(context_json)
+        except json.JSONDecodeError as e:
+            print(f"::error::Invalid JSON context: {e}")
+            sys.exit(1)
+
+        # Render template
+        template_name = os.environ['TEMPLATE_NAME']
+        release_tag = os.environ['RELEASE_TAG']
+
+        responder = BotResponder()
+
+        try:
+            content = responder.render_with_marker(template_name, context, release_tag)
+        except Exception as e:
+            print(f"::error::Failed to render template '{template_name}': {e}")
+            sys.exit(1)
+
+        # Write rendered content to output file for next step
+        # Using multiline output format
+        output_file = os.environ['GITHUB_OUTPUT']
+        delimiter = 'RENDERED_CONTENT_EOF'
+
+        with open(output_file, 'a') as f:
+            f.write(f"content<<{delimiter}\n")
+            f.write(content)
+            f.write(f"\n{delimiter}\n")
+            f.write(f"marker=<!-- release-bot:{release_tag} -->\n")
+
+        print(f"Rendered template: {template_name}")
+        print(f"Content length: {len(content)} chars")
+
+    - name: Post or Update Comment
+      id: post
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+      env:
+        ISSUE_NUMBER: ${{ inputs.issue_number }}
+        EXISTING_COMMENT_ID: ${{ inputs.comment_id }}
+        RENDERED_CONTENT: ${{ steps.render.outputs.content }}
+        MARKER: ${{ steps.render.outputs.marker }}
+      with:
+        script: |
+          const issueNumber = parseInt(process.env.ISSUE_NUMBER);
+          const existingCommentId = process.env.EXISTING_COMMENT_ID;
+          const content = process.env.RENDERED_CONTENT;
+          const marker = process.env.MARKER;
+
+          // If comment_id provided, update that specific comment
+          if (existingCommentId) {
+            const commentId = parseInt(existingCommentId);
+            console.log(`Updating existing comment: ${commentId}`);
+
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: commentId,
+              body: content
+            });
+
+            core.setOutput('comment_id', commentId.toString());
+            return;
+          }
+
+          // Otherwise, search for existing comment with matching marker
+          console.log(`Searching for comment with marker: ${marker}`);
+
+          const comments = await github.paginate(
+            github.rest.issues.listComments,
+            {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber
+            }
+          );
+
+          const existingComment = comments.find(c => c.body && c.body.includes(marker));
+
+          if (existingComment) {
+            console.log(`Found existing comment: ${existingComment.id}`);
+
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existingComment.id,
+              body: content
+            });
+
+            core.setOutput('comment_id', existingComment.id.toString());
+          } else {
+            console.log('No existing comment found, creating new one');
+
+            const result = await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: content
+            });
+
+            console.log(`Created comment: ${result.data.id}`);
+            core.setOutput('comment_id', result.data.id.toString());
+          }
