@@ -268,3 +268,244 @@ class GitHubClient:
             return int(output.strip()) if output.strip() else None
         except (GitHubClientError, ValueError):
             return None
+
+    # -------------------------------------------------------------------------
+    # Issue Operations (added for issue_sync.py)
+    # -------------------------------------------------------------------------
+
+    def get_issue(self, issue_number: int) -> dict:
+        """
+        Get issue details including body and labels.
+
+        Args:
+            issue_number: The issue number
+
+        Returns:
+            Dict with issue details (number, title, body, labels, html_url, state)
+
+        Raises:
+            GitHubClientError: If issue doesn't exist or API fails
+        """
+        output = self._run_gh([
+            "api",
+            f"repos/{self.repo}/issues/{issue_number}",
+            "--jq", "."
+        ])
+
+        try:
+            issue = json.loads(output)
+            return {
+                "number": issue["number"],
+                "title": issue["title"],
+                "body": issue.get("body", ""),
+                "labels": issue.get("labels", []),
+                "html_url": issue["html_url"],
+                "state": issue["state"]
+            }
+        except json.JSONDecodeError as e:
+            raise GitHubClientError(f"Failed to parse issue response: {e}")
+
+    def search_issues(
+        self,
+        labels: Optional[List[str]] = None,
+        state: str = "open"
+    ) -> List[dict]:
+        """
+        Search issues by labels and state.
+
+        Args:
+            labels: List of label names to filter by
+            state: Issue state ('open', 'closed', 'all')
+
+        Returns:
+            List of issue dicts with number, title, body, labels, html_url
+        """
+        # Build gh issue list command
+        args = [
+            "issue", "list",
+            "--repo", self.repo,
+            "--state", state,
+            "--json", "number,title,body,labels,url"
+        ]
+
+        if labels:
+            for label in labels:
+                args.extend(["--label", label])
+
+        try:
+            output = self._run_gh(args)
+        except GitHubClientError:
+            return []
+
+        try:
+            issues_data = json.loads(output) if output.strip() else []
+        except json.JSONDecodeError:
+            return []
+
+        return [
+            {
+                "number": issue["number"],
+                "title": issue["title"],
+                "body": issue.get("body", ""),
+                "labels": issue.get("labels", []),
+                "html_url": issue.get("url", "")
+            }
+            for issue in issues_data
+        ]
+
+    def create_issue(
+        self,
+        title: str,
+        body: str,
+        labels: Optional[List[str]] = None
+    ) -> dict:
+        """
+        Create a new issue.
+
+        Args:
+            title: Issue title
+            body: Issue body (markdown)
+            labels: List of label names to add
+
+        Returns:
+            Dict with created issue details
+
+        Raises:
+            GitHubClientError: If creation fails
+        """
+        args = [
+            "issue", "create",
+            "--repo", self.repo,
+            "--title", title,
+            "--body", body
+        ]
+
+        if labels:
+            for label in labels:
+                args.extend(["--label", label])
+
+        output = self._run_gh(args)
+
+        # gh issue create outputs the URL of the created issue
+        issue_url = output.strip()
+
+        # Extract issue number from URL
+        # URL format: https://github.com/owner/repo/issues/123
+        try:
+            issue_number = int(issue_url.rstrip('/').split('/')[-1])
+        except (ValueError, IndexError):
+            raise GitHubClientError(f"Failed to parse issue number from: {issue_url}")
+
+        # Fetch full issue details
+        return self.get_issue(issue_number)
+
+    def update_issue(
+        self,
+        issue_number: int,
+        title: Optional[str] = None,
+        body: Optional[str] = None
+    ) -> dict:
+        """
+        Update an existing issue's title and/or body.
+
+        Args:
+            issue_number: The issue number to update
+            title: New title (optional)
+            body: New body (optional)
+
+        Returns:
+            Dict with updated issue details
+
+        Raises:
+            GitHubClientError: If update fails
+        """
+        # Use PATCH on the issues API
+        args = [
+            "api",
+            f"repos/{self.repo}/issues/{issue_number}",
+            "-X", "PATCH"
+        ]
+
+        if title is not None:
+            args.extend(["-f", f"title={title}"])
+        if body is not None:
+            args.extend(["-f", f"body={body}"])
+
+        output = self._run_gh(args)
+
+        try:
+            issue = json.loads(output)
+            return {
+                "number": issue["number"],
+                "title": issue["title"],
+                "body": issue.get("body", ""),
+                "labels": issue.get("labels", []),
+                "html_url": issue["html_url"],
+                "state": issue["state"]
+            }
+        except json.JSONDecodeError as e:
+            raise GitHubClientError(f"Failed to parse update response: {e}")
+
+    def add_labels(self, issue_number: int, labels: List[str]) -> None:
+        """
+        Add labels to an issue.
+
+        Args:
+            issue_number: The issue number
+            labels: List of label names to add
+
+        Raises:
+            GitHubClientError: If operation fails
+        """
+        if not labels:
+            return
+
+        # POST to labels endpoint
+        labels_json = json.dumps(labels)
+        self._run_gh([
+            "api",
+            f"repos/{self.repo}/issues/{issue_number}/labels",
+            "-X", "POST",
+            "-f", f"labels={labels_json}"
+        ])
+
+    def remove_labels(self, issue_number: int, labels: List[str]) -> None:
+        """
+        Remove labels from an issue.
+
+        Args:
+            issue_number: The issue number
+            labels: List of label names to remove
+
+        Raises:
+            GitHubClientError: If operation fails
+        """
+        for label in labels:
+            try:
+                self._run_gh([
+                    "api",
+                    f"repos/{self.repo}/issues/{issue_number}/labels/{label}",
+                    "-X", "DELETE"
+                ])
+            except GitHubClientError:
+                # Label might not exist, continue
+                pass
+
+    def set_labels(self, issue_number: int, labels: List[str]) -> None:
+        """
+        Replace all labels on an issue with the specified labels.
+
+        Args:
+            issue_number: The issue number
+            labels: List of label names to set
+
+        Raises:
+            GitHubClientError: If operation fails
+        """
+        labels_json = json.dumps(labels)
+        self._run_gh([
+            "api",
+            f"repos/{self.repo}/issues/{issue_number}/labels",
+            "-X", "PUT",
+            "-f", f"labels={labels_json}"
+        ])

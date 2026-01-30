@@ -1,0 +1,74 @@
+name: update-issue-section
+description: |
+  Updates a reserved section in a Release Issue body.
+  Sections are marked with <!-- BEGIN:SECTION_NAME --> and <!-- END:SECTION_NAME --> comments.
+  Content between these markers is replaced with the new content.
+
+inputs:
+  issue_number:
+    description: 'Issue number to update'
+    required: true
+  section:
+    description: 'Section name (e.g., STATE, HISTORY, CONFIG)'
+    required: true
+  content:
+    description: 'New content for the section'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      with:
+        python-version: '3.11'
+
+    - name: Fetch Issue and Update Section
+      id: update
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+      env:
+        ISSUE_NUMBER: ${{ inputs.issue_number }}
+        SECTION: ${{ inputs.section }}
+        NEW_CONTENT: ${{ inputs.content }}
+      with:
+        script: |
+          const issueNumber = parseInt(process.env.ISSUE_NUMBER);
+          const section = process.env.SECTION;
+          const newContent = process.env.NEW_CONTENT;
+
+          // Fetch current issue
+          const { data: issue } = await github.rest.issues.get({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: issueNumber
+          });
+
+          const currentBody = issue.body || '';
+
+          // Build section markers
+          const beginMarker = `<!-- BEGIN:${section} -->`;
+          const endMarker = `<!-- END:${section} -->`;
+
+          // Find and replace section content
+          const beginIndex = currentBody.indexOf(beginMarker);
+          const endIndex = currentBody.indexOf(endMarker);
+
+          if (beginIndex === -1 || endIndex === -1 || endIndex <= beginIndex) {
+            console.log(`Section ${section} not found in issue body, skipping update`);
+            return;
+          }
+
+          // Build new body
+          const beforeSection = currentBody.substring(0, beginIndex + beginMarker.length);
+          const afterSection = currentBody.substring(endIndex);
+          const newBody = `${beforeSection}\n${newContent}\n${afterSection}`;
+
+          // Update issue
+          await github.rest.issues.update({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: issueNumber,
+            body: newBody
+          });
+
+          console.log(`Updated section ${section} in issue #${issueNumber}`);
