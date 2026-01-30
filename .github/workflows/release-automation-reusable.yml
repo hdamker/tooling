@@ -251,6 +251,7 @@ jobs:
           sparse-checkout: |
             release_automation/scripts
             release_automation/templates
+            shared-actions/post-bot-comment
 
       - name: Post Processing Comment
         id: post
@@ -396,6 +397,7 @@ jobs:
           sparse-checkout: |
             release_automation/scripts
             release_automation/templates
+            shared-actions/post-bot-comment
 
       - name: Post Rejection Comment
         uses: ./_tooling/shared-actions/post-bot-comment
@@ -516,6 +518,7 @@ jobs:
           sparse-checkout: |
             release_automation/scripts
             release_automation/templates
+            shared-actions/post-bot-comment
 
       - name: Handle Issue Event
         id: handle
@@ -612,6 +615,7 @@ jobs:
           sparse-checkout: |
             release_automation/scripts
             release_automation/templates
+            shared-actions/post-bot-comment
 
       - name: Determine Result Template
         id: template
