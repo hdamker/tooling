@@ -1,0 +1,42 @@
+# Release Automation Reusable Workflow - STUB
+#
+# This is a minimal stub for testing the caller workflow infrastructure.
+# The full implementation is on the release-automation-mvp branch.
+#
+# To test with full implementation, update the caller to use:
+#   @release-automation-mvp instead of @main
+
+name: Release Automation (Stub)
+
+on:
+  workflow_call:
+    inputs:
+      command:
+        description: 'Command to execute (for workflow_dispatch)'
+        type: string
+        required: false
+        default: ''
+      reason:
+        description: 'Reason for discard/delete commands'
+        type: string
+        required: false
+        default: ''
+      trigger_pr:
+        description: 'PR number that triggered this workflow'
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  stub-response:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log Trigger Info
+        run: |
+          echo "::notice::Release Automation STUB triggered"
+          echo "Event: ${{ github.event_name }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "Repository: ${{ github.repository }}"
+          echo ""
+          echo "This is a stub workflow. For full implementation, use:"
+          echo "  @release-automation-mvp branch"
