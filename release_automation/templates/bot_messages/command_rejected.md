@@ -5,19 +5,13 @@
 
 ### Reason
 
-{{reason}}
+{{error_message}}
 
 ### Current State
 
 **Release:** `{{release_tag}}`
 **State:** `{{state}}`
 
-### Valid Actions
-
-{{#valid_actions}}
-- `{{.}}`
-{{/valid_actions}}
-
 ---
 
-For help with release commands, see the [Release Automation Guide](https://github.com/camaraproject/ReleaseManagement/blob/main/documentation/API-Release-Guidelines.md).
+[View workflow run]({{workflow_run_url}}) | For help, see the [Release Automation Guide](https://github.com/camaraproject/ReleaseManagement/blob/main/documentation/API-Release-Guidelines.md).
