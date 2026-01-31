@@ -219,14 +219,14 @@ class TestRealTemplates:
         result = bot_responder.render("command_rejected", {
             "command": "/create-snapshot",
             "user": "developer",
-            "reason": "A snapshot already exists for this release.",
+            "error_message": "A snapshot already exists for this release.",
             "release_tag": "r4.1",
             "state": "snapshot-active",
-            "valid_actions": ["/discard-snapshot", "/delete-draft"],
+            "workflow_run_url": "https://github.com/org/repo/actions/runs/123",
         })
         assert "/create-snapshot" in result
         assert "snapshot already exists" in result
-        assert "/discard-snapshot" in result
+        assert "developer" in result
 
     def test_snapshot_failed_template(self, bot_responder):
         """snapshot_failed template renders with errors."""

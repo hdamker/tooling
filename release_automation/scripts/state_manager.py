@@ -300,7 +300,7 @@ class ReleaseStateManager:
             ref: Branch, tag, or commit to read from
 
         Returns:
-            Parsed YAML content as dict, or None if file doesn't exist
+            Parsed YAML content as dict, or None if file doesn't exist or is invalid
         """
         content = self.gh.get_file_content("release-plan.yaml", ref)
         if not content:
@@ -308,7 +308,8 @@ class ReleaseStateManager:
 
         try:
             return yaml.safe_load(content)
-        except yaml.YAMLError:
+        except yaml.YAMLError as e:
+            print(f"Warning: Failed to parse release-plan.yaml from {ref}: {e}")
             return None
 
     def _read_release_metadata(self, ref: str) -> Optional[dict]:
@@ -319,7 +320,7 @@ class ReleaseStateManager:
             ref: Branch, tag, or commit to read from
 
         Returns:
-            Parsed YAML content as dict, or None if file doesn't exist
+            Parsed YAML content as dict, or None if file doesn't exist or is invalid
         """
         content = self.gh.get_file_content("release-metadata.yaml", ref)
         if not content:
@@ -327,5 +328,6 @@ class ReleaseStateManager:
 
         try:
             return yaml.safe_load(content)
-        except yaml.YAMLError:
+        except yaml.YAMLError as e:
+            print(f"Warning: Failed to parse release-metadata.yaml from {ref}: {e}")
             return None

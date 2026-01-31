@@ -177,6 +177,11 @@ class GitHubClient:
 
         Returns:
             File content as string, or None if file doesn't exist
+
+        Note:
+            Returns None only for 404 (file not found).
+            Logs warnings for other errors (auth, server, etc.) but still returns None
+            to maintain backward compatibility.
         """
         try:
             # Use gh api to get file content (base64 encoded)
@@ -187,7 +192,13 @@ class GitHubClient:
                 "-f", f"ref={ref}"
             ])
             return output
-        except GitHubClientError:
+        except GitHubClientError as e:
+            error_msg = str(e).lower()
+            # 404 is expected when file doesn't exist - return None silently
+            if "404" in error_msg or "not found" in error_msg:
+                return None
+            # Other errors (auth, server, rate limit) should be surfaced
+            print(f"Warning: Failed to read {path} from {ref}: {e}")
             return None
 
     def get_releases(self, include_drafts: bool = False) -> List[Release]:
