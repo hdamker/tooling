@@ -46,10 +46,11 @@ jobs:
       trigger_type: ${{ steps.detect.outputs.trigger_type }}
       command: ${{ steps.detect.outputs.command }}
       command_args: ${{ steps.detect.outputs.command_args }}
-      release_tag: ${{ steps.detect.outputs.release_tag }}
       issue_number: ${{ steps.detect.outputs.issue_number }}
       user: ${{ steps.detect.outputs.user }}
       should_continue: ${{ steps.detect.outputs.should_continue }}
+      # Note: release_tag is NOT output here - it comes from derive-state job
+      # which reads from authoritative sources (release-plan.yaml or release-metadata.yaml)
     steps:
       - name: Detect Trigger Type
         id: detect
@@ -60,7 +61,6 @@ jobs:
             let triggerType = 'unknown';
             let command = '';
             let commandArgs = '';
-            let releaseTag = '';
             let issueNumber = '';
             let user = '';
             let shouldContinue = 'false';
@@ -68,31 +68,14 @@ jobs:
             console.log(`Event: ${eventName}`);
             console.log(`Action: ${context.payload.action || 'N/A'}`);
 
-            // Helper: Extract release tag from labels
-            function extractReleaseTagFromLabels(labels) {
-              if (!labels) return '';
-              for (const label of labels) {
-                // Look for release-state:* labels, then extract tag from title
-                if (label.name && label.name.startsWith('release-state:')) {
-                  return ''; // Has state label but need tag from title
-                }
-              }
-              return '';
-            }
-
-            // Helper: Extract release tag from issue title
-            function extractReleaseTagFromTitle(title) {
-              if (!title) return '';
-              // Match "Release r4.1" or "Release r4.1 (RC)" patterns
-              const match = title.match(/Release\s+(r\d+\.\d+)/i);
-              return match ? match[1] : '';
-            }
-
             // Helper: Check if issue has release-issue label
             function isReleaseIssue(labels) {
               if (!labels) return false;
               return labels.some(l => l.name === 'release-issue');
             }
+
+            // NOTE: release_tag is NOT extracted here - it comes from derive-state job
+            // which reads from authoritative sources (release-plan.yaml or release-metadata.yaml)
 
             // ─────────────────────────────────────────────────────────────────
             // Event: issue_comment
@@ -108,14 +91,6 @@ jobs:
               // Check if this is a Release Issue
               if (!isReleaseIssue(issue.labels)) {
                 console.log('Not a release issue, skipping');
-                core.setOutput('should_continue', 'false');
-                return;
-              }
-
-              // Extract release tag from title
-              releaseTag = extractReleaseTagFromTitle(issue.title);
-              if (!releaseTag) {
-                console.log('Could not extract release tag from issue title');
                 core.setOutput('should_continue', 'false');
                 return;
               }
@@ -163,9 +138,6 @@ jobs:
                 return;
               }
 
-              // Extract release tag from title
-              releaseTag = extractReleaseTagFromTitle(issue.title);
-
               if (action === 'closed') {
                 triggerType = 'issue_close';
                 shouldContinue = 'true';
@@ -189,11 +161,6 @@ jobs:
                 if (baseBranch.startsWith('release-snapshot/')) {
                   triggerType = 'pr_merge';
                   user = pr.merged_by ? pr.merged_by.login : pr.user.login;
-
-                  // Extract release tag from branch name: release-snapshot/r4.1-abc1234
-                  const match = baseBranch.match(/release-snapshot\/(r\d+\.\d+)/);
-                  releaseTag = match ? match[1] : '';
-
                   shouldContinue = 'true';
                 }
               }
@@ -217,24 +184,55 @@ jobs:
             console.log(`Trigger type: ${triggerType}`);
             console.log(`Command: ${command}`);
             console.log(`Command args: ${commandArgs}`);
-            console.log(`Release tag: ${releaseTag}`);
             console.log(`Issue number: ${issueNumber}`);
             console.log(`User: ${user}`);
             console.log(`Should continue: ${shouldContinue}`);
+            console.log('Note: release_tag will come from derive-state job');
 
             core.setOutput('trigger_type', triggerType);
             core.setOutput('command', command);
             core.setOutput('command_args', commandArgs);
-            core.setOutput('release_tag', releaseTag);
             core.setOutput('issue_number', issueNumber);
             core.setOutput('user', user);
             core.setOutput('should_continue', shouldContinue);
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 2: Post interim comment (for slash commands only)
+  # Phase 2: Derive current state (runs first to get release_tag from artifacts)
+  # ─────────────────────────────────────────────────────────────────────────────
+  derive-state:
+    needs: check-trigger
+    if: needs.check-trigger.outputs.should_continue == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.state.outputs.release_tag }}
+      state: ${{ steps.state.outputs.state }}
+      snapshot_id: ${{ steps.state.outputs.snapshot_id }}
+      snapshot_branch: ${{ steps.state.outputs.snapshot_branch }}
+      release_review_branch: ${{ steps.state.outputs.release_review_branch }}
+      release_pr_number: ${{ steps.state.outputs.release_pr_number }}
+      base_commit_sha: ${{ steps.state.outputs.base_commit_sha }}
+      source: ${{ steps.state.outputs.source }}
+    steps:
+      - name: Checkout tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          ref: release-automation-mvp
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            shared-actions/derive-release-state
+
+      - name: Derive Release State
+        id: state
+        uses: ./_tooling/shared-actions/derive-release-state
+        # No release_tag input - derived from repository artifacts (release-plan.yaml or release-metadata.yaml)
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 3: Post interim comment (for slash commands only)
   # ─────────────────────────────────────────────────────────────────────────────
   post-interim:
-    needs: check-trigger
+    needs: [check-trigger, derive-state]
     if: |
       needs.check-trigger.outputs.should_continue == 'true' &&
       needs.check-trigger.outputs.trigger_type == 'slash_command'
@@ -258,7 +256,8 @@ jobs:
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
           issue_number: ${{ needs.check-trigger.outputs.issue_number }}
-          release_tag: ${{ needs.check-trigger.outputs.release_tag }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
           template: interim_processing
           context: |
             {
@@ -266,37 +265,6 @@ jobs:
               "user": "${{ needs.check-trigger.outputs.user }}",
               "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             }
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 3: Derive current state
-  # ─────────────────────────────────────────────────────────────────────────────
-  derive-state:
-    needs: check-trigger
-    if: needs.check-trigger.outputs.should_continue == 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      state: ${{ steps.state.outputs.state }}
-      snapshot_id: ${{ steps.state.outputs.snapshot_id }}
-      snapshot_branch: ${{ steps.state.outputs.snapshot_branch }}
-      release_review_branch: ${{ steps.state.outputs.release_review_branch }}
-      release_pr_number: ${{ steps.state.outputs.release_pr_number }}
-      base_commit_sha: ${{ steps.state.outputs.base_commit_sha }}
-    steps:
-      - name: Checkout tooling
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-        with:
-          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
-          ref: release-automation-mvp
-          path: _tooling
-          sparse-checkout: |
-            release_automation/scripts
-            shared-actions/derive-release-state
-
-      - name: Derive Release State
-        id: state
-        uses: ./_tooling/shared-actions/derive-release-state
-        with:
-          release_tag: ${{ needs.check-trigger.outputs.release_tag }}
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 4: Validate command (for slash commands only)
@@ -403,14 +371,15 @@ jobs:
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
           issue_number: ${{ needs.check-trigger.outputs.issue_number }}
-          release_tag: ${{ needs.check-trigger.outputs.release_tag }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
           template: command_rejected
           context: |
             {
               "command": "${{ needs.check-trigger.outputs.command }}",
               "user": "${{ needs.check-trigger.outputs.user }}",
               "state": "${{ needs.derive-state.outputs.state }}",
-              "release_tag": "${{ needs.check-trigger.outputs.release_tag }}",
+              "release_tag": "${{ needs.derive-state.outputs.release_tag }}",
               "error_message": "${{ needs.validate-command.outputs.error_message }}",
               "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             }
@@ -566,7 +535,8 @@ jobs:
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
           issue_number: ${{ needs.check-trigger.outputs.issue_number }}
-          release_tag: ${{ needs.check-trigger.outputs.release_tag }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
           template: issue_reopened
           context: |
             {
@@ -662,7 +632,7 @@ jobs:
             "command": "${{ needs.check-trigger.outputs.command }}",
             "user": "${{ needs.check-trigger.outputs.user }}",
             "state": "${{ needs.derive-state.outputs.state }}",
-            "release_tag": "${{ needs.check-trigger.outputs.release_tag }}",
+            "release_tag": "${{ needs.derive-state.outputs.release_tag }}",
             "snapshot_id": "${{ needs.derive-state.outputs.snapshot_id }}",
             "snapshot_branch": "${{ needs.derive-state.outputs.snapshot_branch }}",
             "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -682,7 +652,8 @@ jobs:
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
           issue_number: ${{ needs.check-trigger.outputs.issue_number }}
-          release_tag: ${{ needs.check-trigger.outputs.release_tag }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
           template: ${{ steps.template.outputs.template }}
           context: ${{ steps.context.outputs.context }}
           comment_id: ${{ needs.post-interim.outputs.comment_id }}

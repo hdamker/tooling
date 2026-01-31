@@ -21,6 +21,9 @@ inputs:
     description: 'Existing comment ID to update (optional - will search by marker if not provided)'
     required: false
     default: ''
+  run_id:
+    description: 'Workflow run ID for marker uniqueness (preserves comment history across runs)'
+    required: true
 
 outputs:
   comment_id:
@@ -46,6 +49,7 @@ runs:
         TEMPLATE_NAME: ${{ inputs.template }}
         CONTEXT_JSON: ${{ inputs.context }}
         RELEASE_TAG: ${{ inputs.release_tag }}
+        RUN_ID: ${{ inputs.run_id }}
         SCRIPTS_PATH: ${{ github.action_path }}/../../release_automation/scripts
       run: |
         import json
@@ -74,6 +78,7 @@ runs:
         # Render template
         template_name = os.environ['TEMPLATE_NAME']
         release_tag = os.environ['RELEASE_TAG']
+        run_id = os.environ['RUN_ID']
 
         responder = BotResponder()
 
@@ -92,7 +97,7 @@ runs:
             f.write(f"content<<{delimiter}\n")
             f.write(content)
             f.write(f"\n{delimiter}\n")
-            f.write(f"marker=<!-- release-bot:{release_tag} -->\n")
+            f.write(f"marker=<!-- release-bot:{release_tag}:{run_id} -->\n")
 
         print(f"Rendered template: {template_name}")
         print(f"Content length: {len(content)} chars")

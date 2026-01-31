@@ -1,16 +1,25 @@
 name: derive-release-state
 description: |
-  Derives the current release state from repository artifacts.
+  Derives the current release state and release tag from repository artifacts.
   Examines tags, branches, releases, and release-plan.yaml to determine
   whether a release is planned, has an active snapshot, has a draft ready,
   is published, or is cancelled.
 
+  The release_tag is derived from the authoritative source:
+  - PLANNED/CANCELLED: from release-plan.yaml on main branch
+  - SNAPSHOT_ACTIVE/DRAFT_READY: from release-metadata.yaml on snapshot branch
+  - PUBLISHED: from the git tag
+
 inputs:
   release_tag:
-    description: 'Release tag to check (e.g., "r4.1")'
-    required: true
+    description: 'Release tag to check - DEPRECATED: leave empty to auto-derive from repository artifacts'
+    required: false
+    default: ''
 
 outputs:
+  release_tag:
+    description: 'Release tag from authoritative source (release-plan.yaml or release-metadata.yaml)'
+    value: ${{ steps.derive.outputs.release_tag }}
   state:
     description: 'Current release state (planned|snapshot-active|draft-ready|published|cancelled)'
     value: ${{ steps.derive.outputs.state }}
@@ -29,6 +38,9 @@ outputs:
   base_commit_sha:
     description: 'Base commit SHA the snapshot was created from'
     value: ${{ steps.derive.outputs.base_commit_sha }}
+  source:
+    description: 'Source of release_tag (release-plan.yaml|release-metadata.yaml|tag)'
+    value: ${{ steps.derive.outputs.source }}
 
 runs:
   using: composite
@@ -47,7 +59,7 @@ runs:
       shell: python
       env:
         GITHUB_TOKEN: ${{ github.token }}
-        RELEASE_TAG: ${{ inputs.release_tag }}
+        RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
         REPO: ${{ github.repository }}
         SCRIPTS_PATH: ${{ github.action_path }}/../../release_automation/scripts
       run: |
@@ -69,19 +81,29 @@ runs:
         # Initialize clients
         repo = os.environ['REPO']
         token = os.environ.get('GITHUB_TOKEN')
-        release_tag = os.environ['RELEASE_TAG']
+        release_tag_input = os.environ.get('RELEASE_TAG_INPUT', '').strip()
 
         gh = GitHubClient(repo=repo, token=token)
         manager = ReleaseStateManager(github_client=gh)
 
-        # Derive state
-        state = manager.derive_state(release_tag)
-        snapshot = manager.get_current_snapshot(release_tag)
+        # Get release info from repository artifacts (authoritative source)
+        release_info = manager.get_current_release_info()
+        release_tag = release_info['release_tag']
+        state = release_info['state']
+        snapshot_branch = release_info['snapshot_branch']
+        source = release_info['source'] or ''
+
+        # Get snapshot details if available
+        snapshot = None
+        if release_tag:
+            snapshot = manager.get_current_snapshot(release_tag)
 
         # Write outputs to GITHUB_OUTPUT
         output_file = os.environ['GITHUB_OUTPUT']
         with open(output_file, 'a') as f:
+            f.write(f"release_tag={release_tag or ''}\n")
             f.write(f"state={state.value}\n")
+            f.write(f"source={source}\n")
 
             if snapshot:
                 f.write(f"snapshot_id={snapshot.snapshot_id}\n")
@@ -92,13 +114,14 @@ runs:
                 f.write(f"release_pr_number={pr_num}\n")
             else:
                 f.write("snapshot_id=\n")
-                f.write("snapshot_branch=\n")
+                f.write(f"snapshot_branch={snapshot_branch or ''}\n")
                 f.write("release_review_branch=\n")
                 f.write("base_commit_sha=\n")
                 f.write("release_pr_number=\n")
 
         # Log result for debugging
-        print(f"Release state for {release_tag}: {state.value}")
+        print(f"Release tag: {release_tag} (from {source})")
+        print(f"State: {state.value}")
         if snapshot:
             print(f"  Snapshot ID: {snapshot.snapshot_id}")
             print(f"  Snapshot branch: {snapshot.snapshot_branch}")

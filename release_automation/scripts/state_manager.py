@@ -200,6 +200,98 @@ class ReleaseStateManager:
             return [current]
         return []
 
+    def get_current_release_info(self) -> dict:
+        """
+        Get the current release tag and state from repository artifacts.
+
+        This method determines the release_tag from the authoritative source:
+        - If a snapshot branch exists: from release-metadata.yaml on the snapshot
+        - Otherwise: from release-plan.yaml on main branch
+
+        The state is derived accordingly:
+        - PUBLISHED: if tag exists
+        - DRAFT_READY: if snapshot branch and draft release exist
+        - SNAPSHOT_ACTIVE: if snapshot branch exists
+        - PLANNED: if release-plan.yaml has target_release_type != none
+        - CANCELLED: if release-plan.yaml has target_release_type == none
+
+        Returns:
+            dict with keys:
+                - release_tag: str or None
+                - state: ReleaseState
+                - snapshot_branch: str or None
+                - source: 'release-metadata.yaml' | 'release-plan.yaml' | 'tag'
+        """
+        # First, check release-plan.yaml for the planned release
+        plan = self._read_release_plan()
+        plan_release_tag = None
+        plan_release_type = None
+
+        if plan:
+            plan_release_tag = plan.get("repository", {}).get("target_release_tag")
+            plan_release_type = plan.get("repository", {}).get("target_release_type")
+
+        # Check if the planned release is already published
+        if plan_release_tag and self.gh.tag_exists(plan_release_tag):
+            return {
+                "release_tag": plan_release_tag,
+                "state": ReleaseState.PUBLISHED,
+                "snapshot_branch": None,
+                "source": "tag"
+            }
+
+        # Check for any snapshot branches for the planned release
+        if plan_release_tag:
+            snapshot_branches = self.gh.list_branches(f"release-snapshot/{plan_release_tag}-*")
+
+            if snapshot_branches:
+                # Snapshot exists - read release_tag from release-metadata.yaml
+                snapshot_branch = snapshot_branches[0].name
+                metadata = self._read_release_metadata(snapshot_branch)
+
+                if metadata:
+                    metadata_release_tag = metadata.get("repository", {}).get("release_tag")
+                else:
+                    # Fall back to extracting from branch name
+                    # release-snapshot/r4.1-abc1234 → r4.1
+                    snapshot_id = snapshot_branch.replace("release-snapshot/", "")
+                    metadata_release_tag = snapshot_id.split("-")[0] if "-" in snapshot_id else snapshot_id
+
+                # Determine if draft ready
+                if self.gh.draft_release_exists(metadata_release_tag or plan_release_tag):
+                    state = ReleaseState.DRAFT_READY
+                else:
+                    state = ReleaseState.SNAPSHOT_ACTIVE
+
+                return {
+                    "release_tag": metadata_release_tag or plan_release_tag,
+                    "state": state,
+                    "snapshot_branch": snapshot_branch,
+                    "source": "release-metadata.yaml"
+                }
+
+        # No snapshot - use release-plan.yaml
+        if plan_release_tag:
+            if plan_release_type and plan_release_type.lower() != "none":
+                state = ReleaseState.PLANNED
+            else:
+                state = ReleaseState.CANCELLED
+
+            return {
+                "release_tag": plan_release_tag,
+                "state": state,
+                "snapshot_branch": None,
+                "source": "release-plan.yaml"
+            }
+
+        # No release planned
+        return {
+            "release_tag": None,
+            "state": ReleaseState.CANCELLED,
+            "snapshot_branch": None,
+            "source": None
+        }
+
     def _read_release_plan(self, ref: str = "main") -> Optional[dict]:
         """
         Read and parse release-plan.yaml from the repository.
