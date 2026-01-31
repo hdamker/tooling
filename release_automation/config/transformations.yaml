@@ -1,0 +1,88 @@
+# CAMARA Release Automation - Mechanical Transformations
+#
+# This file defines the automated placeholder replacements applied during
+# release branch preparation. Each transformation specifies:
+#   - type: yaml_path | regex | mustache_section
+#   - file_pattern: glob pattern for target files
+#   - path/pattern: location of the placeholder
+#   - replacement: template string with context variables
+#
+# Context variables available:
+#   - {release_tag}: e.g., "r4.2"
+#   - {api_version}: calculated version for current API (e.g., "3.2.0-rc.2")
+#   - {major_version}: major version number (e.g., "3" from "3.2.0-rc.2")
+#   - {commonalities_version}: version from dependencies
+#   - {icm_version}: ICM version from dependencies
+#   - {api_name}: current API name
+
+transformations:
+  # T1: API version in info.version field
+  - name: info_version
+    description: Replace wip version in OpenAPI info.version
+    type: yaml_path
+    file_pattern: "code/API_definitions/*.yaml"
+    path: info.version
+    match_value: wip
+    replacement: "{api_version}"
+
+  # T2: Server URL version path
+  - name: server_url
+    description: Replace /vwip in server URLs
+    type: regex
+    file_pattern: "code/API_definitions/*.yaml"
+    pattern: "/vwip"
+    replacement: "/v{major_version}"
+
+  # T3: Commonalities reference in x-camara-commonalities
+  - name: commonalities_ref
+    description: Replace wip in x-camara-commonalities
+    type: yaml_path
+    file_pattern: "code/API_definitions/*.yaml"
+    path: info.x-camara-commonalities
+    match_value: wip
+    replacement: "{commonalities_version}"
+
+  # T4: ICM reference in x-camara-icm (Identity and Consent Management)
+  - name: icm_version_ref
+    description: Replace wip in x-camara-icm
+    type: yaml_path
+    file_pattern: "code/API_definitions/*.yaml"
+    path: info.x-camara-icm
+    match_value: wip
+    replacement: "{icm_version}"
+
+  # T5: GitHub blob links (main -> release tag)
+  - name: github_main_links
+    description: Replace blob/main/ with blob/{release_tag}/
+    type: regex
+    file_pattern: "**/*.md"
+    pattern: "blob/main/"
+    replacement: "blob/{release_tag}/"
+
+  # T6: GitHub raw content links (main -> release tag)
+  - name: github_raw_links
+    description: Replace raw/main/ with raw/{release_tag}/
+    type: regex
+    file_pattern: "**/*.md"
+    pattern: "raw/main/"
+    replacement: "raw/{release_tag}/"
+
+  # T7: CHANGELOG API version sections (stub - future implementation)
+  - name: changelog_api_versions
+    description: Insert API version entries in CHANGELOG
+    type: mustache_section
+    file_pattern: "CHANGELOG.md"
+    section: api_versions
+    template: |
+      ## {api_name} {api_version}
+      - Release {release_tag}
+    enabled: false  # Stub for future implementation
+
+  # T8: Reserved for future transformations
+  - name: reserved
+    description: Reserved for future use
+    type: regex
+    file_pattern: ""
+    pattern: ""
+    replacement: ""
+    enabled: false

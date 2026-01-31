@@ -222,8 +222,6 @@ class ReleaseStateManager:
                 - snapshot_branch: str or None
                 - source: 'release-metadata.yaml' | 'release-plan.yaml' | 'tag'
         """
-        print(f"DEBUG: get_current_release_info() called for repo={self.gh.repo}")
-
         # First, check release-plan.yaml for the planned release
         plan = self._read_release_plan()
         plan_release_tag = None
@@ -232,9 +230,6 @@ class ReleaseStateManager:
         if plan:
             plan_release_tag = plan.get("repository", {}).get("target_release_tag")
             plan_release_type = plan.get("repository", {}).get("target_release_type")
-            print(f"DEBUG: Plan loaded: target_release_tag={plan_release_tag}, type={plan_release_type}")
-        else:
-            print("DEBUG: No release plan found")
 
         # Check if the planned release is already published
         if plan_release_tag and self.gh.tag_exists(plan_release_tag):
@@ -307,12 +302,8 @@ class ReleaseStateManager:
         Returns:
             Parsed YAML content as dict, or None if file doesn't exist or is invalid
         """
-        print(f"DEBUG: Attempting to read release-plan.yaml from ref='{ref}'")
         content = self.gh.get_file_content("release-plan.yaml", ref)
-        if content:
-            print(f"DEBUG: release-plan.yaml found ({len(content)} bytes)")
-        else:
-            print(f"DEBUG: release-plan.yaml NOT FOUND on ref='{ref}'")
+        if not content:
             return None
 
         try:

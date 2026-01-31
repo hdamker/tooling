@@ -184,7 +184,6 @@ class GitHubClient:
             to maintain backward compatibility.
         """
         api_path = f"repos/{self.repo}/contents/{path}?ref={ref}"
-        print(f"DEBUG: get_file_content() calling: gh api {api_path}")
         try:
             # Use gh api to get file content
             # Note: ref must be a query parameter, not a form field (-f)
@@ -196,7 +195,6 @@ class GitHubClient:
             return output
         except GitHubClientError as e:
             error_msg = str(e).lower()
-            print(f"DEBUG: get_file_content() error: {e}")
             # 404 is expected when file doesn't exist - return None silently
             if "404" in error_msg or "not found" in error_msg:
                 return None
