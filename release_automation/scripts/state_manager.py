@@ -230,9 +230,6 @@ class ReleaseStateManager:
         plan_release_type = None
 
         if plan:
-            print(f"DEBUG: Plan loaded: target_release_tag={plan.get('repository', {}).get('target_release_tag')}")
-        else:
-            print("DEBUG: No release plan found")
             plan_release_tag = plan.get("repository", {}).get("target_release_tag")
             plan_release_type = plan.get("repository", {}).get("target_release_type")
             print(f"DEBUG: Plan loaded: target_release_tag={plan_release_tag}, type={plan_release_type}")
