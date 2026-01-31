@@ -14,4 +14,4 @@
 
 ---
 
-[View workflow run]({{workflow_run_url}}) | For help, see the [Release Documentation](https://github.com/camaraproject/ReleaseManagement/blob/main/documentation/).
+[View workflow run]({{workflow_run_url}}) | For help, see the [Release Documentation](https://github.com/camaraproject/ReleaseManagement/blob/main/documentation/README.md).

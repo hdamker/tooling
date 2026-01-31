@@ -68,9 +68,12 @@ class GitHubClient:
         Raises:
             GitHubClientError: If command fails and check=True
         """
+        import os as _os
+
         cmd = ["gh"] + args
         if self.token:
-            env = {"GH_TOKEN": self.token}
+            # Extend environment with GH_TOKEN, don't replace it
+            env = {**_os.environ, "GH_TOKEN": self.token}
         else:
             env = None
 
