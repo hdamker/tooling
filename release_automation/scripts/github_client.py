@@ -183,17 +183,20 @@ class GitHubClient:
             Logs warnings for other errors (auth, server, etc.) but still returns None
             to maintain backward compatibility.
         """
+        api_path = f"repos/{self.repo}/contents/{path}"
+        print(f"DEBUG: get_file_content() calling: gh api {api_path} -f ref={ref}")
         try:
             # Use gh api to get file content (base64 encoded)
             output = self._run_gh([
                 "api",
-                f"repos/{self.repo}/contents/{path}",
+                api_path,
                 "-H", f"Accept: application/vnd.github.raw",
                 "-f", f"ref={ref}"
             ])
             return output
         except GitHubClientError as e:
             error_msg = str(e).lower()
+            print(f"DEBUG: get_file_content() error: {e}")
             # 404 is expected when file doesn't exist - return None silently
             if "404" in error_msg or "not found" in error_msg:
                 return None
