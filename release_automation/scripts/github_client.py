@@ -183,15 +183,15 @@ class GitHubClient:
             Logs warnings for other errors (auth, server, etc.) but still returns None
             to maintain backward compatibility.
         """
-        api_path = f"repos/{self.repo}/contents/{path}"
-        print(f"DEBUG: get_file_content() calling: gh api {api_path} -f ref={ref}")
+        api_path = f"repos/{self.repo}/contents/{path}?ref={ref}"
+        print(f"DEBUG: get_file_content() calling: gh api {api_path}")
         try:
-            # Use gh api to get file content (base64 encoded)
+            # Use gh api to get file content
+            # Note: ref must be a query parameter, not a form field (-f)
             output = self._run_gh([
                 "api",
                 api_path,
-                "-H", f"Accept: application/vnd.github.raw",
-                "-f", f"ref={ref}"
+                "-H", "Accept: application/vnd.github.raw"
             ])
             return output
         except GitHubClientError as e:
