@@ -1,0 +1,502 @@
+"""
+Snapshot creator for CAMARA release automation.
+
+This module orchestrates the complete snapshot creation flow, including
+version calculation, mechanical transformations, and metadata generation.
+"""
+
+import os
+import shutil
+import tempfile
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+import yaml
+
+from .git_operations import GitOperations, GitOperationsError, PullRequestInfo
+from .github_client import GitHubClient
+from .mechanical_transformer import MechanicalTransformer, TransformationContext
+from .metadata_generator import MetadataGenerator
+from .state_manager import ReleaseState, ReleaseStateManager
+from .version_calculator import VersionCalculator
+
+
+@dataclass
+class SnapshotConfig:
+    """Configuration for snapshot creation."""
+    release_tag: str
+    base_branch: str = "main"
+    base_commit_sha: Optional[str] = None
+    dry_run: bool = False
+    commonalities_version: str = "wip"
+    icm_version: str = "wip"
+
+
+@dataclass
+class SnapshotResult:
+    """Result of snapshot creation."""
+    success: bool
+    snapshot_id: Optional[str] = None
+    snapshot_branch: Optional[str] = None
+    release_review_branch: Optional[str] = None
+    release_pr_number: Optional[int] = None
+    release_pr_url: Optional[str] = None
+    base_commit_sha: Optional[str] = None
+    api_versions: Dict[str, str] = field(default_factory=dict)
+    transformation_summary: Dict[str, Any] = field(default_factory=dict)
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+    def to_bot_context(self) -> Dict[str, Any]:
+        """
+        Convert to context dict for bot message templates.
+
+        Returns:
+            Dict suitable for Mustache template rendering
+        """
+        return {
+            "success": self.success,
+            "snapshot_id": self.snapshot_id,
+            "snapshot_branch": self.snapshot_branch,
+            "release_review_branch": self.release_review_branch,
+            "release_pr_number": self.release_pr_number,
+            "release_pr_url": self.release_pr_url,
+            "base_commit_sha": self.base_commit_sha,
+            "apis": [
+                {"name": name, "version": version}
+                for name, version in self.api_versions.items()
+            ],
+            "transformation_summary": self.transformation_summary,
+            "errors": self.errors,
+            "warnings": self.warnings,
+            "has_errors": len(self.errors) > 0,
+            "has_warnings": len(self.warnings) > 0,
+        }
+
+
+class SnapshotCreatorError(Exception):
+    """Base exception for snapshot creator errors."""
+    pass
+
+
+class InvalidStateError(SnapshotCreatorError):
+    """Raised when snapshot creation attempted in invalid state."""
+    pass
+
+
+class TransformationError(SnapshotCreatorError):
+    """Raised when transformations fail critically."""
+    pass
+
+
+class SnapshotCreator:
+    """
+    Orchestrates release snapshot creation.
+
+    Creates snapshot branches with all transformations applied,
+    generates release-metadata.yaml, and creates the Release PR.
+    """
+
+    SNAPSHOT_BRANCH_PREFIX = "release-snapshot"
+    RELEASE_REVIEW_BRANCH_PREFIX = "release-review"
+    SHORT_SHA_LENGTH = 7
+    BOT_NAME = "CAMARA Release Bot"
+    BOT_EMAIL = "noreply@camaraproject.org"
+
+    def __init__(
+        self,
+        github_client: GitHubClient,
+        version_calculator: VersionCalculator,
+        transformer: MechanicalTransformer,
+        metadata_generator: MetadataGenerator,
+        state_manager: ReleaseStateManager,
+    ):
+        """
+        Initialize snapshot creator with dependencies.
+
+        Args:
+            github_client: GitHubClient instance for repository operations
+            version_calculator: VersionCalculator for API version extensions
+            transformer: MechanicalTransformer for placeholder replacements
+            metadata_generator: MetadataGenerator for release-metadata.yaml
+            state_manager: ReleaseStateManager for state validation
+        """
+        self.gh = github_client
+        self.version_calc = version_calculator
+        self.transformer = transformer
+        self.metadata_gen = metadata_generator
+        self.state_manager = state_manager
+
+    def create_snapshot(
+        self,
+        release_plan: Dict[str, Any],
+        config: SnapshotConfig,
+    ) -> SnapshotResult:
+        """
+        Create a complete release snapshot.
+
+        Args:
+            release_plan: Parsed release-plan.yaml content
+            config: Snapshot configuration
+
+        Returns:
+            SnapshotResult with all details or errors
+        """
+        result = SnapshotResult(success=False)
+        temp_dir = None
+        snapshot_branch = None
+        release_review_branch = None
+
+        try:
+            # Step 1: Validate preconditions
+            errors = self.validate_preconditions(config.release_tag)
+            if errors:
+                result.errors = errors
+                return result
+
+            # Step 2: Get base commit SHA
+            if config.base_commit_sha:
+                base_sha = config.base_commit_sha
+            else:
+                # Get from main branch via API
+                branches = self.gh.list_branches(config.base_branch)
+                if not branches:
+                    result.errors.append(
+                        f"Base branch '{config.base_branch}' not found"
+                    )
+                    return result
+                base_sha = branches[0].sha
+
+            result.base_commit_sha = base_sha
+
+            # Step 3: Generate snapshot ID
+            snapshot_id = self.generate_snapshot_id(config.release_tag, base_sha)
+            result.snapshot_id = snapshot_id
+
+            # Step 4: Calculate API versions
+            api_versions = self.version_calc.calculate_versions_for_plan(release_plan)
+            result.api_versions = api_versions
+
+            # Step 5: Define branch names
+            snapshot_branch = f"{self.SNAPSHOT_BRANCH_PREFIX}/{snapshot_id}"
+            release_review_branch = f"{self.RELEASE_REVIEW_BRANCH_PREFIX}/{snapshot_id}"
+            result.snapshot_branch = snapshot_branch
+            result.release_review_branch = release_review_branch
+
+            if config.dry_run:
+                result.success = True
+                result.warnings.append("Dry run: no branches or PR created")
+                return result
+
+            # Step 6: Clone repository to temp directory
+            temp_dir = tempfile.mkdtemp(prefix="camara-snapshot-")
+            git_ops = GitOperations(
+                repo=self.gh.repo,
+                work_dir=temp_dir,
+                token=self.gh.token,
+            )
+
+            git_ops.clone(branch=config.base_branch)
+            git_ops.configure_user(self.BOT_NAME, self.BOT_EMAIL)
+
+            # Step 7: Create snapshot branch
+            git_ops.create_branch(snapshot_branch)
+
+            # Step 8: Apply transformations
+            context = TransformationContext(
+                release_tag=config.release_tag,
+                api_versions=api_versions,
+                commonalities_version=config.commonalities_version,
+                icm_version=config.icm_version,
+                release_plan=release_plan,
+            )
+
+            transform_result = self.transformer.apply_all(temp_dir, context)
+            result.transformation_summary = {
+                "files_modified": len(transform_result.files_modified),
+                "changes": len(transform_result.changes),
+            }
+            result.warnings.extend(transform_result.warnings)
+
+            if not transform_result.success:
+                result.errors.extend(transform_result.errors)
+                raise TransformationError("Transformations failed")
+
+            # Step 9: Generate and write release-metadata.yaml
+            api_titles = self._extract_api_titles(release_plan, temp_dir)
+            metadata = self.metadata_gen.generate(
+                release_plan, api_versions, base_sha, api_titles
+            )
+            metadata_path = os.path.join(temp_dir, "release-metadata.yaml")
+            with open(metadata_path, "w") as f:
+                yaml.safe_dump(metadata, f, default_flow_style=False, sort_keys=False)
+
+            # Step 10: Commit changes
+            commit_message = f"Release automation: create snapshot {snapshot_id}"
+            git_ops.commit_all(commit_message)
+
+            # Step 11: Push snapshot branch
+            git_ops.push(snapshot_branch)
+
+            # Step 12: Create release-review branch from snapshot
+            git_ops.create_branch(release_review_branch, from_ref="HEAD")
+
+            # Step 13: Push release-review branch
+            git_ops.push(release_review_branch)
+
+            # Step 14: Create Release PR
+            pr_info = self._create_release_pr(
+                git_ops,
+                config.release_tag,
+                snapshot_id,
+                api_versions,
+                release_plan,
+            )
+            result.release_pr_number = pr_info.number
+            result.release_pr_url = pr_info.url
+
+            result.success = True
+
+        except InvalidStateError as e:
+            result.errors.append(str(e))
+        except TransformationError as e:
+            result.errors.append(str(e))
+            self._cleanup_branches(snapshot_branch, release_review_branch)
+        except GitOperationsError as e:
+            result.errors.append(f"Git operation failed: {e}")
+            self._cleanup_branches(snapshot_branch, release_review_branch)
+        except Exception as e:
+            result.errors.append(f"Unexpected error: {e}")
+            self._cleanup_branches(snapshot_branch, release_review_branch)
+        finally:
+            # Cleanup temp directory
+            if temp_dir and os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+        return result
+
+    def validate_preconditions(self, release_tag: str) -> List[str]:
+        """
+        Validate all preconditions for snapshot creation.
+
+        Checks:
+        1. Current state is PLANNED
+        2. No existing snapshot branch for this release
+
+        Args:
+            release_tag: Release tag to validate
+
+        Returns:
+            List of error messages (empty if valid)
+        """
+        errors = []
+
+        # Check current state
+        state = self.state_manager.derive_state(release_tag)
+
+        if state == ReleaseState.PUBLISHED:
+            errors.append(
+                f"Release {release_tag} is already published. "
+                "Cannot create snapshot for a published release."
+            )
+        elif state == ReleaseState.SNAPSHOT_ACTIVE:
+            errors.append(
+                f"A snapshot already exists for {release_tag}. "
+                "Use /discard-snapshot first if you want to create a new one."
+            )
+        elif state == ReleaseState.DRAFT_READY:
+            errors.append(
+                f"A draft release already exists for {release_tag}. "
+                "Use /delete-draft first if you want to start over."
+            )
+        elif state == ReleaseState.CANCELLED:
+            errors.append(
+                f"Release {release_tag} is cancelled. "
+                "Update release-plan.yaml to set target_release_type to a valid value."
+            )
+        elif state != ReleaseState.PLANNED:
+            errors.append(
+                f"Unexpected state '{state.value}' for {release_tag}. "
+                "Expected PLANNED state for snapshot creation."
+            )
+
+        return errors
+
+    def generate_snapshot_id(self, release_tag: str, commit_sha: str) -> str:
+        """
+        Generate unique snapshot ID from release tag and commit SHA.
+
+        Format: {release_tag}-{short_sha}
+        Example: r4.1-abc1234
+
+        Args:
+            release_tag: Release tag (e.g., "r4.1")
+            commit_sha: Full commit SHA
+
+        Returns:
+            Snapshot ID string
+        """
+        short_sha = commit_sha[: self.SHORT_SHA_LENGTH]
+        return f"{release_tag}-{short_sha}"
+
+    def _extract_api_titles(
+        self,
+        release_plan: Dict[str, Any],
+        repo_path: str,
+    ) -> Dict[str, str]:
+        """
+        Extract API titles from release plan or OpenAPI specs.
+
+        Args:
+            release_plan: Parsed release-plan.yaml
+            repo_path: Path to cloned repository
+
+        Returns:
+            Dict mapping api_name to title
+        """
+        titles = {}
+
+        for api in release_plan.get("apis", []):
+            api_name = api.get("api_name")
+            if not api_name:
+                continue
+
+            # Try to get title from release plan first
+            title = api.get("api_title")
+
+            # Fall back to reading from OpenAPI spec
+            if not title:
+                spec_path = os.path.join(
+                    repo_path, "code", "API_definitions", f"{api_name}.yaml"
+                )
+                if os.path.exists(spec_path):
+                    try:
+                        with open(spec_path, "r") as f:
+                            spec = yaml.safe_load(f)
+                            title = spec.get("info", {}).get("title", api_name)
+                    except (yaml.YAMLError, IOError):
+                        title = api_name
+                else:
+                    title = api_name
+
+            titles[api_name] = title
+
+        return titles
+
+    def _create_release_pr(
+        self,
+        git_ops: GitOperations,
+        release_tag: str,
+        snapshot_id: str,
+        api_versions: Dict[str, str],
+        release_plan: Dict[str, Any],
+    ) -> PullRequestInfo:
+        """
+        Create the Release PR.
+
+        Args:
+            git_ops: GitOperations instance
+            release_tag: Release tag
+            snapshot_id: Snapshot ID
+            api_versions: Calculated API versions
+            release_plan: Release plan dict
+
+        Returns:
+            PullRequestInfo with PR number and URL
+        """
+        title = f"Release {release_tag} (snapshot: {snapshot_id})"
+
+        # Build PR body
+        body_lines = [
+            f"## Release {release_tag}",
+            "",
+            "This pull request was created by the CAMARA release automation.",
+            "",
+            "### APIs in this release",
+            "",
+        ]
+
+        for api_name, version in api_versions.items():
+            body_lines.append(f"- **{api_name}**: `{version}`")
+
+        body_lines.extend([
+            "",
+            "### Review checklist",
+            "",
+            "- [ ] Verify API version numbers are correct",
+            "- [ ] Check transformation replacements (server URLs, references)",
+            "- [ ] Review release-metadata.yaml content",
+            "- [ ] Confirm CHANGELOG entries are accurate",
+            "",
+            "### Next steps",
+            "",
+            "1. Review the changes in this PR",
+            "2. Add any manual documentation updates",
+            "3. When ready, merge this PR to create a draft release",
+            "",
+            "---",
+            f"Snapshot ID: `{snapshot_id}`",
+        ])
+
+        body = "\n".join(body_lines)
+
+        return git_ops.create_pr(
+            title=title,
+            body=body,
+            head=f"{self.RELEASE_REVIEW_BRANCH_PREFIX}/{snapshot_id}",
+            base=f"{self.SNAPSHOT_BRANCH_PREFIX}/{snapshot_id}",
+        )
+
+    def _cleanup_branches(
+        self,
+        snapshot_branch: Optional[str],
+        release_review_branch: Optional[str],
+    ) -> List[str]:
+        """
+        Clean up branches on failure.
+
+        Args:
+            snapshot_branch: Snapshot branch name to delete
+            release_review_branch: Release review branch name to delete
+
+        Returns:
+            List of cleanup error messages
+        """
+        cleanup_errors = []
+
+        # We need to create a temporary GitOperations just for cleanup
+        # Since we might not have a cloned repo anymore
+        temp_dir = tempfile.mkdtemp(prefix="camara-cleanup-")
+        try:
+            git_ops = GitOperations(
+                repo=self.gh.repo,
+                work_dir=temp_dir,
+                token=self.gh.token,
+            )
+            # Clone minimally just to have access to remote
+            try:
+                git_ops.clone()
+
+                if release_review_branch:
+                    try:
+                        git_ops.delete_remote_branch(release_review_branch)
+                    except GitOperationsError as e:
+                        cleanup_errors.append(
+                            f"Failed to delete {release_review_branch}: {e}"
+                        )
+
+                if snapshot_branch:
+                    try:
+                        git_ops.delete_remote_branch(snapshot_branch)
+                    except GitOperationsError as e:
+                        cleanup_errors.append(
+                            f"Failed to delete {snapshot_branch}: {e}"
+                        )
+            except GitOperationsError:
+                # If clone fails, we can't cleanup via git
+                pass
+
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+        return cleanup_errors
