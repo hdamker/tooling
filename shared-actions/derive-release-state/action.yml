@@ -41,6 +41,12 @@ outputs:
   source:
     description: 'Source of release_tag (release-plan.yaml|release-metadata.yaml|tag)'
     value: ${{ steps.derive.outputs.source }}
+  config_error:
+    description: 'Configuration error message if state derivation failed (empty if successful)'
+    value: ${{ steps.derive.outputs.config_error }}
+  config_error_type:
+    description: 'Type of configuration error: missing_file|malformed_yaml|missing_field (empty if successful)'
+    value: ${{ steps.derive.outputs.config_error_type }}
 
 runs:
   using: composite
@@ -88,10 +94,36 @@ runs:
 
         # Get release info from repository artifacts (authoritative source)
         release_info = manager.get_current_release_info()
-        release_tag = release_info['release_tag']
-        state = release_info['state']
-        snapshot_branch = release_info['snapshot_branch']
-        source = release_info['source'] or ''
+        output_file = os.environ['GITHUB_OUTPUT']
+
+        # Handle configuration errors
+        if not release_info.success:
+            error = release_info.config_error
+            with open(output_file, 'a') as f:
+                f.write("release_tag=\n")
+                f.write("state=\n")
+                f.write("source=\n")
+                f.write("snapshot_id=\n")
+                f.write("snapshot_branch=\n")
+                f.write("release_review_branch=\n")
+                f.write("base_commit_sha=\n")
+                f.write("release_pr_number=\n")
+                f.write(f"config_error={error.message}\n")
+                f.write(f"config_error_type={error.error_type}\n")
+
+            # Log error (but don't fail the action - let workflow decide)
+            print(f"::warning::Configuration error: {error.message}")
+            print(f"Error type: {error.error_type}")
+            print(f"File: {error.file_path}")
+            if error.field_path:
+                print(f"Field: {error.field_path}")
+            sys.exit(0)
+
+        # Success case
+        release_tag = release_info.release_tag
+        state = release_info.state
+        snapshot_branch = release_info.snapshot_branch
+        source = release_info.source or ''
 
         # Get snapshot details if available
         snapshot = None
@@ -99,11 +131,13 @@ runs:
             snapshot = manager.get_current_snapshot(release_tag)
 
         # Write outputs to GITHUB_OUTPUT
-        output_file = os.environ['GITHUB_OUTPUT']
         with open(output_file, 'a') as f:
             f.write(f"release_tag={release_tag or ''}\n")
             f.write(f"state={state.value}\n")
             f.write(f"source={source}\n")
+            # Clear config_error outputs on success
+            f.write("config_error=\n")
+            f.write("config_error_type=\n")
 
             if snapshot:
                 f.write(f"snapshot_id={snapshot.snapshot_id}\n")

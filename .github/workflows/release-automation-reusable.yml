@@ -212,6 +212,8 @@ jobs:
       release_pr_number: ${{ steps.state.outputs.release_pr_number }}
       base_commit_sha: ${{ steps.state.outputs.base_commit_sha }}
       source: ${{ steps.state.outputs.source }}
+      config_error: ${{ steps.state.outputs.config_error }}
+      config_error_type: ${{ steps.state.outputs.config_error_type }}
     steps:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -229,13 +231,98 @@ jobs:
         # No release_tag input - derived from repository artifacts (release-plan.yaml or release-metadata.yaml)
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 2b: Handle configuration errors (if derive-state detected any)
+  # ─────────────────────────────────────────────────────────────────────────────
+  handle-config-error:
+    needs: [check-trigger, derive-state]
+    if: |
+      needs.check-trigger.outputs.should_continue == 'true' &&
+      needs.derive-state.outputs.config_error != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine Error Response
+        id: decide
+        run: |
+          TRIGGER_TYPE="${{ needs.check-trigger.outputs.trigger_type }}"
+          echo "Trigger type: $TRIGGER_TYPE"
+          echo "Config error: ${{ needs.derive-state.outputs.config_error }}"
+          echo "Error type: ${{ needs.derive-state.outputs.config_error_type }}"
+
+          if [[ "$TRIGGER_TYPE" == "slash_command" ]]; then
+            echo "action=post_comment" >> $GITHUB_OUTPUT
+          else
+            echo "action=fail_workflow" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout tooling (for slash command)
+        if: steps.decide.outputs.action == 'post_comment'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          repository: hdamker/tooling
+          ref: release-automation-mvp
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+            shared-actions/post-bot-comment
+
+      - name: Post Config Error Comment
+        if: steps.decide.outputs.action == 'post_comment'
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
+          release_tag: 'unknown'
+          run_id: ${{ github.run_id }}
+          template: config_error
+          context: |
+            {
+              "error_type": "${{ needs.derive-state.outputs.config_error_type }}",
+              "error_message": "${{ needs.derive-state.outputs.config_error }}",
+              "command": "${{ needs.check-trigger.outputs.command }}",
+              "user": "${{ needs.check-trigger.outputs.user }}",
+              "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+              "is_missing_file": ${{ needs.derive-state.outputs.config_error_type == 'missing_file' }},
+              "is_malformed_yaml": ${{ needs.derive-state.outputs.config_error_type == 'malformed_yaml' }},
+              "is_missing_field": ${{ needs.derive-state.outputs.config_error_type == 'missing_field' }}
+            }
+
+      - name: Fail workflow (for non-slash-command triggers)
+        if: steps.decide.outputs.action == 'fail_workflow'
+        run: |
+          echo "::error::Configuration Error: ${{ needs.derive-state.outputs.config_error }}"
+          echo ""
+          echo "Error type: ${{ needs.derive-state.outputs.config_error_type }}"
+          echo ""
+          echo "How to fix:"
+          ERROR_TYPE="${{ needs.derive-state.outputs.config_error_type }}"
+          case "$ERROR_TYPE" in
+            missing_file)
+              echo "  1. Create release-plan.yaml in repository root"
+              echo "  2. Use the template from ReleaseManagement documentation"
+              echo "  3. Commit and push to main branch"
+              ;;
+            malformed_yaml)
+              echo "  1. Fix YAML syntax in release-plan.yaml"
+              echo "  2. Validate with an online YAML validator"
+              echo "  3. Commit and push the fix"
+              ;;
+            missing_field)
+              echo "  1. Add the missing field to release-plan.yaml"
+              echo "  2. Required: repository.target_release_tag"
+              echo "  3. Commit and push the fix"
+              ;;
+          esac
+          exit 1
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # Phase 3: Post interim comment (for slash commands only)
   # ─────────────────────────────────────────────────────────────────────────────
   post-interim:
     needs: [check-trigger, derive-state]
     if: |
       needs.check-trigger.outputs.should_continue == 'true' &&
-      needs.check-trigger.outputs.trigger_type == 'slash_command'
+      needs.check-trigger.outputs.trigger_type == 'slash_command' &&
+      needs.derive-state.outputs.config_error == ''
     runs-on: ubuntu-latest
     outputs:
       comment_id: ${{ steps.post.outputs.comment_id }}
@@ -267,13 +354,14 @@ jobs:
             }
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 4: Validate command (for slash commands only)
+  # Phase 4: Validate command (for slash commands only, skip on config error)
   # ─────────────────────────────────────────────────────────────────────────────
   validate-command:
     needs: [check-trigger, derive-state]
     if: |
       needs.check-trigger.outputs.should_continue == 'true' &&
-      needs.check-trigger.outputs.trigger_type == 'slash_command'
+      needs.check-trigger.outputs.trigger_type == 'slash_command' &&
+      needs.derive-state.outputs.config_error == ''
     runs-on: ubuntu-latest
     outputs:
       allowed: ${{ steps.validate.outputs.allowed }}

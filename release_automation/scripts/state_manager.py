@@ -5,10 +5,10 @@ This module provides the core state derivation logic that determines
 the current release state by examining repository artifacts.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -53,6 +53,72 @@ class SnapshotInfo:
     base_commit_sha: str
     created_at: datetime
     release_pr_number: Optional[int] = None
+
+
+@dataclass
+class ConfigurationError:
+    """
+    Details about a configuration error that prevents state derivation.
+
+    Configuration errors are distinct from the CANCELLED state - they indicate
+    the repository configuration is broken, not that no release is planned.
+
+    Attributes:
+        error_type: Category of error ('missing_file', 'malformed_yaml', 'missing_field')
+        message: Human-readable error description
+        file_path: Which file has the problem
+        field_path: Dot-separated path to problematic field (e.g., "repository.target_release_tag")
+    """
+    error_type: str  # 'missing_file', 'malformed_yaml', 'missing_field'
+    message: str
+    file_path: str
+    field_path: Optional[str] = None
+
+
+@dataclass
+class ReleaseInfoResult:
+    """
+    Result of get_current_release_info() call.
+
+    This replaces the plain dict return type to distinguish between:
+    - Success: Valid state derived from repository artifacts
+    - Error: Configuration problem that prevents state derivation
+
+    The key insight: configuration errors are NOT a state. They are a
+    failure mode that should be surfaced to the user for correction.
+    """
+    success: bool
+    release_tag: Optional[str] = None
+    state: Optional[ReleaseState] = None
+    snapshot_branch: Optional[str] = None
+    source: Optional[str] = None  # 'release-plan.yaml' | 'release-metadata.yaml' | 'tag'
+    config_error: Optional[ConfigurationError] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert to dict for backward compatibility and workflow outputs.
+
+        Returns:
+            Dict with release info or error details
+        """
+        if self.success:
+            return {
+                "release_tag": self.release_tag,
+                "state": self.state,
+                "snapshot_branch": self.snapshot_branch,
+                "source": self.source,
+                "config_error": None,
+                "config_error_type": None,
+            }
+        else:
+            return {
+                "release_tag": None,
+                "state": None,  # NOT CANCELLED - this is an error, not a state
+                "snapshot_branch": None,
+                "source": None,
+                "config_error": self.config_error.message if self.config_error else "Unknown error",
+                "config_error_type": self.config_error.error_type if self.config_error else "unknown",
+            }
 
 
 class ReleaseStateManager:
@@ -200,7 +266,7 @@ class ReleaseStateManager:
             return [current]
         return []
 
-    def get_current_release_info(self) -> dict:
+    def get_current_release_info(self) -> ReleaseInfoResult:
         """
         Get the current release tag and state from repository artifacts.
 
@@ -213,84 +279,146 @@ class ReleaseStateManager:
         - DRAFT_READY: if snapshot branch and draft release exist
         - SNAPSHOT_ACTIVE: if snapshot branch exists
         - PLANNED: if release-plan.yaml has target_release_type != none
-        - CANCELLED: if release-plan.yaml has target_release_type == none
+        - CANCELLED: if release-plan.yaml has target_release_type == none or missing
+
+        Configuration errors are returned as error results, NOT as CANCELLED state.
 
         Returns:
-            dict with keys:
-                - release_tag: str or None
-                - state: ReleaseState
-                - snapshot_branch: str or None
-                - source: 'release-metadata.yaml' | 'release-plan.yaml' | 'tag'
+            ReleaseInfoResult with either:
+                - success=True: release_tag, state, snapshot_branch, source
+                - success=False: config_error with details
         """
-        # First, check release-plan.yaml for the planned release
-        plan = self._read_release_plan()
-        plan_release_tag = None
-        plan_release_type = None
+        # First, try to read release-plan.yaml and handle configuration errors
+        plan, config_error = self._read_release_plan_with_validation()
 
-        if plan:
-            plan_release_tag = plan.get("repository", {}).get("target_release_tag")
-            plan_release_type = plan.get("repository", {}).get("target_release_type")
+        if config_error:
+            return ReleaseInfoResult(success=False, config_error=config_error)
+
+        # At this point, plan is valid with all required fields
+        plan_release_tag = plan["repository"]["target_release_tag"]
+        plan_release_type = plan["repository"].get("target_release_type")
 
         # Check if the planned release is already published
-        if plan_release_tag and self.gh.tag_exists(plan_release_tag):
-            return {
-                "release_tag": plan_release_tag,
-                "state": ReleaseState.PUBLISHED,
-                "snapshot_branch": None,
-                "source": "tag"
-            }
+        if self.gh.tag_exists(plan_release_tag):
+            return ReleaseInfoResult(
+                success=True,
+                release_tag=plan_release_tag,
+                state=ReleaseState.PUBLISHED,
+                snapshot_branch=None,
+                source="tag"
+            )
 
         # Check for any snapshot branches for the planned release
-        if plan_release_tag:
-            snapshot_branches = self.gh.list_branches(f"release-snapshot/{plan_release_tag}-*")
+        snapshot_branches = self.gh.list_branches(f"release-snapshot/{plan_release_tag}-*")
 
-            if snapshot_branches:
-                # Snapshot exists - read release_tag from release-metadata.yaml
-                snapshot_branch = snapshot_branches[0].name
-                metadata = self._read_release_metadata(snapshot_branch)
+        if snapshot_branches:
+            # Snapshot exists - read release_tag from release-metadata.yaml
+            snapshot_branch = snapshot_branches[0].name
+            metadata = self._read_release_metadata(snapshot_branch)
 
-                if metadata:
-                    metadata_release_tag = metadata.get("repository", {}).get("release_tag")
-                else:
-                    # Fall back to extracting from branch name
-                    # release-snapshot/r4.1-abc1234 → r4.1
-                    snapshot_id = snapshot_branch.replace("release-snapshot/", "")
-                    metadata_release_tag = snapshot_id.split("-")[0] if "-" in snapshot_id else snapshot_id
-
-                # Determine if draft ready
-                if self.gh.draft_release_exists(metadata_release_tag or plan_release_tag):
-                    state = ReleaseState.DRAFT_READY
-                else:
-                    state = ReleaseState.SNAPSHOT_ACTIVE
-
-                return {
-                    "release_tag": metadata_release_tag or plan_release_tag,
-                    "state": state,
-                    "snapshot_branch": snapshot_branch,
-                    "source": "release-metadata.yaml"
-                }
-
-        # No snapshot - use release-plan.yaml
-        if plan_release_tag:
-            if plan_release_type and plan_release_type.lower() != "none":
-                state = ReleaseState.PLANNED
+            if metadata:
+                metadata_release_tag = metadata.get("repository", {}).get("release_tag")
             else:
-                state = ReleaseState.CANCELLED
+                # Fall back to extracting from branch name
+                # release-snapshot/r4.1-abc1234 → r4.1
+                snapshot_id = snapshot_branch.replace("release-snapshot/", "")
+                metadata_release_tag = snapshot_id.split("-")[0] if "-" in snapshot_id else snapshot_id
 
-            return {
-                "release_tag": plan_release_tag,
-                "state": state,
-                "snapshot_branch": None,
-                "source": "release-plan.yaml"
-            }
+            # Determine if draft ready
+            if self.gh.draft_release_exists(metadata_release_tag or plan_release_tag):
+                state = ReleaseState.DRAFT_READY
+            else:
+                state = ReleaseState.SNAPSHOT_ACTIVE
 
-        # No release planned
-        return {
-            "release_tag": None,
-            "state": ReleaseState.CANCELLED,
-            "snapshot_branch": None,
-            "source": None
-        }
+            return ReleaseInfoResult(
+                success=True,
+                release_tag=metadata_release_tag or plan_release_tag,
+                state=state,
+                snapshot_branch=snapshot_branch,
+                source="release-metadata.yaml"
+            )
+
+        # No snapshot - use release-plan.yaml state
+        if plan_release_type and plan_release_type.lower() != "none":
+            state = ReleaseState.PLANNED
+        else:
+            # target_release_type is "none" or missing - intentional CANCELLED
+            state = ReleaseState.CANCELLED
+
+        return ReleaseInfoResult(
+            success=True,
+            release_tag=plan_release_tag,
+            state=state,
+            snapshot_branch=None,
+            source="release-plan.yaml"
+        )
+
+    def _read_release_plan_with_validation(
+        self, ref: str = "main"
+    ) -> tuple[Optional[dict], Optional[ConfigurationError]]:
+        """
+        Read and validate release-plan.yaml from the repository.
+
+        This method distinguishes between different error conditions:
+        - File not found
+        - YAML parse error
+        - Missing required fields
+
+        Args:
+            ref: Branch, tag, or commit to read from
+
+        Returns:
+            Tuple of (parsed_content, error):
+                - (dict, None) if successful
+                - (None, ConfigurationError) if error
+        """
+        content = self.gh.get_file_content("release-plan.yaml", ref)
+
+        if content is None:
+            return None, ConfigurationError(
+                error_type="missing_file",
+                message=f"No release-plan.yaml found on {ref} branch",
+                file_path="release-plan.yaml"
+            )
+
+        # Try to parse YAML
+        try:
+            plan = yaml.safe_load(content)
+        except yaml.YAMLError as e:
+            return None, ConfigurationError(
+                error_type="malformed_yaml",
+                message=f"Invalid YAML syntax in release-plan.yaml: {e}",
+                file_path="release-plan.yaml"
+            )
+
+        # Validate plan is a dict (not null or other type)
+        if not isinstance(plan, dict):
+            return None, ConfigurationError(
+                error_type="malformed_yaml",
+                message="release-plan.yaml must contain a YAML mapping (not empty or scalar)",
+                file_path="release-plan.yaml"
+            )
+
+        # Validate required fields
+        repository = plan.get("repository")
+        if not repository or not isinstance(repository, dict):
+            return None, ConfigurationError(
+                error_type="missing_field",
+                message="Missing 'repository' section in release-plan.yaml",
+                file_path="release-plan.yaml",
+                field_path="repository"
+            )
+
+        target_release_tag = repository.get("target_release_tag")
+        if not target_release_tag:
+            return None, ConfigurationError(
+                error_type="missing_field",
+                message="Missing 'target_release_tag' in release-plan.yaml repository section",
+                file_path="release-plan.yaml",
+                field_path="repository.target_release_tag"
+            )
+
+        return plan, None
 
     def _read_release_plan(self, ref: str = "main") -> Optional[dict]:
         """

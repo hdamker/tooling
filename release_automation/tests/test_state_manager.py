@@ -11,6 +11,8 @@ from unittest.mock import Mock, patch
 
 from release_automation.scripts.github_client import Branch
 from release_automation.scripts.state_manager import (
+    ConfigurationError,
+    ReleaseInfoResult,
     ReleaseState,
     ReleaseStateManager,
     SnapshotInfo,
@@ -310,3 +312,160 @@ repository:
             Branch(name="release-snapshot/r4.1-def5678", sha="def5678")
         ]
         assert manager.derive_state("r4.1") == ReleaseState.SNAPSHOT_ACTIVE
+
+
+class TestGetCurrentReleaseInfoErrors:
+    """Tests for get_current_release_info() configuration error handling.
+
+    BLK-003: Configuration errors should return error results, not CANCELLED state.
+    """
+
+    def test_returns_error_when_file_missing(self, state_manager, mock_github_client):
+        """Missing release-plan.yaml returns config error, not CANCELLED."""
+        mock_github_client.get_file_content.return_value = None
+
+        result = state_manager.get_current_release_info()
+
+        assert not result.success
+        assert result.config_error is not None
+        assert result.config_error.error_type == "missing_file"
+        assert "release-plan.yaml" in result.config_error.message
+        assert result.config_error.file_path == "release-plan.yaml"
+        assert result.state is None  # NOT CANCELLED
+
+    def test_returns_error_when_yaml_malformed(self, state_manager, mock_github_client):
+        """Malformed YAML returns config error, not CANCELLED."""
+        mock_github_client.get_file_content.return_value = "{{invalid yaml:: missing"
+
+        result = state_manager.get_current_release_info()
+
+        assert not result.success
+        assert result.config_error is not None
+        assert result.config_error.error_type == "malformed_yaml"
+        assert result.config_error.file_path == "release-plan.yaml"
+        assert result.state is None
+
+    def test_returns_error_when_yaml_empty(self, state_manager, mock_github_client):
+        """Empty YAML (null) returns config error."""
+        mock_github_client.get_file_content.return_value = ""
+
+        result = state_manager.get_current_release_info()
+
+        assert not result.success
+        assert result.config_error is not None
+        assert result.config_error.error_type == "malformed_yaml"
+
+    def test_returns_error_when_repository_section_missing(
+        self, state_manager, mock_github_client
+    ):
+        """Missing repository section returns config error."""
+        mock_github_client.get_file_content.return_value = """
+apis:
+  - api_name: quality-on-demand
+"""
+        result = state_manager.get_current_release_info()
+
+        assert not result.success
+        assert result.config_error is not None
+        assert result.config_error.error_type == "missing_field"
+        assert result.config_error.field_path == "repository"
+
+    def test_returns_error_when_target_tag_missing(
+        self, state_manager, mock_github_client
+    ):
+        """Missing target_release_tag returns config error."""
+        mock_github_client.get_file_content.return_value = """
+repository:
+  target_release_type: initial
+"""
+        result = state_manager.get_current_release_info()
+
+        assert not result.success
+        assert result.config_error is not None
+        assert result.config_error.error_type == "missing_field"
+        assert result.config_error.field_path == "repository.target_release_tag"
+
+    def test_returns_cancelled_for_intentional_none(
+        self, state_manager, mock_github_client
+    ):
+        """target_release_type: none returns CANCELLED (success, not error)."""
+        mock_github_client.get_file_content.return_value = """
+repository:
+  target_release_tag: r4.1
+  target_release_type: none
+"""
+        mock_github_client.list_branches.return_value = []
+        mock_github_client.tag_exists.return_value = False
+
+        result = state_manager.get_current_release_info()
+
+        assert result.success
+        assert result.state == ReleaseState.CANCELLED
+        assert result.config_error is None
+        assert result.release_tag == "r4.1"
+
+    def test_returns_cancelled_when_release_type_missing(
+        self, state_manager, mock_github_client
+    ):
+        """Missing target_release_type defaults to CANCELLED (like 'none')."""
+        mock_github_client.get_file_content.return_value = """
+repository:
+  target_release_tag: r4.1
+"""
+        mock_github_client.list_branches.return_value = []
+        mock_github_client.tag_exists.return_value = False
+
+        result = state_manager.get_current_release_info()
+
+        assert result.success
+        assert result.state == ReleaseState.CANCELLED
+        assert result.release_tag == "r4.1"
+
+    def test_returns_planned_for_valid_config(
+        self, state_manager, mock_github_client
+    ):
+        """Valid config with release type returns PLANNED."""
+        mock_github_client.get_file_content.return_value = """
+repository:
+  target_release_tag: r4.1
+  target_release_type: initial
+"""
+        mock_github_client.list_branches.return_value = []
+        mock_github_client.tag_exists.return_value = False
+
+        result = state_manager.get_current_release_info()
+
+        assert result.success
+        assert result.state == ReleaseState.PLANNED
+        assert result.release_tag == "r4.1"
+        assert result.source == "release-plan.yaml"
+
+    def test_to_dict_on_error_result(self, state_manager, mock_github_client):
+        """to_dict() returns proper structure for error results."""
+        mock_github_client.get_file_content.return_value = None
+
+        result = state_manager.get_current_release_info()
+        result_dict = result.to_dict()
+
+        assert result_dict["release_tag"] is None
+        assert result_dict["state"] is None
+        assert result_dict["config_error"] is not None
+        assert result_dict["config_error_type"] == "missing_file"
+
+    def test_to_dict_on_success_result(self, state_manager, mock_github_client):
+        """to_dict() returns proper structure for success results."""
+        mock_github_client.get_file_content.return_value = """
+repository:
+  target_release_tag: r4.1
+  target_release_type: initial
+"""
+        mock_github_client.list_branches.return_value = []
+        mock_github_client.tag_exists.return_value = False
+
+        result = state_manager.get_current_release_info()
+        result_dict = result.to_dict()
+
+        assert result_dict["release_tag"] == "r4.1"
+        assert result_dict["state"] == ReleaseState.PLANNED
+        assert result_dict["config_error"] is None
+        assert result_dict["config_error_type"] is None
