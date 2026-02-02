@@ -69,8 +69,9 @@ class TransformationContext:
 
     release_tag: str
     api_versions: Dict[str, str]
-    commonalities_version: str
-    icm_version: str
+    commonalities_release: str  # Release tag, e.g., "r3.4"
+    icm_release: str  # Release tag, e.g., "r3.3"
+    repo_name: str = ""  # Repository name, e.g., "QualityOnDemand"
     release_plan: Dict[str, Any] = field(default_factory=dict)
 
     def get_api_version(self, api_name: str) -> str:
@@ -446,9 +447,11 @@ class MechanicalTransformer:
         Supported variables:
         - {release_tag}
         - {api_version}
+        - {url_version} - URL path version per CAMARA API Design Guide
         - {major_version}
-        - {commonalities_version}
-        - {icm_version}
+        - {repo_name}
+        - {commonalities_release}
+        - {icm_release}
         - {api_name}
 
         Args:
@@ -459,22 +462,28 @@ class MechanicalTransformer:
         Returns:
             Resolved string with variables replaced
         """
+        from .version_calculator import calculate_url_version
+
         result = template
 
         # Get API-specific values
         api_version = ""
         major_version = ""
+        url_version = ""
         if api_name:
             api_version = context.get_api_version(api_name)
             major_version = context.get_major_version(api_version)
+            url_version = calculate_url_version(api_version) if api_version else ""
 
         # Replace variables
         replacements = {
             "{release_tag}": context.release_tag,
             "{api_version}": api_version,
+            "{url_version}": url_version,
             "{major_version}": major_version,
-            "{commonalities_version}": context.commonalities_version,
-            "{icm_version}": context.icm_version,
+            "{repo_name}": context.repo_name,
+            "{commonalities_release}": context.commonalities_release,
+            "{icm_release}": context.icm_release,
             "{api_name}": api_name or "",
         }
 
@@ -487,10 +496,9 @@ class MechanicalTransformer:
         """
         Extract API name from file path.
 
-        Assumes naming convention: {api_name}.yaml or {api_name}_{suffix}.yaml
-        Examples:
-          - qod-provisioning.yaml -> qod-provisioning
-          - location-verification_subscriptions.yaml -> location-verification
+        Simply returns the filename without extension. Files like
+        location-verification-subscriptions.yaml are separate APIs with
+        their own version tracking in release-plan.yaml, not auxiliary files.
 
         Args:
             file_path: Path to API file
@@ -499,12 +507,4 @@ class MechanicalTransformer:
             API name or None if not extractable
         """
         filename = Path(file_path).stem  # Remove extension
-
-        # Remove common suffixes
-        suffixes = ["_subscriptions", "_notifications", "_callback"]
-        for suffix in suffixes:
-            if filename.endswith(suffix):
-                filename = filename[: -len(suffix)]
-                break
-
         return filename if filename else None

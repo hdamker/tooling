@@ -111,7 +111,8 @@ def sample_release_plan():
             },
         ],
         "dependencies": {
-            "commonalities_release": {"release_tag": "r4.2", "version": "1.2.0"},
+            "commonalities_release": "r3.4",
+            "identity_consent_management_release": "r3.3",
         },
     }
 
@@ -146,8 +147,8 @@ class TestSnapshotConfig:
         assert config.base_branch == "main"
         assert config.base_commit_sha is None
         assert config.dry_run is False
-        assert config.commonalities_version == "wip"
-        assert config.icm_version == "wip"
+        # Note: commonalities_release and icm_release are now derived from
+        # release_plan['dependencies'], not passed via SnapshotConfig
 
     def test_custom_values(self):
         """Test SnapshotConfig with custom values."""
@@ -156,14 +157,11 @@ class TestSnapshotConfig:
             base_branch="develop",
             base_commit_sha="abc1234",
             dry_run=True,
-            commonalities_version="r4.2",
-            icm_version="r1.0",
         )
         assert config.release_tag == "r5.0"
         assert config.base_branch == "develop"
         assert config.base_commit_sha == "abc1234"
         assert config.dry_run is True
-        assert config.commonalities_version == "r4.2"
 
 
 # --- Tests for SnapshotResult ---
@@ -728,18 +726,16 @@ class TestTransformationIntegration:
         mock_git_ops_class.return_value = mock_git_ops
         mock_git_ops.create_pr.return_value = PullRequestInfo(number=1, url="url")
 
-        config = SnapshotConfig(
-            release_tag="r4.1",
-            commonalities_version="r4.2",
-            icm_version="r1.0",
-        )
+        config = SnapshotConfig(release_tag="r4.1")
+        # Dependencies are derived from release_plan, not config
         snapshot_creator.create_snapshot(sample_release_plan, config)
 
         call_args = mock_transformer.apply_all.call_args
         context = call_args[0][1]
         assert context.release_tag == "r4.1"
-        assert context.commonalities_version == "r4.2"
-        assert context.icm_version == "r1.0"
+        # These are derived from release_plan['dependencies']
+        assert context.commonalities_release == "r3.4"
+        assert context.icm_release == "r3.3"
 
     @patch("release_automation.scripts.snapshot_creator.tempfile.mkdtemp")
     @patch("release_automation.scripts.snapshot_creator.shutil.rmtree")

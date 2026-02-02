@@ -33,8 +33,9 @@ def context():
             "quality-on-demand": "3.2.0-rc.2",
             "qos-profiles": "1.0.0",
         },
-        commonalities_version="1.2.0-rc.1",
-        icm_version="1.1.0",
+        commonalities_release="r3.4",
+        icm_release="r3.3",
+        repo_name="QualityOnDemand",
     )
 
 
@@ -133,19 +134,33 @@ class TestResolveTemplate:
         )
         assert result == "/v3"
 
-    def test_resolve_commonalities_version(self, transformer, context):
-        """Resolve {commonalities_version} variable."""
+    def test_resolve_commonalities_release(self, transformer, context):
+        """Resolve {commonalities_release} variable."""
         result = transformer._resolve_template(
-            "{commonalities_version}", context, None
+            "{commonalities_release}", context, None
         )
-        assert result == "1.2.0-rc.1"
+        assert result == "r3.4"
 
-    def test_resolve_icm_version(self, transformer, context):
-        """Resolve {icm_version} variable."""
+    def test_resolve_icm_release(self, transformer, context):
+        """Resolve {icm_release} variable."""
         result = transformer._resolve_template(
-            "{icm_version}", context, None
+            "{icm_release}", context, None
         )
-        assert result == "1.1.0"
+        assert result == "r3.3"
+
+    def test_resolve_repo_name(self, transformer, context):
+        """Resolve {repo_name} variable."""
+        result = transformer._resolve_template(
+            "{repo_name}", context, None
+        )
+        assert result == "QualityOnDemand"
+
+    def test_resolve_url_version(self, transformer, context):
+        """Resolve {url_version} variable."""
+        result = transformer._resolve_template(
+            "{url_version}", context, "quality-on-demand"
+        )
+        assert result == "v3rc2"
 
     def test_resolve_api_name(self, transformer, context):
         """Resolve {api_name} variable."""
@@ -182,25 +197,25 @@ class TestExtractApiName:
         assert result == "quality-on-demand"
 
     def test_api_name_with_subscriptions_suffix(self, transformer):
-        """Extract API name from subscriptions file."""
+        """Subscriptions files are separate APIs - suffix NOT stripped."""
         result = transformer._extract_api_name_from_path(
-            "/repo/code/API_definitions/location-verification_subscriptions.yaml"
+            "/repo/code/API_definitions/location-verification-subscriptions.yaml"
         )
-        assert result == "location-verification"
+        assert result == "location-verification-subscriptions"
 
     def test_api_name_with_notifications_suffix(self, transformer):
-        """Extract API name from notifications file."""
+        """Notifications files are separate APIs - suffix NOT stripped."""
         result = transformer._extract_api_name_from_path(
-            "/repo/code/API_definitions/device-status_notifications.yaml"
+            "/repo/code/API_definitions/device-status-notifications.yaml"
         )
-        assert result == "device-status"
+        assert result == "device-status-notifications"
 
     def test_api_name_with_callback_suffix(self, transformer):
-        """Extract API name from callback file."""
+        """Callback files are separate APIs - suffix NOT stripped."""
         result = transformer._extract_api_name_from_path(
-            "/repo/code/API_definitions/sim-swap_callback.yaml"
+            "/repo/code/API_definitions/sim-swap-callback.yaml"
         )
-        assert result == "sim-swap"
+        assert result == "sim-swap-callback"
 
 
 class TestRegexTransformation:
@@ -323,8 +338,9 @@ class TestYamlPathTransformation:
             test_context = TransformationContext(
                 release_tag="r4.2",
                 api_versions={"test": "3.2.0-rc.2"},
-                commonalities_version="1.2.0",
-                icm_version="1.1.0",
+                commonalities_release="r3.4",
+                icm_release="r3.3",
+                repo_name="TestRepo",
             )
 
             result = transformer.apply_transformation(temp_path, rule, test_context)

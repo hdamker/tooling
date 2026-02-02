@@ -14,6 +14,67 @@ import yaml
 from .github_client import GitHubClient
 
 
+def calculate_url_version(api_version: str) -> str:
+    """
+    Calculate the URL version component per CAMARA API Design Guide rules.
+
+    Rules from CAMARA API Design Guide section 7.2:
+    - Initial public (0.y.z): v0.y
+    - Stable public (x.y.z where x>0): vx
+    - Initial alpha (0.y.z-alpha.m): v0.yalpham
+    - Initial rc (0.y.z-rc.n): v0.yrcn
+    - Stable alpha (x.y.z-alpha.m where x>0): vxalpham
+    - Stable rc (x.y.z-rc.n where x>0): vxrcn
+    - Work-in-progress: vwip
+
+    Args:
+        api_version: Full API version string (e.g., "1.2.0-rc.3", "0.3.0-alpha.1")
+
+    Returns:
+        URL version string (e.g., "v1rc3", "v0.3alpha1", "v1", "v0.3")
+
+    Examples:
+        >>> calculate_url_version("0.3.0-alpha.1")
+        'v0.3alpha1'
+        >>> calculate_url_version("1.2.0-alpha.2")
+        'v1alpha2'
+        >>> calculate_url_version("1.2.0-rc.3")
+        'v1rc3'
+        >>> calculate_url_version("0.3.0")
+        'v0.3'
+        >>> calculate_url_version("1.0.0")
+        'v1'
+        >>> calculate_url_version("wip")
+        'vwip'
+    """
+    if api_version == "wip":
+        return "vwip"
+
+    # Parse version: x.y.z or x.y.z-status.n
+    pattern = re.compile(r'^(\d+)\.(\d+)\.(\d+)(?:-([a-z]+)\.(\d+))?$')
+    match = pattern.match(api_version)
+    if not match:
+        # Fallback for invalid versions
+        return "vwip"
+
+    major, minor, _patch, status, extension = match.groups()
+    major = int(major)
+
+    # Build URL version base
+    if major == 0:
+        # Initial version: include minor
+        base = f"v0.{minor}"
+    else:
+        # Stable version: major only
+        base = f"v{major}"
+
+    # Add pre-release suffix if present
+    if status and extension:
+        return f"{base}{status}{extension}"
+
+    return base
+
+
 @dataclass
 class VersionInfo:
     """Information about a released API version."""

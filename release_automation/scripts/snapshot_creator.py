@@ -28,8 +28,8 @@ class SnapshotConfig:
     base_branch: str = "main"
     base_commit_sha: Optional[str] = None
     dry_run: bool = False
-    commonalities_version: str = "wip"
-    icm_version: str = "wip"
+    # Note: commonalities_release and icm_release are derived from
+    # release_plan['dependencies'], not passed via config
 
 
 @dataclass
@@ -203,11 +203,17 @@ class SnapshotCreator:
             git_ops.create_branch(snapshot_branch)
 
             # Step 8: Apply transformations
+            # Extract dependency release tags from release-plan.yaml
+            dependencies = release_plan.get("dependencies", {})
+            commonalities_release = dependencies.get("commonalities_release", "main")
+            icm_release = dependencies.get("identity_consent_management_release", "main")
+
             context = TransformationContext(
                 release_tag=config.release_tag,
                 api_versions=api_versions,
-                commonalities_version=config.commonalities_version,
-                icm_version=config.icm_version,
+                commonalities_release=commonalities_release,
+                icm_release=icm_release,
+                repo_name=self.gh.repo,
                 release_plan=release_plan,
             )
 
