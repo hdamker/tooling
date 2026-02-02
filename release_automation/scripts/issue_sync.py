@@ -18,6 +18,17 @@ from .bot_responder import BotResponder
 # Marker to identify workflow-owned issues
 WORKFLOW_MARKER = "<!-- release-automation:workflow-owned -->"
 
+# Required labels for release automation
+# Format: (name, color_hex_without_hash, description)
+REQUIRED_LABELS = [
+    ("release-issue", "5319E7", "Release tracking issue managed by automation"),
+    ("release-state:planned", "0E8A16", "Release is planned"),
+    ("release-state:snapshot-active", "FBCA04", "Release snapshot is active"),
+    ("release-state:draft-ready", "1D76DB", "Draft release is ready"),
+    ("release-state:published", "0E8A16", "Release has been published"),
+    ("release-state:cancelled", "D93F0B", "Release has been cancelled"),
+]
+
 
 @dataclass
 class SyncResult:
@@ -72,6 +83,30 @@ class IssueSyncManager:
         self.state_manager = state_manager
         self.issue_manager = issue_manager
         self.bot = bot_responder
+        self._labels_ensured = False  # Track if we've already ensured labels
+
+    def ensure_labels_exist(self) -> List[str]:
+        """
+        Ensure all required labels exist in the repository.
+
+        Creates any missing labels with the correct colors and descriptions.
+        This method is idempotent and caches its result within the instance.
+
+        Returns:
+            List of labels that were created (empty if all existed)
+        """
+        if self._labels_ensured:
+            return []
+
+        created = []
+        for name, color, description in REQUIRED_LABELS:
+            existing = self.gh.get_label(name)
+            if existing is None:
+                self.gh.create_label(name, color, description)
+                created.append(name)
+
+        self._labels_ensured = True
+        return created
 
     def sync_release_issue(
         self,
@@ -97,6 +132,9 @@ class IssueSyncManager:
         release_tag = release_plan.get("repository", {}).get("target_release_tag", "")
         if not release_tag:
             return SyncResult(action="none", reason="missing_release_tag")
+
+        # Ensure required labels exist before any label operations
+        self.ensure_labels_exist()
 
         # Derive current state
         state = self.state_manager.derive_state(release_tag)

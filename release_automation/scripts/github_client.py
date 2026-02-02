@@ -9,7 +9,7 @@ for authentication and API access.
 import json
 import subprocess
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fnmatch import fnmatch
 
 
@@ -524,3 +524,74 @@ class GitHubClient:
             "-X", "PUT",
             "-f", f"labels={labels_json}"
         ])
+
+    def get_label(self, label_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a repository label by name.
+
+        Args:
+            label_name: The label name to look up
+
+        Returns:
+            Label dict with 'name', 'color', 'description' if found, None otherwise
+        """
+        import urllib.parse
+        encoded_name = urllib.parse.quote(label_name, safe='')
+
+        try:
+            result = self._run_gh([
+                "api",
+                f"repos/{self.repo}/labels/{encoded_name}"
+            ])
+            label = json.loads(result)
+            return {
+                "name": label["name"],
+                "color": label.get("color", ""),
+                "description": label.get("description", "")
+            }
+        except GitHubClientError:
+            # Label doesn't exist
+            return None
+        except json.JSONDecodeError:
+            return None
+
+    def create_label(
+        self,
+        name: str,
+        color: str,
+        description: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Create a repository label.
+
+        Args:
+            name: Label name
+            color: Hex color without # (e.g., "0E8A16")
+            description: Optional description
+
+        Returns:
+            Created label dict
+
+        Raises:
+            GitHubClientError: If creation fails
+        """
+        args = [
+            "api",
+            f"repos/{self.repo}/labels",
+            "-X", "POST",
+            "-f", f"name={name}",
+            "-f", f"color={color}"
+        ]
+        if description:
+            args.extend(["-f", f"description={description}"])
+
+        result = self._run_gh(args)
+        try:
+            label = json.loads(result)
+            return {
+                "name": label["name"],
+                "color": label.get("color", ""),
+                "description": label.get("description", "")
+            }
+        except json.JSONDecodeError as e:
+            raise GitHubClientError(f"Failed to parse label creation response: {e}")

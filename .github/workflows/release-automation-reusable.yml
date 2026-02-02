@@ -486,15 +486,41 @@ jobs:
       success: ${{ steps.create.outputs.success }}
       snapshot_id: ${{ steps.create.outputs.snapshot_id }}
       snapshot_branch: ${{ steps.create.outputs.snapshot_branch }}
+      release_review_branch: ${{ steps.create.outputs.release_review_branch }}
       release_pr_number: ${{ steps.create.outputs.release_pr_number }}
+      release_pr_url: ${{ steps.create.outputs.release_pr_url }}
       error_message: ${{ steps.create.outputs.error_message }}
     steps:
-      - name: Create Snapshot (Placeholder)
+      - name: Checkout tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          ref: release-automation-mvp
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+            shared-actions/create-snapshot
+
+      - name: Create Snapshot
         id: create
+        uses: ./_tooling/shared-actions/create-snapshot
+        with:
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          base_branch: main
+          github_token: ${{ github.token }}
+
+      - name: Log Result
+        if: always()
         run: |
-          echo "::notice::create-snapshot command not yet implemented (WS4)"
-          echo "success=false" >> $GITHUB_OUTPUT
-          echo "error_message=create-snapshot command will be implemented in WS4 (Snapshot Creation workstream)" >> $GITHUB_OUTPUT
+          echo "Create snapshot result:"
+          echo "  Success: ${{ steps.create.outputs.success }}"
+          echo "  Snapshot ID: ${{ steps.create.outputs.snapshot_id }}"
+          echo "  Snapshot branch: ${{ steps.create.outputs.snapshot_branch }}"
+          echo "  Release PR: #${{ steps.create.outputs.release_pr_number }}"
+          if [ -n "${{ steps.create.outputs.error_message }}" ]; then
+            echo "  Error: ${{ steps.create.outputs.error_message }}"
+          fi
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 5c: Execute discard-snapshot command

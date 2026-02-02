@@ -11,6 +11,7 @@ from release_automation.scripts.issue_sync import (
     IssueSyncManager,
     SyncResult,
     WORKFLOW_MARKER,
+    REQUIRED_LABELS,
 )
 from release_automation.scripts.state_manager import ReleaseState
 
@@ -446,3 +447,134 @@ class TestWorkflowMarkerConstant:
         assert "workflow-owned" in WORKFLOW_MARKER
         assert WORKFLOW_MARKER.startswith("<!--")
         assert WORKFLOW_MARKER.endswith("-->")
+
+
+class TestRequiredLabels:
+    """Tests for REQUIRED_LABELS constant."""
+
+    def test_required_labels_defined(self):
+        """Test required labels are defined."""
+        assert len(REQUIRED_LABELS) == 6
+
+    def test_required_labels_have_correct_format(self):
+        """Test each label has (name, color, description) format."""
+        for label in REQUIRED_LABELS:
+            assert len(label) == 3
+            name, color, description = label
+            assert isinstance(name, str)
+            assert isinstance(color, str)
+            assert isinstance(description, str)
+            # Color should be 6 hex chars
+            assert len(color) == 6
+
+    def test_required_labels_include_release_issue(self):
+        """Test release-issue label is included."""
+        names = [l[0] for l in REQUIRED_LABELS]
+        assert "release-issue" in names
+
+    def test_required_labels_include_all_states(self):
+        """Test all state labels are included."""
+        names = [l[0] for l in REQUIRED_LABELS]
+        assert "release-state:planned" in names
+        assert "release-state:snapshot-active" in names
+        assert "release-state:draft-ready" in names
+        assert "release-state:published" in names
+        assert "release-state:cancelled" in names
+
+
+class TestEnsureLabelsExist:
+    """Tests for ensure_labels_exist method."""
+
+    def test_creates_missing_labels(self):
+        """Test missing labels are created."""
+        gh = MagicMock()
+        gh.get_label.return_value = None  # All labels missing
+
+        manager = IssueSyncManager(gh, MagicMock(), MagicMock(), MagicMock())
+        created = manager.ensure_labels_exist()
+
+        assert len(created) == 6
+        assert gh.create_label.call_count == 6
+
+    def test_skips_existing_labels(self):
+        """Test existing labels are not recreated."""
+        gh = MagicMock()
+        # Only release-issue exists
+        gh.get_label.side_effect = lambda name: {"name": name} if name == "release-issue" else None
+
+        manager = IssueSyncManager(gh, MagicMock(), MagicMock(), MagicMock())
+        created = manager.ensure_labels_exist()
+
+        assert len(created) == 5  # 6 - 1 = 5 created
+        assert "release-issue" not in created
+        assert gh.create_label.call_count == 5
+
+    def test_is_idempotent(self):
+        """Test calling multiple times only creates labels once."""
+        gh = MagicMock()
+        gh.get_label.return_value = None
+
+        manager = IssueSyncManager(gh, MagicMock(), MagicMock(), MagicMock())
+
+        # First call
+        created1 = manager.ensure_labels_exist()
+        assert len(created1) == 6
+
+        # Second call
+        created2 = manager.ensure_labels_exist()
+        assert len(created2) == 0  # No new labels created
+
+        # Only 6 create calls total
+        assert gh.create_label.call_count == 6
+
+    def test_returns_created_label_names(self):
+        """Test returns list of created label names."""
+        gh = MagicMock()
+        gh.get_label.return_value = None
+
+        manager = IssueSyncManager(gh, MagicMock(), MagicMock(), MagicMock())
+        created = manager.ensure_labels_exist()
+
+        expected_names = [l[0] for l in REQUIRED_LABELS]
+        assert sorted(created) == sorted(expected_names)
+
+    def test_passes_correct_color_and_description(self):
+        """Test labels are created with correct color and description."""
+        gh = MagicMock()
+        gh.get_label.return_value = None
+
+        manager = IssueSyncManager(gh, MagicMock(), MagicMock(), MagicMock())
+        manager.ensure_labels_exist()
+
+        # Check one specific label
+        calls = gh.create_label.call_args_list
+        release_issue_call = next(
+            c for c in calls if c.args[0] == "release-issue"
+        )
+        assert release_issue_call.args[1] == "5319E7"  # Color
+        assert "automation" in release_issue_call.args[2].lower()  # Description
+
+
+class TestSyncReleaseIssueWithLabels:
+    """Tests that sync_release_issue ensures labels exist."""
+
+    def test_ensures_labels_before_operations(self):
+        """Test ensure_labels_exist is called during sync."""
+        gh = MagicMock()
+        state_manager = MagicMock()
+        gh.get_label.return_value = None  # All labels missing
+        state_manager.derive_state.return_value = ReleaseState.CANCELLED
+        gh.search_issues.return_value = []
+
+        manager = IssueSyncManager(gh, state_manager, MagicMock(), MagicMock())
+
+        release_plan = {
+            "repository": {
+                "target_release_tag": "r4.1"
+            }
+        }
+
+        manager.sync_release_issue(release_plan)
+
+        # Labels should have been ensured
+        assert gh.create_label.call_count == 6
