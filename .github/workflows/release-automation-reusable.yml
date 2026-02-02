@@ -634,24 +634,56 @@ jobs:
             }
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 6: Update issue state (after successful command)
+  # Phase 6: Update Release Issue state (after command execution)
   # ─────────────────────────────────────────────────────────────────────────────
   update-issue:
-    needs: [check-trigger, derive-state, create-snapshot, discard-snapshot, delete-draft]
+    name: "Phase 6: Update Release Issue"
+    needs: [check-trigger, derive-state, create-snapshot, discard-snapshot, delete-draft, handle-issue-event]
     if: |
       always() &&
-      needs.check-trigger.outputs.should_continue == 'true' &&
-      needs.check-trigger.outputs.issue_number != '' &&
+      needs.derive-state.outputs.config_error == '' &&
+      needs.derive-state.outputs.state != '' &&
       (
         (needs.create-snapshot.result == 'success' && needs.create-snapshot.outputs.success == 'true') ||
         (needs.discard-snapshot.result == 'success' && needs.discard-snapshot.outputs.success == 'true') ||
-        (needs.delete-draft.result == 'success' && needs.delete-draft.outputs.success == 'true')
+        (needs.delete-draft.result == 'success' && needs.delete-draft.outputs.success == 'true') ||
+        (needs.handle-issue-event.result == 'success') ||
+        (needs.check-trigger.outputs.command == 'sync-issue')
       )
     runs-on: ubuntu-latest
+    outputs:
+      issue_number: ${{ steps.sync.outputs.issue_number }}
+      issue_action: ${{ steps.sync.outputs.issue_action }}
+      issue_url: ${{ steps.sync.outputs.issue_url }}
     steps:
-      - name: Update Issue State (Placeholder)
+      - name: Checkout tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          ref: release-automation-mvp
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+            shared-actions/sync-release-issue
+
+      - name: Sync Release Issue
+        id: sync
+        uses: ./_tooling/shared-actions/sync-release-issue
+        with:
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          state: ${{ needs.derive-state.outputs.state }}
+          snapshot_branch: ${{ needs.derive-state.outputs.snapshot_branch }}
+          release_pr_number: ${{ needs.derive-state.outputs.release_pr_number }}
+          trigger_type: ${{ needs.check-trigger.outputs.trigger_type }}
+          github_token: ${{ github.token }}
+
+      - name: Log Result
         run: |
-          echo "::notice::Issue state update will be implemented when command handlers are complete"
+          echo "Issue sync result:"
+          echo "  Action: ${{ steps.sync.outputs.issue_action }}"
+          echo "  Issue: #${{ steps.sync.outputs.issue_number }}"
+          echo "  URL: ${{ steps.sync.outputs.issue_url }}"
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 7: Post final result comment
