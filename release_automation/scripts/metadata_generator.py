@@ -185,13 +185,17 @@ class MetadataGenerator:
 
     def _format_dependency(
         self,
-        dependency: Optional[Dict[str, Any]],
+        dependency: Optional[Any],
     ) -> Optional[str]:
         """
         Format a dependency as "rX.Y (version)" string.
 
+        Handles two formats in release-plan.yaml:
+        1. Simple string: "r3.4" -> returns "r3.4"
+        2. Dict with details: {release_tag: "r3.4", version: "1.2.0"} -> "r3.4 (1.2.0)"
+
         Args:
-            dependency: Dependency dict with release_tag and optional version
+            dependency: String release tag or dict with release_tag and optional version
 
         Returns:
             Formatted string like "r4.2 (1.2.0-rc.1)" or None if no dependency
@@ -199,6 +203,11 @@ class MetadataGenerator:
         if not dependency:
             return None
 
+        # Handle string format (simple release tag)
+        if isinstance(dependency, str):
+            return dependency
+
+        # Handle dict format with release_tag and optional version
         release_tag = dependency.get("release_tag")
         version = dependency.get("version")
 

@@ -342,6 +342,16 @@ class TestDependencyFormatting:
         dep = {"version": "1.0.0"}
         assert generator._format_dependency(dep) is None
 
+    def test_format_dependency_string(self, generator):
+        """Format string dependency (simple release tag) returns the string."""
+        result = generator._format_dependency("r3.4")
+        assert result == "r3.4"
+
+    def test_format_dependency_empty_string(self, generator):
+        """Format empty string dependency returns None."""
+        result = generator._format_dependency("")
+        assert result is None
+
 
 class TestApiBuildList:
     """Tests for API list building."""

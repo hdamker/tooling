@@ -238,6 +238,7 @@ class TestRealTemplates:
                 "API version mismatch in quality-on-demand",
                 "Missing required field: x-]]",
             ],
+            "error_message": "",  # Empty when errors list is provided
             "warnings": [
                 "Deprecated field found",
             ],
@@ -245,3 +246,17 @@ class TestRealTemplates:
         assert "Failed" in result
         assert "API version mismatch" in result
         assert "Deprecated field" in result
+
+    def test_snapshot_failed_template_with_error_message(self, bot_responder):
+        """snapshot_failed template renders with single error_message."""
+        result = bot_responder.render("snapshot_failed", {
+            "release_tag": "r4.1",
+            "state": "planned",
+            "release_type": "initial",
+            "errors": [],  # Empty when error_message is provided
+            "error_message": "Unexpected error: 'str' object has no attribute 'get'",
+            "warnings": [],
+        })
+        assert "Failed" in result
+        assert "Unexpected error" in result
+        assert "'str' object has no attribute 'get'" in result

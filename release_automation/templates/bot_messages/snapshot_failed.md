@@ -8,6 +8,9 @@
 {{#errors}}
 - {{.}}
 {{/errors}}
+{{#error_message}}
+- {{error_message}}
+{{/error_message}}
 
 {{#warnings}}
 ### Warnings
