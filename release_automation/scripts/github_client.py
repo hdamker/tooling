@@ -475,14 +475,15 @@ class GitHubClient:
         if not labels:
             return
 
-        # POST to labels endpoint
-        labels_json = json.dumps(labels)
-        self._run_gh([
+        # POST to labels endpoint using array syntax for gh api
+        args = [
             "api",
             f"repos/{self.repo}/issues/{issue_number}/labels",
-            "-X", "POST",
-            "-f", f"labels={labels_json}"
-        ])
+            "-X", "POST"
+        ]
+        for label in labels:
+            args.extend(["-f", f"labels[]={label}"])
+        self._run_gh(args)
 
     def remove_labels(self, issue_number: int, labels: List[str]) -> None:
         """
@@ -517,13 +518,15 @@ class GitHubClient:
         Raises:
             GitHubClientError: If operation fails
         """
-        labels_json = json.dumps(labels)
-        self._run_gh([
+        # PUT to labels endpoint using array syntax for gh api
+        args = [
             "api",
             f"repos/{self.repo}/issues/{issue_number}/labels",
-            "-X", "PUT",
-            "-f", f"labels={labels_json}"
-        ])
+            "-X", "PUT"
+        ]
+        for label in labels:
+            args.extend(["-f", f"labels[]={label}"])
+        self._run_gh(args)
 
     def get_label(self, label_name: str) -> Optional[Dict[str, Any]]:
         """
