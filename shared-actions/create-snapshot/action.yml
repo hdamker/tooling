@@ -128,7 +128,8 @@ runs:
             gh = GitHubClient(repo=repo, token=token)
             state_manager = ReleaseStateManager(github_client=gh)
             version_calc = VersionCalculator(github_client=gh)
-            transformer = MechanicalTransformer()
+            config_path = os.path.join(tooling_root, 'release_automation', 'config', 'transformations.yaml')
+            transformer = MechanicalTransformer(config_path=config_path)
             metadata_gen = MetadataGenerator()
 
             creator = SnapshotCreator(
