@@ -13,10 +13,12 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from .changelog_generator import ChangelogGenerator
 from .git_operations import GitOperations, GitOperationsError, PullRequestInfo
 from .github_client import GitHubClient
 from .mechanical_transformer import MechanicalTransformer, TransformationContext
 from .metadata_generator import MetadataGenerator
+from .readme_updater import ReadmeUpdater, ReadmeUpdateError
 from .state_manager import ReleaseState, ReleaseStateManager
 from .version_calculator import VersionCalculator
 
@@ -244,8 +246,34 @@ class SnapshotCreator:
             # Step 11: Push snapshot branch
             git_ops.push(snapshot_branch)
 
-            # Step 12: Create release-review branch from snapshot
+            # Step 12a: Create release-review branch from snapshot
             git_ops.create_branch(release_review_branch, from_ref="HEAD")
+
+            # Step 12b: Update README Release Information
+            try:
+                readme_changed = self._update_readme(
+                    temp_dir, config, release_plan, api_versions, metadata
+                )
+                if readme_changed:
+                    git_ops.commit_all(
+                        f"Update README Release Information for {config.release_tag}"
+                    )
+            except ReadmeUpdateError as e:
+                result.warnings.append(f"README update skipped: {e}")
+            except Exception as e:
+                result.warnings.append(f"README update failed: {e}")
+
+            # Step 12c: Generate CHANGELOG draft
+            try:
+                repo_name = self.gh.repo.split("/")[-1]
+                self._generate_changelog(
+                    temp_dir, config, release_plan, api_versions, metadata, repo_name
+                )
+                git_ops.commit_all(
+                    f"Add CHANGELOG draft for {config.release_tag}"
+                )
+            except Exception as e:
+                result.warnings.append(f"CHANGELOG generation failed: {e}")
 
             # Step 13: Push release-review branch
             git_ops.push(release_review_branch)
@@ -455,6 +483,153 @@ class SnapshotCreator:
             head=f"{self.RELEASE_REVIEW_BRANCH_PREFIX}/{snapshot_id}",
             base=f"{self.SNAPSHOT_BRANCH_PREFIX}/{snapshot_id}",
         )
+
+    def _get_latest_public_release(self) -> Optional[str]:
+        """Query GitHub releases for the latest non-prerelease, non-draft release tag."""
+        releases = self.gh.get_releases(include_drafts=False)
+        for release in releases:
+            if not release.prerelease:
+                return release.tag_name
+        return None
+
+    def _get_previous_release(self) -> Optional[str]:
+        """Query GitHub releases for the most recent release tag (any type)."""
+        releases = self.gh.get_releases(include_drafts=False)
+        if releases:
+            return releases[0].tag_name
+        return None
+
+    def _get_candidate_prs(self, previous_release: Optional[str]) -> List[Dict[str, str]]:
+        """Use GitHub compare API to list merged PRs since previous_release.
+
+        Falls back to empty list on API errors (non-fatal).
+        """
+        if not previous_release:
+            return []
+        try:
+            compare_data = self.gh.compare_commits(previous_release, "HEAD")
+            commits = compare_data.get("commits", [])
+            prs = []
+            for commit in commits:
+                msg = commit.get("commit", {}).get("message", "")
+                # Extract PR references from merge commit messages
+                author = commit.get("author", {}).get("login", "unknown")
+                url = commit.get("html_url", "")
+                # Use first line of commit message as title
+                title = msg.split("\n")[0] if msg else ""
+                if title:
+                    prs.append({"title": title, "author": author, "url": url})
+            return prs
+        except Exception:
+            return []
+
+    def _update_readme(
+        self,
+        temp_dir: str,
+        config: SnapshotConfig,
+        release_plan: Dict[str, Any],
+        api_versions: Dict[str, str],
+        metadata: Dict[str, Any],
+    ) -> bool:
+        """Update README Release Information section on release-review branch.
+
+        Determines release state by checking existing GitHub releases.
+        Formats API links and calls ReadmeUpdater.
+
+        Returns:
+            True if README was modified, False otherwise.
+
+        Raises:
+            ReadmeUpdateError: If README is missing delimiters.
+        """
+        readme_path = os.path.join(temp_dir, "README.md")
+        if not os.path.exists(readme_path):
+            return False
+
+        # Determine release state
+        repo_info = release_plan.get("repository", {})
+        release_type = repo_info.get("target_release_type", "")
+        existing_public = self._get_latest_public_release()
+        is_prerelease = release_type in ("alpha", "rc")
+
+        if is_prerelease and not existing_public:
+            release_state = "prerelease_only"
+        elif is_prerelease and existing_public:
+            release_state = "public_with_prerelease"
+        elif not is_prerelease:
+            release_state = "public_release"
+        else:
+            release_state = "no_release"
+
+        repo_name = self.gh.repo.split("/")[-1]
+        org = self.gh.repo.split("/")[0]
+
+        # Build API info for link formatting
+        apis_list = [
+            {"file_name": api_name, "version": version}
+            for api_name, version in api_versions.items()
+        ]
+
+        # Build data dict
+        data = {
+            "repo_name": repo_name,
+        }
+
+        if release_state in ("public_release", "public_with_prerelease"):
+            public_tag = existing_public if existing_public else config.release_tag
+            if not is_prerelease:
+                public_tag = config.release_tag
+            data["latest_public_release"] = public_tag
+            data["github_url"] = f"https://github.com/{org}/{repo_name}/releases/tag/{public_tag}"
+            data["meta_release"] = release_plan.get("meta_release", "")
+            data["formatted_apis"] = ReadmeUpdater.format_api_links(
+                apis_list if not is_prerelease else [], repo_name, public_tag, org
+            )
+
+        if release_state in ("prerelease_only", "public_with_prerelease"):
+            data["newest_prerelease"] = config.release_tag
+            data["prerelease_github_url"] = (
+                f"https://github.com/{org}/{repo_name}/releases/tag/{config.release_tag}"
+            )
+            data["prerelease_type"] = (
+                "release candidate" if release_type == "rc" else release_type
+            )
+            data["formatted_prerelease_apis"] = ReadmeUpdater.format_api_links(
+                apis_list, repo_name, config.release_tag, org
+            )
+
+        updater = ReadmeUpdater()
+        return updater.update_release_info(readme_path, release_state, data)
+
+    def _generate_changelog(
+        self,
+        temp_dir: str,
+        config: SnapshotConfig,
+        release_plan: Dict[str, Any],
+        api_versions: Dict[str, str],
+        metadata: Dict[str, Any],
+        repo_name: str,
+    ) -> str:
+        """Generate CHANGELOG draft on release-review branch.
+
+        Determines previous release, fetches candidate PRs from GitHub,
+        generates draft, writes to CHANGELOG directory.
+
+        Returns:
+            Relative path to the written CHANGELOG file.
+        """
+        previous_release = self._get_previous_release()
+        candidate_prs = self._get_candidate_prs(previous_release)
+
+        generator = ChangelogGenerator()
+        content = generator.generate_draft(
+            release_tag=config.release_tag,
+            metadata=metadata,
+            repo_name=repo_name,
+            previous_release=previous_release,
+            candidate_prs=candidate_prs,
+        )
+        return generator.write_changelog(temp_dir, content, config.release_tag, repo_name)
 
     def _cleanup_branches(
         self,

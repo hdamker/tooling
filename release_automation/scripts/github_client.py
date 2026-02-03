@@ -598,3 +598,24 @@ class GitHubClient:
             }
         except json.JSONDecodeError as e:
             raise GitHubClientError(f"Failed to parse label creation response: {e}")
+
+    def compare_commits(self, base: str, head: str) -> dict:
+        """
+        Compare two commits/tags/branches using the GitHub compare API.
+
+        Args:
+            base: Base reference (tag, branch, or SHA)
+            head: Head reference (tag, branch, or SHA)
+
+        Returns:
+            Parsed JSON response from the compare API, or empty dict on error.
+        """
+        try:
+            output = self._run_gh([
+                "api",
+                f"repos/{self.repo}/compare/{base}...{head}",
+                "--jq", "."
+            ])
+            return json.loads(output)
+        except (GitHubClientError, json.JSONDecodeError):
+            return {}

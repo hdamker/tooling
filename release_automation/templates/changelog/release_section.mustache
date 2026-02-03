@@ -1,0 +1,30 @@
+# {{release_tag}}
+
+## Release Notes
+
+This {{release_type_description}} contains the definition and documentation of
+{{#apis}}
+* {{api_title}} {{api_version}}
+{{/apis}}
+
+The API definition(s) are based on
+* Commonalities {{commonalities_release}}
+* Identity and Consent Management {{icm_release}}
+
+{{{formatted_api_sections}}}
+
+<details>
+<summary>Candidate changes (auto-generated from merged PRs{{#previous_release}} since {{previous_release}}{{/previous_release}})</summary>
+
+{{#candidate_prs}}
+* {{title}} by @{{author}} in {{url}}
+{{/candidate_prs}}
+{{^candidate_prs}}
+* No merged PRs found for comparison
+{{/candidate_prs}}
+{{#previous_release}}
+
+**Full Changelog**: https://github.com/camaraproject/{{repo_name}}/compare/{{previous_release}}...{{release_tag}}
+{{/previous_release}}
+
+</details>

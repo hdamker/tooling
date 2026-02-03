@@ -872,3 +872,122 @@ class TestCustomBaseCommit:
 
         mock_github_client.list_branches.assert_called_with("main")
         assert result.src_commit_sha is not None
+
+
+# --- Tests for Release Documentation (WP31/WP32 Integration) ---
+
+
+class TestReleaseDocumentation:
+    """Tests for README and CHANGELOG generation in create_snapshot flow."""
+
+    def test_get_latest_public_release_returns_first_non_prerelease(
+        self, snapshot_creator, mock_github_client
+    ):
+        """Returns tag of first non-prerelease release."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r4.1-rc.1", prerelease=True),
+            Mock(tag_name="r3.2", prerelease=False),
+            Mock(tag_name="r2.2", prerelease=False),
+        ]
+        result = snapshot_creator._get_latest_public_release()
+        assert result == "r3.2"
+
+    def test_get_latest_public_release_returns_none_when_no_public(
+        self, snapshot_creator, mock_github_client
+    ):
+        """Returns None when only prereleases exist."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r4.1-rc.1", prerelease=True),
+        ]
+        result = snapshot_creator._get_latest_public_release()
+        assert result is None
+
+    def test_get_previous_release_returns_most_recent(
+        self, snapshot_creator, mock_github_client
+    ):
+        """Returns the most recent release tag."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r3.2"),
+            Mock(tag_name="r2.2"),
+        ]
+        result = snapshot_creator._get_previous_release()
+        assert result == "r3.2"
+
+    def test_get_previous_release_returns_none_when_empty(
+        self, snapshot_creator, mock_github_client
+    ):
+        """Returns None when no releases exist."""
+        mock_github_client.get_releases.return_value = []
+        result = snapshot_creator._get_previous_release()
+        assert result is None
+
+    def test_get_candidate_prs_returns_empty_on_no_previous(self, snapshot_creator):
+        """Returns empty list when no previous release."""
+        result = snapshot_creator._get_candidate_prs(None)
+        assert result == []
+
+    def test_get_candidate_prs_returns_empty_on_api_error(
+        self, snapshot_creator, mock_github_client
+    ):
+        """Returns empty list when compare API fails."""
+        mock_github_client.compare_commits.side_effect = Exception("API error")
+        result = snapshot_creator._get_candidate_prs("r3.2")
+        assert result == []
+
+    def test_update_readme_returns_false_when_no_readme(
+        self, snapshot_creator, tmp_path, sample_release_plan
+    ):
+        """Returns False when README.md doesn't exist."""
+        config = SnapshotConfig(release_tag="r4.1")
+        result = snapshot_creator._update_readme(
+            str(tmp_path), config, sample_release_plan, {}, {}
+        )
+        assert result is False
+
+    @patch("release_automation.scripts.snapshot_creator.ReadmeUpdater")
+    def test_update_readme_determines_prerelease_state(
+        self, mock_updater_cls, snapshot_creator, mock_github_client, tmp_path, sample_release_plan
+    ):
+        """Determines prerelease_only state when no public releases exist."""
+        # Create README with delimiters
+        readme = tmp_path / "README.md"
+        readme.write_text(
+            "<!-- CAMARA:RELEASE-INFO:START -->\nold\n<!-- CAMARA:RELEASE-INFO:END -->\n"
+        )
+        mock_github_client.get_releases.return_value = []
+
+        mock_instance = Mock()
+        mock_instance.update_release_info.return_value = True
+        mock_updater_cls.return_value = mock_instance
+        mock_updater_cls.format_api_links = Mock(return_value="")
+
+        config = SnapshotConfig(release_tag="r4.1")
+        snapshot_creator._update_readme(
+            str(tmp_path), config, sample_release_plan, {"quality-on-demand": "v1.0.0"}, {}
+        )
+
+        # Should be called with prerelease_only state since no public releases
+        call_args = mock_instance.update_release_info.call_args
+        assert call_args[0][1] == "prerelease_only"
+
+    @patch("release_automation.scripts.snapshot_creator.ChangelogGenerator")
+    def test_generate_changelog_creates_file(
+        self, mock_gen_cls, snapshot_creator, mock_github_client, tmp_path
+    ):
+        """Generates CHANGELOG and writes to directory."""
+        mock_github_client.get_releases.return_value = []
+        mock_github_client.compare_commits.return_value = {}
+
+        mock_instance = Mock()
+        mock_instance.generate_draft.return_value = "# r4.1\n\nContent\n"
+        mock_instance.write_changelog.return_value = "CHANGELOG/CHANGELOG-r4.md"
+        mock_gen_cls.return_value = mock_instance
+
+        config = SnapshotConfig(release_tag="r4.1")
+        metadata = {"repository": {"release_type": "rc"}, "apis": [], "dependencies": {}}
+        result = snapshot_creator._generate_changelog(
+            str(tmp_path), config, {}, {}, metadata, "TestRepo-QoD"
+        )
+        assert result == "CHANGELOG/CHANGELOG-r4.md"
+        mock_instance.generate_draft.assert_called_once()
+        mock_instance.write_changelog.assert_called_once()
