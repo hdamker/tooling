@@ -256,3 +256,134 @@ class TestRealTemplates:
         assert "Failed" in result
         assert "Unexpected error" in result
         assert "'str' object has no attribute 'get'" in result
+
+
+class TestContextIntegration:
+    """Tests simulating the post-bot-comment action's context flow.
+
+    These tests verify that partial context (as each workflow job passes)
+    produces complete, crash-free template rendering via build_context().
+    """
+
+    def test_config_error_partial_context(self, bot_responder):
+        """handle-config-error job's partial context renders config_error."""
+        from release_automation.scripts.context_builder import build_context
+
+        raw = {
+            "error_type": "missing_file",
+            "error_message": "release-plan.yaml not found",
+            "command": "/create-snapshot",
+            "user": "developer",
+            "workflow_run_url": "https://github.com/org/repo/actions/runs/1",
+        }
+        context = build_context(**raw)
+        result = bot_responder.render("config_error", context)
+        assert "missing_file" in result or "release-plan.yaml" in result
+
+    def test_config_error_derives_boolean_flags(self, bot_responder):
+        """Boolean flags are derived from error_type without explicit passing."""
+        from release_automation.scripts.context_builder import build_context
+
+        raw = {
+            "error_type": "malformed_yaml",
+            "error_message": "YAML syntax error on line 5",
+            "command": "/create-snapshot",
+            "user": "developer",
+            "workflow_run_url": "https://github.com/org/repo/actions/runs/1",
+        }
+        context = build_context(**raw)
+        assert context["is_malformed_yaml"] is True
+        assert context["is_missing_file"] is False
+        assert context["is_missing_field"] is False
+
+    def test_post_result_renders_snapshot_created(self, bot_responder):
+        """post-result job's context renders snapshot_created template."""
+        from release_automation.scripts.context_builder import build_context
+
+        raw = {
+            "command": "create-snapshot",
+            "user": "developer",
+            "release_tag": "r4.1",
+            "state": "snapshot-active",
+            "snapshot_id": "r4.1-abc1234",
+            "snapshot_branch": "release-snapshot/r4.1-abc1234",
+            "release_review_branch": "release-review/r4.1-abc1234",
+            "release_pr_url": "https://github.com/org/repo/pull/42",
+            "release_pr_number": "42",
+            "workflow_run_url": "https://github.com/org/repo/actions/runs/1",
+            "apis": [{"api_name": "QoD", "api_version": "1.0.0-rc.1"}],
+        }
+        context = build_context(**raw)
+        result = bot_responder.render("snapshot_created", context)
+        assert "r4.1-abc1234" in result
+        assert "QoD" in result
+        assert "1.0.0-rc.1" in result
+        assert "pull/42" in result
+
+    def test_issue_reopened_partial_context(self, bot_responder):
+        """handle-issue-event's minimal context renders issue_reopened."""
+        from release_automation.scripts.context_builder import build_context
+
+        raw = {
+            "release_tag": "r4.1",
+            "state": "snapshot-active",
+            "snapshot_id": "r4.1-abc1234",
+            "reason": "Cannot close Release Issue while release is in progress",
+        }
+        context = build_context(**raw)
+        assert context["state_snapshot_active"] is True
+        assert context["state_draft_ready"] is False
+        result = bot_responder.render("issue_reopened", context)
+        assert "r4.1" in result
+
+    def test_apis_json_string_to_list_conversion(self):
+        """apis_json string is correctly converted to apis list."""
+        import json
+        from release_automation.scripts.context_builder import build_context
+
+        raw = {
+            "release_tag": "r4.1",
+            "apis_json": json.dumps([
+                {"api_name": "QoD", "api_version": "1.0.0"},
+                {"api_name": "qos-profiles", "api_version": "0.11.0-rc.1"},
+            ]),
+        }
+        # Simulate the conversion done in post-bot-comment action
+        if "apis_json" in raw and isinstance(raw["apis_json"], str):
+            raw["apis"] = json.loads(raw["apis_json"])
+            del raw["apis_json"]
+        context = build_context(**raw)
+        assert len(context["apis"]) == 2
+        assert context["apis"][0]["api_name"] == "QoD"
+        assert context["apis"][1]["api_version"] == "0.11.0-rc.1"
+
+    def test_interim_processing_minimal_context(self, bot_responder):
+        """post-interim's minimal context renders interim_processing."""
+        from release_automation.scripts.context_builder import build_context
+
+        raw = {
+            "command": "/create-snapshot",
+            "user": "developer",
+            "workflow_run_url": "https://github.com/org/repo/actions/runs/1",
+        }
+        context = build_context(**raw)
+        result = bot_responder.render("interim_processing", context)
+        assert "/create-snapshot" in result
+        assert "developer" in result
+
+    def test_rejection_partial_context(self, bot_responder):
+        """post-rejection job's context renders command_rejected."""
+        from release_automation.scripts.context_builder import build_context
+
+        raw = {
+            "command": "/create-snapshot",
+            "user": "developer",
+            "state": "snapshot-active",
+            "release_tag": "r4.1",
+            "error_message": "Command /create-snapshot not allowed in state 'snapshot-active'",
+            "workflow_run_url": "https://github.com/org/repo/actions/runs/1",
+        }
+        context = build_context(**raw)
+        result = bot_responder.render("command_rejected", context)
+        assert "not allowed" in result
+        assert "developer" in result

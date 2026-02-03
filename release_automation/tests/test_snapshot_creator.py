@@ -546,6 +546,41 @@ class TestErrorHandling:
         assert result.success is False
         assert "Git operation failed" in result.errors[0]
 
+    @patch("release_automation.scripts.snapshot_creator.tempfile.mkdtemp")
+    @patch("release_automation.scripts.snapshot_creator.shutil.rmtree")
+    @patch("release_automation.scripts.snapshot_creator.GitOperations")
+    def test_cleanup_errors_added_to_warnings(
+        self,
+        mock_git_ops_class,
+        mock_rmtree,
+        mock_mkdtemp,
+        snapshot_creator,
+        mock_transformer,
+        sample_release_plan,
+    ):
+        """Test that cleanup branch errors are captured in result.warnings."""
+        mock_mkdtemp.return_value = "/tmp/test-snapshot"
+        mock_git_ops = MagicMock()
+        mock_git_ops_class.return_value = mock_git_ops
+
+        # Make transformation fail to trigger cleanup path
+        mock_transformer.apply_all.return_value = TransformationResult(
+            success=False,
+            errors=["Transformation failed"],
+        )
+
+        # Mock _cleanup_branches to return cleanup errors
+        with patch.object(
+            snapshot_creator, '_cleanup_branches',
+            return_value=["Failed to delete release-review/r4.1-abc1234: permission denied"]
+        ):
+            config = SnapshotConfig(release_tag="r4.1")
+            result = snapshot_creator.create_snapshot(sample_release_plan, config)
+
+        assert result.success is False
+        assert "Transformations failed" in result.errors
+        assert "Failed to delete release-review/r4.1-abc1234: permission denied" in result.warnings
+
     def test_temp_directory_always_cleaned(
         self,
         snapshot_creator,

@@ -66,14 +66,30 @@ runs:
         print(f"Added to sys.path: {tooling_root}")
 
         from release_automation.scripts.bot_responder import BotResponder
+        from release_automation.scripts.context_builder import build_context
 
         # Parse context
         context_json = os.environ['CONTEXT_JSON']
         try:
-            context = json.loads(context_json)
+            raw_context = json.loads(context_json)
         except json.JSONDecodeError as e:
             print(f"::error::Invalid JSON context: {e}")
             sys.exit(1)
+
+        # Convert apis_json string to apis list if present
+        # (workflow passes serialized JSON string for list-type outputs)
+        if 'apis_json' in raw_context and isinstance(raw_context['apis_json'], str):
+            try:
+                raw_context['apis'] = json.loads(raw_context['apis_json'])
+            except (json.JSONDecodeError, TypeError):
+                raw_context['apis'] = []
+            del raw_context['apis_json']
+
+        # Guarantee schema completeness via build_context()
+        # - Fills missing keys with type-appropriate defaults
+        # - Derives boolean flags from string fields (e.g., is_missing_file from error_type)
+        # - Ignores unknown keys silently
+        context = build_context(**raw_context)
 
         # Render template
         template_name = os.environ['TEMPLATE_NAME']

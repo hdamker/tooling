@@ -267,13 +267,16 @@ class SnapshotCreator:
             result.errors.append(str(e))
         except TransformationError as e:
             result.errors.append(str(e))
-            self._cleanup_branches(snapshot_branch, release_review_branch)
+            cleanup_errors = self._cleanup_branches(snapshot_branch, release_review_branch)
+            result.warnings.extend(cleanup_errors)
         except GitOperationsError as e:
             result.errors.append(f"Git operation failed: {e}")
-            self._cleanup_branches(snapshot_branch, release_review_branch)
+            cleanup_errors = self._cleanup_branches(snapshot_branch, release_review_branch)
+            result.warnings.extend(cleanup_errors)
         except Exception as e:
             result.errors.append(f"Unexpected error: {e}")
-            self._cleanup_branches(snapshot_branch, release_review_branch)
+            cleanup_errors = self._cleanup_branches(snapshot_branch, release_review_branch)
+            result.warnings.extend(cleanup_errors)
         finally:
             # Cleanup temp directory
             if temp_dir and os.path.exists(temp_dir):

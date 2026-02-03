@@ -284,10 +284,7 @@ jobs:
               "error_message": "${{ needs.derive-state.outputs.config_error }}",
               "command": "${{ needs.check-trigger.outputs.command }}",
               "user": "${{ needs.check-trigger.outputs.user }}",
-              "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
-              "is_missing_file": ${{ needs.derive-state.outputs.config_error_type == 'missing_file' }},
-              "is_malformed_yaml": ${{ needs.derive-state.outputs.config_error_type == 'malformed_yaml' }},
-              "is_missing_field": ${{ needs.derive-state.outputs.config_error_type == 'missing_field' }}
+              "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             }
 
       - name: Fail workflow (for non-slash-command triggers)
@@ -658,6 +655,7 @@ jobs:
           template: issue_reopened
           context: |
             {
+              "release_tag": "${{ needs.derive-state.outputs.release_tag }}",
               "state": "${{ needs.derive-state.outputs.state }}",
               "snapshot_id": "${{ needs.derive-state.outputs.snapshot_id }}",
               "reason": "Cannot close Release Issue while release is in progress"
@@ -777,21 +775,59 @@ jobs:
       - name: Build Result Context
         id: context
         run: |
-          # Build JSON context based on command and results
-          CONTEXT='{
-            "command": "${{ needs.check-trigger.outputs.command }}",
-            "user": "${{ needs.check-trigger.outputs.user }}",
-            "state": "${{ needs.derive-state.outputs.state }}",
-            "release_tag": "${{ needs.derive-state.outputs.release_tag }}",
-            "snapshot_id": "${{ needs.derive-state.outputs.snapshot_id }}",
-            "snapshot_branch": "${{ needs.derive-state.outputs.snapshot_branch }}",
-            "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          }'
+          # Build base context from derive-state and check-trigger outputs
+          CONTEXT=$(jq -n \
+            --arg command "${{ needs.check-trigger.outputs.command }}" \
+            --arg user "${{ needs.check-trigger.outputs.user }}" \
+            --arg release_tag "${{ needs.derive-state.outputs.release_tag }}" \
+            --arg state "${{ needs.derive-state.outputs.state }}" \
+            --arg snapshot_id "${{ needs.derive-state.outputs.snapshot_id }}" \
+            --arg snapshot_branch "${{ needs.derive-state.outputs.snapshot_branch }}" \
+            --arg release_review_branch "${{ needs.derive-state.outputs.release_review_branch }}" \
+            --arg release_type "${{ needs.derive-state.outputs.release_type }}" \
+            --arg src_commit_sha "${{ needs.derive-state.outputs.src_commit_sha }}" \
+            --arg commonalities_release "${{ needs.derive-state.outputs.commonalities_release }}" \
+            --arg icm_release "${{ needs.derive-state.outputs.identity_consent_management_release }}" \
+            --arg workflow_run_url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            '{
+              command: $command,
+              user: $user,
+              release_tag: $release_tag,
+              state: $state,
+              snapshot_id: $snapshot_id,
+              snapshot_branch: $snapshot_branch,
+              release_review_branch: $release_review_branch,
+              release_type: $release_type,
+              src_commit_sha: $src_commit_sha,
+              commonalities_release: $commonalities_release,
+              identity_consent_management_release: $icm_release,
+              workflow_run_url: $workflow_run_url
+            }')
 
-          # For now, include error messages from placeholder commands
+          # Add create-snapshot outputs if that job ran successfully
+          if [ "${{ needs.create-snapshot.outputs.success }}" == "true" ]; then
+            CONTEXT=$(echo "$CONTEXT" | jq \
+              --arg sid "${{ needs.create-snapshot.outputs.snapshot_id }}" \
+              --arg sb "${{ needs.create-snapshot.outputs.snapshot_branch }}" \
+              --arg rrb "${{ needs.create-snapshot.outputs.release_review_branch }}" \
+              --arg prn "${{ needs.create-snapshot.outputs.release_pr_number }}" \
+              --arg pru "${{ needs.create-snapshot.outputs.release_pr_url }}" \
+              '. + {snapshot_id: $sid, snapshot_branch: $sb, release_review_branch: $rrb, release_pr_number: $prn, release_pr_url: $pru}')
+          fi
+
+          # Add error message for failure cases
           if [ "${{ needs.create-snapshot.outputs.success }}" == "false" ]; then
-            ERROR_MSG="${{ needs.create-snapshot.outputs.error_message }}"
-            CONTEXT=$(echo "$CONTEXT" | jq --arg err "$ERROR_MSG" '. + {error_message: $err}')
+            CONTEXT=$(echo "$CONTEXT" | jq \
+              --arg err "${{ needs.create-snapshot.outputs.error_message }}" \
+              '. + {error_message: $err}')
+          fi
+
+          # Add apis_json from derive-state (parsed to apis list in post-bot-comment action)
+          APIS_JSON='${{ needs.derive-state.outputs.apis_json }}'
+          if [ -n "$APIS_JSON" ] && [ "$APIS_JSON" != "" ]; then
+            CONTEXT=$(echo "$CONTEXT" | jq \
+              --arg apis "$APIS_JSON" \
+              '. + {apis_json: $apis}')
           fi
 
           echo "context<<EOF" >> $GITHUB_OUTPUT
