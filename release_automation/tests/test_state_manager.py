@@ -196,7 +196,7 @@ repository:
         assert result.snapshot_id == "r4.1-abc1234"
         assert result.snapshot_branch == "release-snapshot/r4.1-abc1234"
         assert result.release_review_branch == "release-review/r4.1-abc1234"
-        assert result.base_commit_sha == "full1234567890abcdef1234567890abcdef12345678"
+        assert result.src_commit_sha == "full1234567890abcdef1234567890abcdef12345678"
         assert result.release_pr_number == 42
 
     def test_uses_branch_sha_when_no_metadata(self, state_manager, mock_github_client):
@@ -212,7 +212,7 @@ repository:
         result = state_manager.get_current_snapshot("r4.1")
 
         assert result is not None
-        assert result.base_commit_sha == "branch_sha_123"
+        assert result.src_commit_sha == "branch_sha_123"
 
     def test_handles_invalid_datetime(self, state_manager, mock_github_client):
         """Invalid datetime string → uses current time."""

@@ -102,7 +102,7 @@ class MetadataGenerator:
         self,
         release_plan: Dict[str, Any],
         api_versions: Dict[str, str],
-        base_commit_sha: Optional[str],
+        src_commit_sha: Optional[str],
         api_titles: Dict[str, str],
     ) -> Dict[str, Any]:
         """
@@ -111,7 +111,7 @@ class MetadataGenerator:
         Args:
             release_plan: Parsed release-plan.yaml content
             api_versions: Dict mapping api_name to calculated version string
-            base_commit_sha: SHA of the base commit (source of snapshot)
+            src_commit_sha: SHA of the source commit (snapshot was created from)
             api_titles: Dict mapping api_name to human-readable title
 
         Returns:
@@ -148,7 +148,7 @@ class MetadataGenerator:
             repository_name=repository_name,
             release_tag=release_tag,
             release_type=release_type,
-            src_commit_sha=base_commit_sha,
+            src_commit_sha=src_commit_sha,
             apis=apis,
             release_date=None,  # Set during publication
             release_notes=release_notes,

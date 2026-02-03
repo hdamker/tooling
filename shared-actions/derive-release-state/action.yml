@@ -35,9 +35,21 @@ outputs:
   release_pr_number:
     description: 'Release PR number if exists'
     value: ${{ steps.derive.outputs.release_pr_number }}
-  base_commit_sha:
-    description: 'Base commit SHA the snapshot was created from'
-    value: ${{ steps.derive.outputs.base_commit_sha }}
+  src_commit_sha:
+    description: 'Source commit SHA the snapshot was created from'
+    value: ${{ steps.derive.outputs.src_commit_sha }}
+  release_type:
+    description: 'Release type from release-metadata.yaml (e.g., initial, patch)'
+    value: ${{ steps.derive.outputs.release_type }}
+  apis_json:
+    description: 'JSON array of API metadata from release-metadata.yaml'
+    value: ${{ steps.derive.outputs.apis_json }}
+  commonalities_release:
+    description: 'Commonalities release dependency from release-metadata.yaml'
+    value: ${{ steps.derive.outputs.commonalities_release }}
+  identity_consent_management_release:
+    description: 'ICM release dependency from release-metadata.yaml'
+    value: ${{ steps.derive.outputs.identity_consent_management_release }}
   source:
     description: 'Source of release_tag (release-plan.yaml|release-metadata.yaml|tag)'
     value: ${{ steps.derive.outputs.source }}
@@ -106,8 +118,12 @@ runs:
                 f.write("snapshot_id=\n")
                 f.write("snapshot_branch=\n")
                 f.write("release_review_branch=\n")
-                f.write("base_commit_sha=\n")
+                f.write("src_commit_sha=\n")
                 f.write("release_pr_number=\n")
+                f.write("release_type=\n")
+                f.write("apis_json=\n")
+                f.write("commonalities_release=\n")
+                f.write("identity_consent_management_release=\n")
                 f.write(f"config_error={error.message}\n")
                 f.write(f"config_error_type={error.error_type}\n")
 
@@ -140,18 +156,27 @@ runs:
             f.write("config_error_type=\n")
 
             if snapshot:
+                import json
                 f.write(f"snapshot_id={snapshot.snapshot_id}\n")
                 f.write(f"snapshot_branch={snapshot.snapshot_branch}\n")
                 f.write(f"release_review_branch={snapshot.release_review_branch}\n")
-                f.write(f"base_commit_sha={snapshot.base_commit_sha}\n")
+                f.write(f"src_commit_sha={snapshot.src_commit_sha}\n")
                 pr_num = snapshot.release_pr_number if snapshot.release_pr_number else ''
                 f.write(f"release_pr_number={pr_num}\n")
+                f.write(f"release_type={snapshot.release_type}\n")
+                f.write(f"apis_json={json.dumps(snapshot.apis)}\n")
+                f.write(f"commonalities_release={snapshot.commonalities_release}\n")
+                f.write(f"identity_consent_management_release={snapshot.identity_consent_management_release}\n")
             else:
                 f.write("snapshot_id=\n")
                 f.write(f"snapshot_branch={snapshot_branch or ''}\n")
                 f.write("release_review_branch=\n")
-                f.write("base_commit_sha=\n")
+                f.write("src_commit_sha=\n")
                 f.write("release_pr_number=\n")
+                f.write("release_type=\n")
+                f.write("apis_json=\n")
+                f.write("commonalities_release=\n")
+                f.write("identity_consent_management_release=\n")
 
         # Log result for debugging
         print(f"Release tag: {release_tag} (from {source})")

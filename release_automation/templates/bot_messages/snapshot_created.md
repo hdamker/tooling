@@ -25,7 +25,7 @@ Review the Release PR and merge when ready to create a draft release.
 ### API Versions
 
 {{#apis}}
-- **{{name}}**: `{{version}}`
+- **{{api_name}}**: `{{api_version}}`
 {{/apis}}
 
 ---

@@ -210,7 +210,11 @@ jobs:
       snapshot_branch: ${{ steps.state.outputs.snapshot_branch }}
       release_review_branch: ${{ steps.state.outputs.release_review_branch }}
       release_pr_number: ${{ steps.state.outputs.release_pr_number }}
-      base_commit_sha: ${{ steps.state.outputs.base_commit_sha }}
+      src_commit_sha: ${{ steps.state.outputs.src_commit_sha }}
+      release_type: ${{ steps.state.outputs.release_type }}
+      apis_json: ${{ steps.state.outputs.apis_json }}
+      commonalities_release: ${{ steps.state.outputs.commonalities_release }}
+      identity_consent_management_release: ${{ steps.state.outputs.identity_consent_management_release }}
       source: ${{ steps.state.outputs.source }}
       config_error: ${{ steps.state.outputs.config_error }}
       config_error_type: ${{ steps.state.outputs.config_error_type }}

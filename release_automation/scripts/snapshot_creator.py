@@ -26,7 +26,7 @@ class SnapshotConfig:
     """Configuration for snapshot creation."""
     release_tag: str
     base_branch: str = "main"
-    base_commit_sha: Optional[str] = None
+    src_commit_sha: Optional[str] = None
     dry_run: bool = False
     # Note: commonalities_release and icm_release are derived from
     # release_plan['dependencies'], not passed via config
@@ -41,7 +41,7 @@ class SnapshotResult:
     release_review_branch: Optional[str] = None
     release_pr_number: Optional[int] = None
     release_pr_url: Optional[str] = None
-    base_commit_sha: Optional[str] = None
+    src_commit_sha: Optional[str] = None
     api_versions: Dict[str, str] = field(default_factory=dict)
     transformation_summary: Dict[str, Any] = field(default_factory=dict)
     errors: List[str] = field(default_factory=list)
@@ -61,9 +61,9 @@ class SnapshotResult:
             "release_review_branch": self.release_review_branch,
             "release_pr_number": self.release_pr_number,
             "release_pr_url": self.release_pr_url,
-            "base_commit_sha": self.base_commit_sha,
+            "src_commit_sha": self.src_commit_sha,
             "apis": [
-                {"name": name, "version": version}
+                {"api_name": name, "api_version": version}
                 for name, version in self.api_versions.items()
             ],
             "transformation_summary": self.transformation_summary,
@@ -155,8 +155,8 @@ class SnapshotCreator:
                 return result
 
             # Step 2: Get base commit SHA
-            if config.base_commit_sha:
-                base_sha = config.base_commit_sha
+            if config.src_commit_sha:
+                base_sha = config.src_commit_sha
             else:
                 # Get from main branch via API
                 branches = self.gh.list_branches(config.base_branch)
@@ -167,7 +167,7 @@ class SnapshotCreator:
                     return result
                 base_sha = branches[0].sha
 
-            result.base_commit_sha = base_sha
+            result.src_commit_sha = base_sha
 
             # Step 3: Generate snapshot ID
             snapshot_id = self.generate_snapshot_id(config.release_tag, base_sha)

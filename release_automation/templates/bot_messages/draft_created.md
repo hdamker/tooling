@@ -14,7 +14,7 @@ The Release PR has been merged and a draft release has been created.
 ### API Versions
 
 {{#apis}}
-- **{{name}}**: `{{version}}`
+- **{{api_name}}**: `{{api_version}}`
 {{/apis}}
 
 ---

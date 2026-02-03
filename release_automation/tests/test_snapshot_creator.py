@@ -145,7 +145,7 @@ class TestSnapshotConfig:
         config = SnapshotConfig(release_tag="r4.1")
         assert config.release_tag == "r4.1"
         assert config.base_branch == "main"
-        assert config.base_commit_sha is None
+        assert config.src_commit_sha is None
         assert config.dry_run is False
         # Note: commonalities_release and icm_release are now derived from
         # release_plan['dependencies'], not passed via SnapshotConfig
@@ -155,12 +155,12 @@ class TestSnapshotConfig:
         config = SnapshotConfig(
             release_tag="r5.0",
             base_branch="develop",
-            base_commit_sha="abc1234",
+            src_commit_sha="abc1234",
             dry_run=True,
         )
         assert config.release_tag == "r5.0"
         assert config.base_branch == "develop"
-        assert config.base_commit_sha == "abc1234"
+        assert config.src_commit_sha == "abc1234"
         assert config.dry_run is True
 
 
@@ -178,7 +178,7 @@ class TestSnapshotResult:
             release_review_branch="release-review/r4.1-abc1234",
             release_pr_number=42,
             release_pr_url="https://github.com/owner/repo/pull/42",
-            base_commit_sha="abc1234567890",
+            src_commit_sha="abc1234567890",
             api_versions={"api1": "1.0.0", "api2": "2.0.0"},
         )
         assert result.success is True
@@ -206,8 +206,8 @@ class TestSnapshotResult:
         assert context["success"] is True
         assert context["snapshot_id"] == "r4.1-abc1234"
         assert len(context["apis"]) == 2
-        assert context["apis"][0]["name"] == "api1"
-        assert context["apis"][0]["version"] == "1.0.0"
+        assert context["apis"][0]["api_name"] == "api1"
+        assert context["apis"][0]["api_version"] == "1.0.0"
         assert context["has_errors"] is False
         assert context["has_warnings"] is False
 
@@ -802,27 +802,27 @@ class TestTransformationIntegration:
 class TestCustomBaseCommit:
     """Tests for using custom base commit SHA."""
 
-    def test_uses_provided_base_commit_sha(
+    def test_uses_provided_src_commit_sha(
         self,
         snapshot_creator,
         mock_github_client,
         sample_release_plan,
     ):
-        """Test that provided base_commit_sha is used."""
+        """Test that provided src_commit_sha is used."""
         # Reset the mock to clear any previous calls
         mock_github_client.list_branches.reset_mock()
 
         config = SnapshotConfig(
             release_tag="r4.1",
-            base_commit_sha="custom123456789",
+            src_commit_sha="custom123456789",
             dry_run=True,
         )
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
-        assert result.base_commit_sha == "custom123456789"
+        assert result.src_commit_sha == "custom123456789"
         # SHA is truncated to 7 characters: "custom1" from "custom123456789"
         assert result.snapshot_id == "r4.1-custom1"
-        # Should not call list_branches to get SHA since base_commit_sha was provided
+        # Should not call list_branches to get SHA since src_commit_sha was provided
         mock_github_client.list_branches.assert_not_called()
 
     def test_fetches_sha_when_not_provided(
@@ -836,4 +836,4 @@ class TestCustomBaseCommit:
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         mock_github_client.list_branches.assert_called_with("main")
-        assert result.base_commit_sha is not None
+        assert result.src_commit_sha is not None

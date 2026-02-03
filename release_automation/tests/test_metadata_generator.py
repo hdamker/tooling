@@ -181,7 +181,7 @@ class TestMetadataGenerator:
         result = generator.generate(
             release_plan=sample_release_plan,
             api_versions=sample_api_versions,
-            base_commit_sha="abcd1234efgh5678",
+            src_commit_sha="abcd1234efgh5678",
             api_titles=sample_api_titles,
         )
 
@@ -231,7 +231,7 @@ class TestMetadataGenerator:
         result = generator.generate(
             release_plan=release_plan,
             api_versions={"simple-api": "0.1.0-alpha.1"},
-            base_commit_sha="abc123",
+            src_commit_sha="abc123",
             api_titles={"simple-api": "Simple API"},
         )
 
@@ -252,7 +252,7 @@ class TestMetadataGenerator:
         result = generator.generate(
             release_plan=release_plan,
             api_versions={},
-            base_commit_sha=None,
+            src_commit_sha=None,
             api_titles={},
         )
 
@@ -273,7 +273,7 @@ class TestMetadataGenerator:
         result = generator.generate(
             release_plan=release_plan,
             api_versions={},
-            base_commit_sha=None,
+            src_commit_sha=None,
             api_titles={},
         )
 

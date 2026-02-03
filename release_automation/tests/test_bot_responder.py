@@ -195,19 +195,21 @@ class TestRealTemplates:
 
     def test_snapshot_created_template(self, bot_responder):
         """snapshot_created template renders correctly."""
-        result = bot_responder.render("snapshot_created", {
-            "release_tag": "r4.1",
-            "meta_release": "Spring 2026",
-            "snapshot_id": "r4.1-abc1234",
-            "state": "snapshot-active",
-            "snapshot_branch": "release-snapshot/r4.1-abc1234",
-            "release_review_branch": "release-review/r4.1-abc1234",
-            "release_pr_url": "https://github.com/org/repo/pull/123",
-            "apis": [
-                {"name": "quality-on-demand", "version": "1.0.0"},
-                {"name": "qos-profiles", "version": "0.11.0-rc.1"},
+        from release_automation.scripts.context_builder import build_context
+        context = build_context(
+            release_tag="r4.1",
+            meta_release="Spring 2026",
+            snapshot_id="r4.1-abc1234",
+            state="snapshot-active",
+            snapshot_branch="release-snapshot/r4.1-abc1234",
+            release_review_branch="release-review/r4.1-abc1234",
+            release_pr_url="https://github.com/org/repo/pull/123",
+            apis=[
+                {"api_name": "quality-on-demand", "api_version": "1.0.0"},
+                {"api_name": "qos-profiles", "api_version": "0.11.0-rc.1"},
             ],
-        })
+        )
+        result = bot_responder.render("snapshot_created", context)
         assert "r4.1" in result
         assert "Spring 2026" in result
         assert "r4.1-abc1234" in result
@@ -229,34 +231,28 @@ class TestRealTemplates:
         assert "developer" in result
 
     def test_snapshot_failed_template(self, bot_responder):
-        """snapshot_failed template renders with errors."""
-        result = bot_responder.render("snapshot_failed", {
-            "release_tag": "r4.1",
-            "state": "planned",
-            "release_type": "initial",
-            "errors": [
-                "API version mismatch in quality-on-demand",
-                "Missing required field: x-]]",
-            ],
-            "error_message": "",  # Empty when errors list is provided
-            "warnings": [
-                "Deprecated field found",
-            ],
-        })
+        """snapshot_failed template renders with error message."""
+        from release_automation.scripts.context_builder import build_context
+        context = build_context(
+            release_tag="r4.1",
+            state="planned",
+            error_message="API version mismatch in quality-on-demand",
+            workflow_run_url="https://github.com/org/repo/actions/runs/123",
+        )
+        result = bot_responder.render("snapshot_failed", context)
         assert "Failed" in result
         assert "API version mismatch" in result
-        assert "Deprecated field" in result
 
     def test_snapshot_failed_template_with_error_message(self, bot_responder):
         """snapshot_failed template renders with single error_message."""
-        result = bot_responder.render("snapshot_failed", {
-            "release_tag": "r4.1",
-            "state": "planned",
-            "release_type": "initial",
-            "errors": [],  # Empty when error_message is provided
-            "error_message": "Unexpected error: 'str' object has no attribute 'get'",
-            "warnings": [],
-        })
+        from release_automation.scripts.context_builder import build_context
+        context = build_context(
+            release_tag="r4.1",
+            state="planned",
+            error_message="Unexpected error: 'str' object has no attribute 'get'",
+            workflow_run_url="https://github.com/org/repo/actions/runs/456",
+        )
+        result = bot_responder.render("snapshot_failed", context)
         assert "Failed" in result
         assert "Unexpected error" in result
         assert "'str' object has no attribute 'get'" in result

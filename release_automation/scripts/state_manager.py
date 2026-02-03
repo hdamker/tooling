@@ -43,16 +43,24 @@ class SnapshotInfo:
         snapshot_id: Unique identifier (e.g., "r4.1-abc1234")
         snapshot_branch: Full branch name (e.g., "release-snapshot/r4.1-abc1234")
         release_review_branch: Review branch name (e.g., "release-review/r4.1-abc1234")
-        base_commit_sha: The commit SHA the snapshot was created from
+        src_commit_sha: The commit SHA the snapshot was created from
         created_at: When the snapshot was created
         release_pr_number: PR number if Release PR exists
+        release_type: Release type from release-metadata.yaml
+        apis: API metadata from release-metadata.yaml
+        commonalities_release: From release-metadata.yaml dependencies
+        identity_consent_management_release: From release-metadata.yaml dependencies
     """
     snapshot_id: str
     snapshot_branch: str
     release_review_branch: str
-    base_commit_sha: str
+    src_commit_sha: str
     created_at: datetime
     release_pr_number: Optional[int] = None
+    release_type: str = ""
+    apis: List[Dict[str, str]] = field(default_factory=list)
+    commonalities_release: str = ""
+    identity_consent_management_release: str = ""
 
 
 @dataclass
@@ -216,11 +224,23 @@ class ReleaseStateManager:
         # Read release-metadata.yaml from the snapshot branch
         metadata = self._read_release_metadata(branch_name)
 
-        # Get the base commit SHA from metadata or branch
+        # Extract data from metadata (or use defaults)
         if metadata:
-            base_commit_sha = metadata.get("repository", {}).get("src_commit_sha", branch.sha)
+            repo_section = metadata.get("repository", {})
+            src_commit_sha = repo_section.get("src_commit_sha", branch.sha)
+            release_type = repo_section.get("release_type", "")
+            apis = metadata.get("apis", [])
+            deps = metadata.get("dependencies", {})
+            commonalities_release = deps.get("commonalities_release", "")
+            identity_consent_management_release = deps.get(
+                "identity_consent_management_release", ""
+            )
         else:
-            base_commit_sha = branch.sha
+            src_commit_sha = branch.sha
+            release_type = ""
+            apis = []
+            commonalities_release = ""
+            identity_consent_management_release = ""
 
         # Get branch creation time (approximated)
         created_at_str = self.gh.get_branch_creation_time(branch_name)
@@ -240,9 +260,13 @@ class ReleaseStateManager:
             snapshot_id=snapshot_id,
             snapshot_branch=branch_name,
             release_review_branch=release_review_branch,
-            base_commit_sha=base_commit_sha,
+            src_commit_sha=src_commit_sha,
             created_at=created_at,
-            release_pr_number=release_pr_number
+            release_pr_number=release_pr_number,
+            release_type=release_type,
+            apis=apis,
+            commonalities_release=commonalities_release,
+            identity_consent_management_release=identity_consent_management_release,
         )
 
     def get_snapshot_history(self, release_tag: str) -> List[SnapshotInfo]:
