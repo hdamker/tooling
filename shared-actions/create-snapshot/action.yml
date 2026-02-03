@@ -18,14 +18,6 @@ inputs:
     description: 'Base branch for snapshot (default: main)'
     required: false
     default: 'main'
-  commonalities_version:
-    description: 'Commonalities version for transformations'
-    required: false
-    default: 'wip'
-  icm_version:
-    description: 'ICM version for transformations'
-    required: false
-    default: 'wip'
   dry_run:
     description: 'If true, validate only without creating branches'
     required: false
@@ -76,8 +68,6 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github_token }}
         RELEASE_TAG: ${{ inputs.release_tag }}
         BASE_BRANCH: ${{ inputs.base_branch }}
-        COMMONALITIES_VERSION: ${{ inputs.commonalities_version }}
-        ICM_VERSION: ${{ inputs.icm_version }}
         DRY_RUN: ${{ inputs.dry_run }}
         REPO: ${{ github.repository }}
         SCRIPTS_PATH: ${{ github.action_path }}/../../release_automation/scripts
@@ -105,8 +95,6 @@ runs:
         token = os.environ['GITHUB_TOKEN']
         release_tag = os.environ.get('RELEASE_TAG', '').strip()
         base_branch = os.environ.get('BASE_BRANCH', 'main').strip()
-        commonalities_version = os.environ.get('COMMONALITIES_VERSION', 'wip').strip()
-        icm_version = os.environ.get('ICM_VERSION', 'wip').strip()
         dry_run = os.environ.get('DRY_RUN', 'false').lower() == 'true'
 
         output_file = os.environ['GITHUB_OUTPUT']
@@ -133,8 +121,6 @@ runs:
         print(f"Creating snapshot for {release_tag}")
         print(f"  Repository: {repo}")
         print(f"  Base branch: {base_branch}")
-        print(f"  Commonalities: {commonalities_version}")
-        print(f"  ICM: {icm_version}")
         print(f"  Dry run: {dry_run}")
 
         # Initialize clients and components
@@ -189,8 +175,6 @@ runs:
         config = SnapshotConfig(
             release_tag=release_tag,
             base_branch=base_branch,
-            commonalities_version=commonalities_version,
-            icm_version=icm_version,
             dry_run=dry_run,
         )
 
