@@ -499,6 +499,23 @@ class SnapshotCreator:
             return releases[0].tag_name
         return None
 
+    def _read_release_metadata(self, tag: str) -> Optional[Dict[str, Any]]:
+        """Read release-metadata.yaml from a release tag.
+
+        Same pattern as version_calculator._read_release_metadata().
+        Used to get API versions from an existing public release.
+
+        Returns:
+            Parsed metadata dict, or None if not found/parseable.
+        """
+        content = self.gh.get_file_content("release-metadata.yaml", ref=tag)
+        if not content:
+            return None
+        try:
+            return yaml.safe_load(content)
+        except yaml.YAMLError:
+            return None
+
     def _get_candidate_changes(
         self, release_tag: str, previous_release: Optional[str]
     ) -> Optional[str]:
@@ -560,14 +577,34 @@ class SnapshotCreator:
         }
 
         if release_state in ("public_release", "public_with_prerelease"):
-            public_tag = existing_public if existing_public else config.release_tag
-            if not is_prerelease:
+            if is_prerelease:
+                # Pre-release: public section shows existing public release info
+                public_tag = existing_public
+                public_metadata = self._read_release_metadata(public_tag)
+                public_apis = []
+                public_meta_release = ""
+                if public_metadata:
+                    for api in public_metadata.get("apis", []):
+                        public_apis.append({
+                            "file_name": api.get("api_file_name", api.get("api_name", "")),
+                            "version": api.get("api_version", ""),
+                        })
+                    public_meta_release = public_metadata.get(
+                        "repository", {}
+                    ).get("meta_release", "")
+            else:
+                # Public release: show current snapshot info
                 public_tag = config.release_tag
+                public_apis = apis_list
+                public_meta_release = release_plan.get(
+                    "repository", {}
+                ).get("meta_release", "")
+
             data["latest_public_release"] = public_tag
             data["github_url"] = f"https://github.com/{org}/{repo_name}/releases/tag/{public_tag}"
-            data["meta_release"] = release_plan.get("meta_release", "")
+            data["meta_release"] = public_meta_release
             data["formatted_apis"] = ReadmeUpdater.format_api_links(
-                apis_list if not is_prerelease else [], repo_name, public_tag, org
+                public_apis, repo_name, public_tag, org
             )
 
         if release_state in ("prerelease_only", "public_with_prerelease"):
@@ -576,7 +613,7 @@ class SnapshotCreator:
                 f"https://github.com/{org}/{repo_name}/releases/tag/{config.release_tag}"
             )
             data["prerelease_type"] = (
-                "release candidate" if release_type == "rc" else release_type
+                "release candidate" if release_type == "pre-release-rc" else "pre-release"
             )
             data["formatted_prerelease_apis"] = ReadmeUpdater.format_api_links(
                 apis_list, repo_name, config.release_tag, org
