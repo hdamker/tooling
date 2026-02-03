@@ -619,3 +619,32 @@ class GitHubClient:
             return json.loads(output)
         except (GitHubClientError, json.JSONDecodeError):
             return {}
+
+    def generate_release_notes(
+        self, tag_name: str, previous_tag_name: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Generate release notes using GitHub's auto-generated release notes API.
+
+        Uses POST /repos/{owner}/{repo}/releases/generate-notes to produce
+        PR-level change descriptions matching GitHub's draft release format.
+
+        Args:
+            tag_name: Target tag for the release notes
+            previous_tag_name: Previous tag for comparison (optional)
+
+        Returns:
+            Markdown body with PR-level changes, or None on error.
+        """
+        args = [
+            "api", f"repos/{self.repo}/releases/generate-notes",
+            "-f", f"tag_name={tag_name}",
+            "--jq", ".body",
+        ]
+        if previous_tag_name:
+            args.extend(["-f", f"previous_tag_name={previous_tag_name}"])
+        try:
+            output = self._run_gh(args)
+            return output.strip() if output.strip() else None
+        except GitHubClientError:
+            return None

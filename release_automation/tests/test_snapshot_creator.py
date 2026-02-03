@@ -921,18 +921,33 @@ class TestReleaseDocumentation:
         result = snapshot_creator._get_previous_release()
         assert result is None
 
-    def test_get_candidate_prs_returns_empty_on_no_previous(self, snapshot_creator):
-        """Returns empty list when no previous release."""
-        result = snapshot_creator._get_candidate_prs(None)
-        assert result == []
-
-    def test_get_candidate_prs_returns_empty_on_api_error(
+    def test_get_candidate_changes_works_without_previous(
         self, snapshot_creator, mock_github_client
     ):
-        """Returns empty list when compare API fails."""
-        mock_github_client.compare_commits.side_effect = Exception("API error")
-        result = snapshot_creator._get_candidate_prs("r3.2")
-        assert result == []
+        """Calls generate-notes API even without previous release."""
+        mock_github_client.generate_release_notes.return_value = "## What's Changed\n"
+        result = snapshot_creator._get_candidate_changes("r4.1", None)
+        assert result is not None
+        mock_github_client.generate_release_notes.assert_called_once_with("r4.1", None)
+
+    def test_get_candidate_changes_returns_body_on_success(
+        self, snapshot_creator, mock_github_client
+    ):
+        """Returns markdown body from generate-notes API."""
+        mock_github_client.generate_release_notes.return_value = (
+            "## What's Changed\n* PR #1 by @user\n"
+        )
+        result = snapshot_creator._get_candidate_changes("r4.1", "r3.2")
+        assert "What's Changed" in result
+        mock_github_client.generate_release_notes.assert_called_once_with("r4.1", "r3.2")
+
+    def test_get_candidate_changes_returns_none_on_api_error(
+        self, snapshot_creator, mock_github_client
+    ):
+        """Returns None when generate-notes API fails."""
+        mock_github_client.generate_release_notes.return_value = None
+        result = snapshot_creator._get_candidate_changes("r4.1", "r3.2")
+        assert result is None
 
     def test_update_readme_returns_false_when_no_readme(
         self, snapshot_creator, tmp_path, sample_release_plan
@@ -962,8 +977,10 @@ class TestReleaseDocumentation:
         mock_updater_cls.format_api_links = Mock(return_value="")
 
         config = SnapshotConfig(release_tag="r4.1")
+        metadata = {"repository": {"release_type": "pre-release-rc"}}
         snapshot_creator._update_readme(
-            str(tmp_path), config, sample_release_plan, {"quality-on-demand": "v1.0.0"}, {}
+            str(tmp_path), config, sample_release_plan,
+            {"quality-on-demand": "v1.0.0"}, metadata
         )
 
         # Should be called with prerelease_only state since no public releases
@@ -976,7 +993,7 @@ class TestReleaseDocumentation:
     ):
         """Generates CHANGELOG and writes to directory."""
         mock_github_client.get_releases.return_value = []
-        mock_github_client.compare_commits.return_value = {}
+        mock_github_client.generate_release_notes.return_value = None
 
         mock_instance = Mock()
         mock_instance.generate_draft.return_value = "# r4.1\n\nContent\n"
@@ -984,7 +1001,7 @@ class TestReleaseDocumentation:
         mock_gen_cls.return_value = mock_instance
 
         config = SnapshotConfig(release_tag="r4.1")
-        metadata = {"repository": {"release_type": "rc"}, "apis": [], "dependencies": {}}
+        metadata = {"repository": {"release_type": "pre-release-alpha"}, "apis": [], "dependencies": {}}
         result = snapshot_creator._generate_changelog(
             str(tmp_path), config, {}, {}, metadata, "TestRepo-QoD"
         )

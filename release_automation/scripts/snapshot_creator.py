@@ -499,29 +499,14 @@ class SnapshotCreator:
             return releases[0].tag_name
         return None
 
-    def _get_candidate_prs(self, previous_release: Optional[str]) -> List[Dict[str, str]]:
-        """Use GitHub compare API to list merged PRs since previous_release.
+    def _get_candidate_changes(
+        self, release_tag: str, previous_release: Optional[str]
+    ) -> Optional[str]:
+        """Use GitHub's generate-notes API to get PR-level change descriptions.
 
-        Falls back to empty list on API errors (non-fatal).
+        Falls back to None on API errors (non-fatal).
         """
-        if not previous_release:
-            return []
-        try:
-            compare_data = self.gh.compare_commits(previous_release, "HEAD")
-            commits = compare_data.get("commits", [])
-            prs = []
-            for commit in commits:
-                msg = commit.get("commit", {}).get("message", "")
-                # Extract PR references from merge commit messages
-                author = commit.get("author", {}).get("login", "unknown")
-                url = commit.get("html_url", "")
-                # Use first line of commit message as title
-                title = msg.split("\n")[0] if msg else ""
-                if title:
-                    prs.append({"title": title, "author": author, "url": url})
-            return prs
-        except Exception:
-            return []
+        return self.gh.generate_release_notes(release_tag, previous_release)
 
     def _update_readme(
         self,
@@ -546,11 +531,10 @@ class SnapshotCreator:
         if not os.path.exists(readme_path):
             return False
 
-        # Determine release state
-        repo_info = release_plan.get("repository", {})
-        release_type = repo_info.get("target_release_type", "")
+        # Determine release state from metadata (release-metadata.yaml values)
+        release_type = metadata.get("repository", {}).get("release_type", "")
         existing_public = self._get_latest_public_release()
-        is_prerelease = release_type in ("alpha", "rc")
+        is_prerelease = release_type in ("pre-release-alpha", "pre-release-rc")
 
         if is_prerelease and not existing_public:
             release_state = "prerelease_only"
@@ -612,22 +596,23 @@ class SnapshotCreator:
     ) -> str:
         """Generate CHANGELOG draft on release-review branch.
 
-        Determines previous release, fetches candidate PRs from GitHub,
-        generates draft, writes to CHANGELOG directory.
+        Determines previous release, fetches candidate changes from GitHub's
+        generate-notes API, generates draft, writes to CHANGELOG directory.
 
         Returns:
             Relative path to the written CHANGELOG file.
         """
         previous_release = self._get_previous_release()
-        candidate_prs = self._get_candidate_prs(previous_release)
+        candidate_changes = self._get_candidate_changes(
+            config.release_tag, previous_release
+        )
 
         generator = ChangelogGenerator()
         content = generator.generate_draft(
             release_tag=config.release_tag,
             metadata=metadata,
             repo_name=repo_name,
-            previous_release=previous_release,
-            candidate_prs=candidate_prs,
+            candidate_changes=candidate_changes,
         )
         return generator.write_changelog(temp_dir, content, config.release_tag, repo_name)
 

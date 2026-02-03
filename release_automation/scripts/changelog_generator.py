@@ -6,10 +6,9 @@ Each release section includes API documentation links, dependency versions,
 and candidate changes from merged PRs.
 """
 
-import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import pystache
 
@@ -33,10 +32,10 @@ as follows:
 """
 
 RELEASE_TYPE_MAP = {
-    "alpha": "pre-release",
-    "rc": "release candidate",
-    "public": "public release",
-    "maintenance": "maintenance release",
+    "pre-release-alpha": "pre-release",
+    "pre-release-rc": "release candidate",
+    "public-release": "public release",
+    "maintenance-release": "maintenance release",
 }
 
 
@@ -80,20 +79,20 @@ class ChangelogGenerator:
         release_tag: str,
         metadata: Dict[str, Any],
         repo_name: str,
-        previous_release: Optional[str],
-        candidate_prs: List[Dict[str, str]],
+        candidate_changes: Optional[str] = None,
     ) -> str:
         """Generate CHANGELOG section content for a release.
 
         Args:
             release_tag: Target release tag (e.g., "r4.1")
             metadata: Generated release-metadata.yaml dict containing:
-                - repository.release_type (e.g., "alpha")
+                - repository.release_type (e.g., "pre-release-alpha")
                 - apis[].api_name, api_version, api_title, api_file_name
                 - dependencies.commonalities_release, identity_consent_management_release
             repo_name: Repository name (e.g., "QualityOnDemand")
-            previous_release: Previous release tag for comparison (None if first release)
-            candidate_prs: List of [{title, author, url}] from GitHub compare API
+            candidate_changes: Pre-formatted markdown body from GitHub's
+                generate-notes API (includes PR list and full changelog link).
+                None if unavailable.
 
         Returns:
             Rendered template string (release section content)
@@ -132,8 +131,7 @@ class ChangelogGenerator:
             "icm_release": icm,
             "formatted_api_sections": formatted_api_sections,
             "repo_name": repo_name,
-            "candidate_prs": candidate_prs if candidate_prs else False,
-            "previous_release": previous_release if previous_release else False,
+            "candidate_changes": candidate_changes if candidate_changes else False,
         }
 
         template_path = self.template_dir / "release_section.mustache"

@@ -28,7 +28,7 @@ def single_api_metadata():
     """Metadata dict with a single API."""
     return {
         "repository": {
-            "release_type": "rc",
+            "release_type": "pre-release-rc",
         },
         "apis": [
             {
@@ -50,7 +50,7 @@ def multi_api_metadata():
     """Metadata dict with multiple APIs."""
     return {
         "repository": {
-            "release_type": "public",
+            "release_type": "public-release",
         },
         "apis": [
             {
@@ -74,20 +74,15 @@ def multi_api_metadata():
 
 
 @pytest.fixture
-def sample_prs():
-    """Sample candidate PRs from GitHub compare API."""
-    return [
-        {
-            "title": "Add feature X",
-            "author": "user1",
-            "url": "https://github.com/camaraproject/QualityOnDemand/pull/100",
-        },
-        {
-            "title": "Fix bug Y",
-            "author": "user2",
-            "url": "https://github.com/camaraproject/QualityOnDemand/pull/101",
-        },
-    ]
+def sample_changes_body():
+    """Sample candidate changes body from GitHub generate-notes API."""
+    return (
+        "## What's Changed\n"
+        "* Add feature X by @user1 in https://github.com/camaraproject/QualityOnDemand/pull/100\n"
+        "* Fix bug Y by @user2 in https://github.com/camaraproject/QualityOnDemand/pull/101\n"
+        "\n"
+        "**Full Changelog**: https://github.com/camaraproject/QualityOnDemand/compare/r3.2...r4.1\n"
+    )
 
 
 # --- Cycle Extraction ---
@@ -116,14 +111,14 @@ class TestCycleExtraction:
 class TestReleaseTypeDescription:
     """Tests for _get_release_type_description()."""
 
-    def test_alpha_returns_prerelease(self, generator):
-        assert generator._get_release_type_description("alpha") == "pre-release"
+    def test_pre_release_alpha_returns_prerelease(self, generator):
+        assert generator._get_release_type_description("pre-release-alpha") == "pre-release"
 
-    def test_rc_returns_release_candidate(self, generator):
-        assert generator._get_release_type_description("rc") == "release candidate"
+    def test_pre_release_rc_returns_release_candidate(self, generator):
+        assert generator._get_release_type_description("pre-release-rc") == "release candidate"
 
-    def test_public_returns_public_release(self, generator):
-        assert generator._get_release_type_description("public") == "public release"
+    def test_public_release_returns_public_release(self, generator):
+        assert generator._get_release_type_description("public-release") == "public release"
 
     def test_unknown_returns_as_is(self, generator):
         assert generator._get_release_type_description("custom") == "custom"
@@ -186,21 +181,20 @@ class TestDraftGeneration:
             release_tag="r4.1",
             metadata=single_api_metadata,
             repo_name="QualityOnDemand",
-            previous_release="r3.2",
-            candidate_prs=[],
         )
         assert "# r4.1" in result
         assert "release candidate" in result
         assert "quality-on-demand v1.1.0-rc.1" in result
         assert "Commonalities v0.6.0 (r3.3)" in result
 
-    def test_generate_draft_with_candidate_prs(self, generator, single_api_metadata, sample_prs):
+    def test_generate_draft_with_candidate_changes(
+        self, generator, single_api_metadata, sample_changes_body
+    ):
         result = generator.generate_draft(
             release_tag="r4.1",
             metadata=single_api_metadata,
             repo_name="QualityOnDemand",
-            previous_release="r3.2",
-            candidate_prs=sample_prs,
+            candidate_changes=sample_changes_body,
         )
         assert "Add feature X" in result
         assert "@user1" in result
@@ -208,25 +202,21 @@ class TestDraftGeneration:
         assert "Full Changelog" in result
         assert "compare/r3.2...r4.1" in result
 
-    def test_generate_draft_no_previous_release(self, generator, single_api_metadata):
+    def test_generate_draft_no_candidate_changes(self, generator, single_api_metadata):
         result = generator.generate_draft(
             release_tag="r1.1",
             metadata=single_api_metadata,
             repo_name="QualityOnDemand",
-            previous_release=None,
-            candidate_prs=[],
+            candidate_changes=None,
         )
         assert "# r1.1" in result
-        assert "Full Changelog" not in result
-        assert "No merged PRs found" in result
+        assert "No candidate changes available" in result
 
     def test_generate_draft_multiple_apis(self, generator, multi_api_metadata):
         result = generator.generate_draft(
             release_tag="r3.2",
             metadata=multi_api_metadata,
             repo_name="QualityOnDemand",
-            previous_release="r2.2",
-            candidate_prs=[],
         )
         assert "quality-on-demand v1.1.0" in result
         assert "qos-profiles v1.1.0" in result
