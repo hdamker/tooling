@@ -111,7 +111,7 @@ class ChangelogGenerator:
             formatted_sections.append(
                 self.format_api_section(api, release_tag, repo_name)
             )
-        formatted_api_sections = "\n".join(formatted_sections)
+        formatted_api_sections = "\n\n".join(formatted_sections)
 
         # Get dependency versions
         deps = metadata.get("dependencies", {})
