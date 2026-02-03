@@ -472,6 +472,18 @@ class MechanicalTransformer:
         url_version = ""
         if api_name:
             api_version = context.get_api_version(api_name)
+            # For test files like "qos-profiles-getQosProfile", the filename
+            # doesn't match an API name directly. Find the longest API name
+            # that is a prefix of the filename (e.g., "qos-profiles").
+            if not api_version:
+                matching = [
+                    k for k in context.api_versions
+                    if api_name.startswith(k + "-") or api_name.startswith(k + "_")
+                ]
+                if matching:
+                    best = max(matching, key=len)
+                    api_version = context.api_versions[best]
+                    api_name = best
             major_version = context.get_major_version(api_version)
             url_version = calculate_url_version(api_version) if api_version else ""
 
