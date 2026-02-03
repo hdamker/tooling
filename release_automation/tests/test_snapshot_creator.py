@@ -1008,3 +1008,40 @@ class TestReleaseDocumentation:
         assert result == "CHANGELOG/CHANGELOG-r4.md"
         mock_instance.generate_draft.assert_called_once()
         mock_instance.write_changelog.assert_called_once()
+
+    def test_read_release_metadata_from_repo_tree(
+        self, snapshot_creator, mock_github_client
+    ):
+        """Returns metadata when file exists in repository tree at tag."""
+        yaml_content = "repository:\n  release_type: public-release\napis:\n- api_name: qod\n  api_version: v1.0.0\n"
+        mock_github_client.get_file_content.return_value = yaml_content
+        result = snapshot_creator._read_release_metadata("r3.2")
+        assert result is not None
+        assert result["repository"]["release_type"] == "public-release"
+        assert result["apis"][0]["api_version"] == "v1.0.0"
+        mock_github_client.get_file_content.assert_called_once_with(
+            "release-metadata.yaml", ref="r3.2"
+        )
+
+    def test_read_release_metadata_falls_back_to_release_asset(
+        self, snapshot_creator, mock_github_client
+    ):
+        """Falls back to release asset when file not in repo tree."""
+        mock_github_client.get_file_content.return_value = None
+        yaml_content = "repository:\n  release_type: public-release\napis:\n- api_name: qod\n  api_version: v1.0.0\n"
+        mock_github_client.download_release_asset.return_value = yaml_content
+        result = snapshot_creator._read_release_metadata("r3.2")
+        assert result is not None
+        assert result["apis"][0]["api_version"] == "v1.0.0"
+        mock_github_client.download_release_asset.assert_called_once_with(
+            "r3.2", "release-metadata.yaml"
+        )
+
+    def test_read_release_metadata_returns_none_when_not_found(
+        self, snapshot_creator, mock_github_client
+    ):
+        """Returns None when metadata not found in tree or assets."""
+        mock_github_client.get_file_content.return_value = None
+        mock_github_client.download_release_asset.return_value = None
+        result = snapshot_creator._read_release_metadata("r3.2")
+        assert result is None

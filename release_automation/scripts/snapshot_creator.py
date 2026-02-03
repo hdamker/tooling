@@ -502,13 +502,18 @@ class SnapshotCreator:
     def _read_release_metadata(self, tag: str) -> Optional[Dict[str, Any]]:
         """Read release-metadata.yaml from a release tag.
 
-        Same pattern as version_calculator._read_release_metadata().
-        Used to get API versions from an existing public release.
+        Tries two sources in order:
+        1. Repository tree at tag (newer releases with committed file)
+        2. Release asset (legacy releases where metadata was uploaded)
 
         Returns:
             Parsed metadata dict, or None if not found/parseable.
         """
+        # Try 1: repository tree (newer releases)
         content = self.gh.get_file_content("release-metadata.yaml", ref=tag)
+        # Try 2: release asset (legacy releases)
+        if not content:
+            content = self.gh.download_release_asset(tag, "release-metadata.yaml")
         if not content:
             return None
         try:

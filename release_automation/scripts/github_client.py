@@ -620,6 +620,31 @@ class GitHubClient:
         except (GitHubClientError, json.JSONDecodeError):
             return {}
 
+    def download_release_asset(self, tag: str, filename: str) -> Optional[str]:
+        """Download a release asset by filename pattern.
+
+        Uses `gh release download` to fetch asset content to stdout.
+        This is the fallback for legacy releases where release-metadata.yaml
+        is a release asset rather than a committed file.
+
+        Args:
+            tag: Release tag (e.g., "r3.2")
+            filename: Asset filename pattern (e.g., "release-metadata.yaml")
+
+        Returns:
+            Asset content as string, or None if not found/error.
+        """
+        try:
+            output = self._run_gh([
+                "release", "download", tag,
+                "--repo", self.repo,
+                "-p", filename,
+                "-O", "-"
+            ])
+            return output if output.strip() else None
+        except GitHubClientError:
+            return None
+
     def generate_release_notes(
         self, tag_name: str, previous_tag_name: Optional[str] = None
     ) -> Optional[str]:
