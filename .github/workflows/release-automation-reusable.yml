@@ -501,6 +501,7 @@ jobs:
           sparse-checkout: |
             release_automation/scripts
             release_automation/templates
+            release_automation/config
             shared-actions/create-snapshot
 
       - name: Create Snapshot
