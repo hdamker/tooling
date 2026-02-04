@@ -537,12 +537,53 @@ jobs:
       success: ${{ steps.discard.outputs.success }}
       error_message: ${{ steps.discard.outputs.error_message }}
     steps:
-      - name: Discard Snapshot (Placeholder)
+      - name: Discard Snapshot
         id: discard
-        run: |
-          echo "::notice::discard-snapshot command not yet implemented (WS5)"
-          echo "success=false" >> $GITHUB_OUTPUT
-          echo "error_message=discard-snapshot command will be implemented in WS5 (Additional Commands workstream)" >> $GITHUB_OUTPUT
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const snapshotBranch = '${{ needs.derive-state.outputs.snapshot_branch }}';
+            const prNumber = '${{ needs.derive-state.outputs.release_pr_number }}';
+            const releaseTag = '${{ needs.derive-state.outputs.release_tag }}';
+
+            console.log(`Discarding snapshot for ${releaseTag}`);
+            console.log(`  Snapshot branch: ${snapshotBranch}`);
+            console.log(`  Release PR: #${prNumber}`);
+
+            try {
+              // Step 1: Close Release PR (without merging)
+              if (prNumber) {
+                console.log(`Closing Release PR #${prNumber}...`);
+                await github.rest.pulls.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: parseInt(prNumber),
+                  state: 'closed'
+                });
+                console.log('Release PR closed');
+              }
+
+              // Step 2: Delete snapshot branch
+              if (snapshotBranch) {
+                console.log(`Deleting snapshot branch: ${snapshotBranch}...`);
+                await github.rest.git.deleteRef({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: `heads/${snapshotBranch}`
+                });
+                console.log('Snapshot branch deleted');
+              }
+
+              // Note: release-review branch is kept for reference
+              // Maintainers can copy content from it for the next attempt
+
+              core.setOutput('success', 'true');
+              core.setOutput('error_message', '');
+            } catch (error) {
+              console.log(`::error::Discard failed: ${error.message}`);
+              core.setOutput('success', 'false');
+              core.setOutput('error_message', error.message);
+            }
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 5d: Execute delete-draft command
@@ -557,12 +598,73 @@ jobs:
       success: ${{ steps.delete.outputs.success }}
       error_message: ${{ steps.delete.outputs.error_message }}
     steps:
-      - name: Delete Draft (Placeholder)
+      - name: Delete Draft Release
         id: delete
-        run: |
-          echo "::notice::delete-draft command not yet implemented (WS5)"
-          echo "success=false" >> $GITHUB_OUTPUT
-          echo "error_message=delete-draft command will be implemented in WS5 (Additional Commands workstream)" >> $GITHUB_OUTPUT
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const releaseTag = '${{ needs.derive-state.outputs.release_tag }}';
+            const snapshotBranch = '${{ needs.derive-state.outputs.snapshot_branch }}';
+
+            console.log(`Deleting draft release for ${releaseTag}`);
+            console.log(`  Snapshot branch: ${snapshotBranch}`);
+
+            try {
+              // Step 1: Find and delete the draft release
+              const releases = await github.rest.repos.listReleases({
+                owner: context.repo.owner,
+                repo: context.repo.repo
+              });
+
+              const draftRelease = releases.data.find(
+                r => r.tag_name === releaseTag && r.draft === true
+              );
+
+              if (draftRelease) {
+                console.log(`Deleting draft release: ${draftRelease.name} (ID: ${draftRelease.id})`);
+                await github.rest.repos.deleteRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: draftRelease.id
+                });
+                console.log('Draft release deleted');
+              } else {
+                console.log(`Warning: No draft release found for tag ${releaseTag}`);
+              }
+
+              // Step 2: Delete the release tag (created by draft release)
+              try {
+                await github.rest.git.deleteRef({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: `tags/${releaseTag}`
+                });
+                console.log(`Deleted tag: ${releaseTag}`);
+              } catch (e) {
+                // Tag may not exist (draft may not have created it)
+                console.log(`Tag ${releaseTag} not found or already deleted`);
+              }
+
+              // Step 3: Delete snapshot branch
+              if (snapshotBranch) {
+                console.log(`Deleting snapshot branch: ${snapshotBranch}...`);
+                await github.rest.git.deleteRef({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: `heads/${snapshotBranch}`
+                });
+                console.log('Snapshot branch deleted');
+              }
+
+              // Note: release-review branch is kept for reference
+
+              core.setOutput('success', 'true');
+              core.setOutput('error_message', '');
+            } catch (error) {
+              console.log(`::error::Delete draft failed: ${error.message}`);
+              core.setOutput('success', 'false');
+              core.setOutput('error_message', error.message);
+            }
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 5e: Handle PR merge (draft release creation)
@@ -576,12 +678,72 @@ jobs:
       draft_release_url: ${{ steps.handle.outputs.draft_release_url }}
       error_message: ${{ steps.handle.outputs.error_message }}
     steps:
-      - name: Handle PR Merge (Placeholder)
+      - name: Create Draft Release
         id: handle
-        run: |
-          echo "::notice::PR merge handler not yet implemented (WS5)"
-          echo "success=false" >> $GITHUB_OUTPUT
-          echo "error_message=PR merge handler will be implemented in WS5 (Additional Commands workstream)" >> $GITHUB_OUTPUT
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const releaseTag = '${{ needs.derive-state.outputs.release_tag }}';
+            const snapshotBranch = '${{ needs.derive-state.outputs.snapshot_branch }}';
+            const releaseType = '${{ needs.derive-state.outputs.release_type }}';
+            const apisJson = '${{ needs.derive-state.outputs.apis_json }}';
+
+            console.log(`Creating draft release for ${releaseTag}`);
+            console.log(`  Snapshot branch: ${snapshotBranch}`);
+            console.log(`  Release type: ${releaseType}`);
+
+            try {
+              // Determine if this is a pre-release
+              const isPrerelease = releaseType.startsWith('pre-release');
+
+              // Parse API info for release body
+              let apis = [];
+              try {
+                apis = JSON.parse(apisJson || '[]');
+              } catch (e) {
+                console.log('Could not parse apis_json, continuing without API list');
+              }
+
+              // Build release body
+              let body = `## Release ${releaseTag}\n\n`;
+              body += `**Release type:** ${releaseType}\n\n`;
+
+              if (apis.length > 0) {
+                body += `### API Versions\n\n`;
+                for (const api of apis) {
+                  const name = api.api_name || api.api_title || '';
+                  const version = api.api_version || '';
+                  body += `- **${name}**: \`${version}\`\n`;
+                }
+                body += '\n';
+              }
+
+              body += `---\n\n`;
+              body += `_Draft created automatically from merged Release PR._\n`;
+              body += `_Review the release content, then publish when ready._\n`;
+
+              // Create draft release
+              const release = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: releaseTag,
+                target_commitish: snapshotBranch,
+                name: releaseTag,
+                body: body,
+                draft: true,
+                prerelease: isPrerelease
+              });
+
+              console.log(`Draft release created: ${release.data.html_url}`);
+              core.setOutput('success', 'true');
+              core.setOutput('draft_release_url', release.data.html_url);
+              core.setOutput('error_message', '');
+            } catch (error) {
+              console.log(`::error::Draft release creation failed: ${error.message}`);
+              core.setOutput('success', 'false');
+              core.setOutput('draft_release_url', '');
+              core.setOutput('error_message', error.message);
+            }
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 5f: Handle issue close/reopen events
@@ -667,7 +829,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   update-issue:
     name: "Phase 6: Update Release Issue"
-    needs: [check-trigger, derive-state, create-snapshot, discard-snapshot, delete-draft, handle-issue-event]
+    needs: [check-trigger, derive-state, create-snapshot, discard-snapshot, delete-draft, handle-pr-merge, handle-issue-event]
     if: |
       always() &&
       needs.derive-state.outputs.config_error == '' &&
@@ -676,6 +838,7 @@ jobs:
         (needs.create-snapshot.result == 'success' && needs.create-snapshot.outputs.success == 'true') ||
         (needs.discard-snapshot.result == 'success' && needs.discard-snapshot.outputs.success == 'true') ||
         (needs.delete-draft.result == 'success' && needs.delete-draft.outputs.success == 'true') ||
+        (needs.handle-pr-merge.result == 'success' && needs.handle-pr-merge.outputs.success == 'true') ||
         (needs.handle-issue-event.result == 'success') ||
         (needs.check-trigger.outputs.command == 'sync-issue')
       )
@@ -773,6 +936,19 @@ jobs:
               ;;
           esac
 
+      - name: Resolve Reason
+        id: reason
+        run: |
+          COMMAND="${{ needs.check-trigger.outputs.command }}"
+          ARGS="${{ needs.check-trigger.outputs.command_args }}"
+
+          # Default reason for discard/delete commands when none provided
+          if [ -z "$ARGS" ] && { [ "$COMMAND" = "discard-snapshot" ] || [ "$COMMAND" = "delete-draft" ]; }; then
+            ARGS="No reason provided"
+          fi
+
+          echo "reason=$ARGS" >> $GITHUB_OUTPUT
+
       - name: Build Result Context
         id: context
         run: |
@@ -780,6 +956,7 @@ jobs:
           CONTEXT=$(jq -n \
             --arg command "${{ needs.check-trigger.outputs.command }}" \
             --arg user "${{ needs.check-trigger.outputs.user }}" \
+            --arg reason "${{ steps.reason.outputs.reason }}" \
             --arg release_tag "${{ needs.derive-state.outputs.release_tag }}" \
             --arg state "${{ needs.derive-state.outputs.state }}" \
             --arg snapshot_id "${{ needs.derive-state.outputs.snapshot_id }}" \
@@ -793,6 +970,7 @@ jobs:
             '{
               command: $command,
               user: $user,
+              reason: $reason,
               release_tag: $release_tag,
               state: $state,
               snapshot_id: $snapshot_id,
@@ -816,10 +994,18 @@ jobs:
               '. + {snapshot_id: $sid, snapshot_branch: $sb, release_review_branch: $rrb, release_pr_number: $prn, release_pr_url: $pru}')
           fi
 
-          # Add error message for failure cases
+          # Add error message for command failure cases
           if [ "${{ needs.create-snapshot.outputs.success }}" == "false" ]; then
             CONTEXT=$(echo "$CONTEXT" | jq \
               --arg err "${{ needs.create-snapshot.outputs.error_message }}" \
+              '. + {error_message: $err}')
+          elif [ "${{ needs.discard-snapshot.outputs.success }}" == "false" ]; then
+            CONTEXT=$(echo "$CONTEXT" | jq \
+              --arg err "${{ needs.discard-snapshot.outputs.error_message }}" \
+              '. + {error_message: $err}')
+          elif [ "${{ needs.delete-draft.outputs.success }}" == "false" ]; then
+            CONTEXT=$(echo "$CONTEXT" | jq \
+              --arg err "${{ needs.delete-draft.outputs.error_message }}" \
               '. + {error_message: $err}')
           fi
 

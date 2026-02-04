@@ -239,6 +239,13 @@ class SnapshotCreator:
             with open(metadata_path, "w") as f:
                 yaml.safe_dump(metadata, f, default_flow_style=False, sort_keys=False)
 
+            # Step 9b: Remove release-plan.yaml from snapshot
+            # release-metadata.yaml is the authoritative artifact; the plan is
+            # an input file that should not appear on the release branch.
+            plan_path = os.path.join(temp_dir, "release-plan.yaml")
+            if os.path.exists(plan_path):
+                os.remove(plan_path)
+
             # Step 10: Commit changes
             commit_message = f"Release automation: create snapshot {snapshot_id}"
             git_ops.commit_all(commit_message)

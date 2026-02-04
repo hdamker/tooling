@@ -89,13 +89,12 @@ class MetadataGenerator:
     a complete metadata structure ready for YAML serialization.
     """
 
-    # Mapping from release-plan types to release-metadata types
-    RELEASE_TYPE_MAP = {
-        "alpha": "pre-release-alpha",
-        "rc": "pre-release-rc",
-        "public": "public-release",
-        "maintenance": "maintenance-release",
-        "none": "pre-release-alpha",  # Default for unspecified
+    # Valid long-form release type values (from release-plan.yaml)
+    VALID_RELEASE_TYPES = {
+        "pre-release-alpha",
+        "pre-release-rc",
+        "public-release",
+        "maintenance-release",
     }
 
     def generate(
@@ -124,8 +123,8 @@ class MetadataGenerator:
 
         # Get release tag and type
         release_tag = repo_section.get("target_release_tag", "")
-        release_type = self._map_release_type(
-            repo_section.get("target_release_type", "none")
+        release_type = self._validate_release_type(
+            repo_section.get("target_release_type", "")
         )
 
         # Build API list
@@ -171,17 +170,26 @@ class MetadataGenerator:
         repo_section = release_plan.get("repository", {})
         return repo_section.get("repository_name", "")
 
-    def _map_release_type(self, plan_type: str) -> str:
+    def _validate_release_type(self, release_type: str) -> str:
         """
-        Map release-plan type to release-metadata type.
+        Validate release type is a known long-form value.
 
         Args:
-            plan_type: Type from release-plan.yaml (alpha, rc, public, etc.)
+            release_type: Type from release-plan.yaml
+                (e.g., "pre-release-alpha", "public-release")
 
         Returns:
-            Corresponding release-metadata type string
+            The validated release type string (unchanged)
+
+        Raises:
+            ValueError: If release_type is not a known value
         """
-        return self.RELEASE_TYPE_MAP.get(plan_type.lower(), "pre-release-alpha")
+        if release_type not in self.VALID_RELEASE_TYPES:
+            raise ValueError(
+                f"Unknown release type: '{release_type}'. "
+                f"Must be one of: {', '.join(sorted(self.VALID_RELEASE_TYPES))}"
+            )
+        return release_type
 
     def _format_dependency(
         self,

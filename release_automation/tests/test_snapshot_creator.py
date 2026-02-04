@@ -96,7 +96,7 @@ def sample_release_plan():
         "repository": {
             "repository_name": "TestRepo-QoD",
             "target_release_tag": "r4.1",
-            "target_release_type": "rc",
+            "target_release_type": "pre-release-rc",
         },
         "apis": [
             {

@@ -31,7 +31,7 @@ def sample_release_plan():
         "repository": {
             "repository_name": "QualityOnDemand",
             "target_release_tag": "r4.2",
-            "target_release_type": "rc",
+            "target_release_type": "pre-release-rc",
             "release_notes": "Pre-release for CAMARA Fall26 meta-release.",
         },
         "dependencies": {
@@ -217,7 +217,7 @@ class TestMetadataGenerator:
             "repository": {
                 "repository_name": "SimpleAPI",
                 "target_release_tag": "r1.0",
-                "target_release_type": "alpha",
+                "target_release_type": "pre-release-alpha",
             },
             "apis": [
                 {
@@ -244,7 +244,7 @@ class TestMetadataGenerator:
             "repository": {
                 "repository_name": "EmptyRepo",
                 "target_release_tag": "r1.0",
-                "target_release_type": "none",
+                "target_release_type": "pre-release-alpha",
             },
             "apis": [],
         }
@@ -265,7 +265,7 @@ class TestMetadataGenerator:
             "repository": {
                 "repository_name": "TestRepo",
                 "target_release_tag": "r2.0",
-                "target_release_type": "public",
+                "target_release_type": "public-release",
             },
             "apis": [],
         }
@@ -280,38 +280,54 @@ class TestMetadataGenerator:
         assert result["repository"]["src_commit_sha"] is None
 
 
-class TestReleaseTypeMapping:
-    """Tests for release type mapping."""
+class TestReleaseTypeValidation:
+    """Tests for release type validation (DEC-009: long-form values only)."""
 
-    def test_alpha_maps_to_pre_release_alpha(self, generator):
-        """alpha -> pre-release-alpha."""
-        assert generator._map_release_type("alpha") == "pre-release-alpha"
+    def test_pre_release_alpha_accepted(self, generator):
+        """pre-release-alpha is a valid release type."""
+        assert generator._validate_release_type("pre-release-alpha") == "pre-release-alpha"
 
-    def test_rc_maps_to_pre_release_rc(self, generator):
-        """rc -> pre-release-rc."""
-        assert generator._map_release_type("rc") == "pre-release-rc"
+    def test_pre_release_rc_accepted(self, generator):
+        """pre-release-rc is a valid release type."""
+        assert generator._validate_release_type("pre-release-rc") == "pre-release-rc"
 
-    def test_public_maps_to_public_release(self, generator):
-        """public -> public-release."""
-        assert generator._map_release_type("public") == "public-release"
+    def test_public_release_accepted(self, generator):
+        """public-release is a valid release type."""
+        assert generator._validate_release_type("public-release") == "public-release"
 
-    def test_maintenance_maps_to_maintenance_release(self, generator):
-        """maintenance -> maintenance-release."""
-        assert generator._map_release_type("maintenance") == "maintenance-release"
+    def test_maintenance_release_accepted(self, generator):
+        """maintenance-release is a valid release type."""
+        assert generator._validate_release_type("maintenance-release") == "maintenance-release"
 
-    def test_none_maps_to_pre_release_alpha(self, generator):
-        """none -> pre-release-alpha (default)."""
-        assert generator._map_release_type("none") == "pre-release-alpha"
+    def test_short_form_alpha_rejected(self, generator):
+        """Short-form 'alpha' is rejected — must use 'pre-release-alpha'."""
+        with pytest.raises(ValueError, match="Unknown release type: 'alpha'"):
+            generator._validate_release_type("alpha")
 
-    def test_unknown_maps_to_pre_release_alpha(self, generator):
-        """Unknown type defaults to pre-release-alpha."""
-        assert generator._map_release_type("invalid") == "pre-release-alpha"
+    def test_short_form_rc_rejected(self, generator):
+        """Short-form 'rc' is rejected — must use 'pre-release-rc'."""
+        with pytest.raises(ValueError, match="Unknown release type: 'rc'"):
+            generator._validate_release_type("rc")
 
-    def test_case_insensitive(self, generator):
-        """Release type mapping is case-insensitive."""
-        assert generator._map_release_type("RC") == "pre-release-rc"
-        assert generator._map_release_type("Alpha") == "pre-release-alpha"
-        assert generator._map_release_type("PUBLIC") == "public-release"
+    def test_short_form_public_rejected(self, generator):
+        """Short-form 'public' is rejected — must use 'public-release'."""
+        with pytest.raises(ValueError, match="Unknown release type: 'public'"):
+            generator._validate_release_type("public")
+
+    def test_none_rejected(self, generator):
+        """'none' is rejected — NOT_PLANNED state should not reach metadata generation."""
+        with pytest.raises(ValueError, match="Unknown release type: 'none'"):
+            generator._validate_release_type("none")
+
+    def test_unknown_rejected(self, generator):
+        """Unknown values are rejected with clear error."""
+        with pytest.raises(ValueError, match="Unknown release type: 'invalid'"):
+            generator._validate_release_type("invalid")
+
+    def test_empty_string_rejected(self, generator):
+        """Empty string is rejected."""
+        with pytest.raises(ValueError, match="Unknown release type: ''"):
+            generator._validate_release_type("")
 
 
 class TestDependencyFormatting:
