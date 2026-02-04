@@ -757,20 +757,39 @@ jobs:
         with:
           script: |
             const snapshotBranch = '${{ needs.derive-state.outputs.snapshot_branch }}';
+            const releaseTag = '${{ needs.derive-state.outputs.release_tag }}';
 
-            // Fetch CHANGELOG.md from the snapshot branch
+            // Derive meta-release from tag: r4.1 → r4, r3.2 → r3
+            const metaRelease = releaseTag.match(/^(r\d+)/)?.[1] || '';
+
+            // Try CHANGELOG/CHANGELOG-rX.md first (new convention), fall back to CHANGELOG.md
+            const candidates = [];
+            if (metaRelease) {
+              candidates.push(`CHANGELOG/CHANGELOG-${metaRelease}.md`);
+            }
+            candidates.push('CHANGELOG.md');
+
             let changelogContent = '';
-            try {
-              const response = await github.rest.repos.getContent({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                path: 'CHANGELOG.md',
-                ref: snapshotBranch
-              });
-              changelogContent = Buffer.from(response.data.content, 'base64').toString('utf-8');
-              console.log(`Fetched CHANGELOG.md (${changelogContent.length} chars)`);
-            } catch (error) {
-              console.log(`::warning::Could not fetch CHANGELOG.md: ${error.message}`);
+            let changelogPath = '';
+            for (const path of candidates) {
+              try {
+                const response = await github.rest.repos.getContent({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  path: path,
+                  ref: snapshotBranch
+                });
+                changelogContent = Buffer.from(response.data.content, 'base64').toString('utf-8');
+                changelogPath = path;
+                console.log(`Fetched ${path} (${changelogContent.length} chars)`);
+                break;
+              } catch (error) {
+                console.log(`${path} not found, trying next...`);
+              }
+            }
+
+            if (!changelogContent) {
+              console.log('::warning::No CHANGELOG file found on snapshot branch');
               core.setOutput('release_notes', '');
               return;
             }
@@ -789,7 +808,7 @@ jobs:
             }
 
             if (startIdx === -1) {
-              console.log('::warning::No "## Release Notes" section found in CHANGELOG.md');
+              console.log(`::warning::No "## Release Notes" section found in ${changelogPath}`);
               core.setOutput('release_notes', '');
               return;
             }
