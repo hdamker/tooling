@@ -195,9 +195,9 @@ class TestResolveTemplate:
     def test_resolve_test_file_api_version_prefix_match(self, transformer, context):
         """Test file prefix match resolves {api_version} correctly."""
         result = transformer._resolve_template(
-            "\\1{api_version}", context, "quality-on-demand-createSession"
+            "\\g<1>{api_version}", context, "quality-on-demand-createSession"
         )
-        assert result == "\\13.2.0-rc.2"
+        assert result == "\\g<1>3.2.0-rc.2"
 
     def test_resolve_prefix_match_picks_longest(self, transformer):
         """With overlapping API names, longest prefix wins."""
