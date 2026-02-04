@@ -12,7 +12,7 @@
 
 - Snapshot branch `{{snapshot_branch}}` has been deleted
 - Release PR has been closed
-- Release-review branch `{{release_review_branch}}` has been **preserved** for reference
+- Release-review branch has been renamed to `{{release_review_branch}}-discarded`
 
 ### State
 

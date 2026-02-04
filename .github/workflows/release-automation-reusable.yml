@@ -574,15 +574,51 @@ jobs:
                 console.log('Snapshot branch deleted');
               }
 
-              // Note: release-review branch is kept for reference
-              // Maintainers can copy content from it for the next attempt
-
               core.setOutput('success', 'true');
               core.setOutput('error_message', '');
             } catch (error) {
               console.log(`::error::Discard failed: ${error.message}`);
               core.setOutput('success', 'false');
               core.setOutput('error_message', error.message);
+            }
+
+      # Step 3: Rename review branch to free name for next create-snapshot
+      - name: Cleanup review branch
+        if: steps.discard.outputs.success == 'true'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const reviewBranch = '${{ needs.derive-state.outputs.release_review_branch }}';
+            if (!reviewBranch) return;
+
+            const newName = `${reviewBranch}-discarded`;
+            try {
+              const ref = await github.rest.git.getRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `heads/${reviewBranch}`
+              });
+
+              // Delete old -discarded branch if it exists (repeated cycles)
+              try {
+                await github.rest.git.deleteRef({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  ref: `heads/${newName}`
+                });
+                console.log(`Deleted previous ${newName}`);
+              } catch (_) { /* doesn't exist */ }
+
+              await github.rest.git.createRef({
+                owner: context.repo.owner, repo: context.repo.repo,
+                ref: `refs/heads/${newName}`, sha: ref.data.object.sha
+              });
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner, repo: context.repo.repo,
+                ref: `heads/${reviewBranch}`
+              });
+              console.log(`Renamed: ${reviewBranch} → ${newName}`);
+            } catch (e) {
+              console.log(`Could not rename review branch: ${e.message}`);
             }
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -656,14 +692,51 @@ jobs:
                 console.log('Snapshot branch deleted');
               }
 
-              // Note: release-review branch is kept for reference
-
               core.setOutput('success', 'true');
               core.setOutput('error_message', '');
             } catch (error) {
               console.log(`::error::Delete draft failed: ${error.message}`);
               core.setOutput('success', 'false');
               core.setOutput('error_message', error.message);
+            }
+
+      # Step 4: Rename review branch to free name for next create-snapshot
+      - name: Cleanup review branch
+        if: steps.delete.outputs.success == 'true'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const reviewBranch = '${{ needs.derive-state.outputs.release_review_branch }}';
+            if (!reviewBranch) return;
+
+            const newName = `${reviewBranch}-discarded`;
+            try {
+              const ref = await github.rest.git.getRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `heads/${reviewBranch}`
+              });
+
+              // Delete old -discarded branch if it exists (repeated cycles)
+              try {
+                await github.rest.git.deleteRef({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  ref: `heads/${newName}`
+                });
+                console.log(`Deleted previous ${newName}`);
+              } catch (_) { /* doesn't exist */ }
+
+              await github.rest.git.createRef({
+                owner: context.repo.owner, repo: context.repo.repo,
+                ref: `refs/heads/${newName}`, sha: ref.data.object.sha
+              });
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner, repo: context.repo.repo,
+                ref: `heads/${reviewBranch}`
+              });
+              console.log(`Renamed: ${reviewBranch} → ${newName}`);
+            } catch (e) {
+              console.log(`Could not rename review branch: ${e.message}`);
             }
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -674,19 +747,86 @@ jobs:
     if: needs.check-trigger.outputs.trigger_type == 'pr_merge'
     runs-on: ubuntu-latest
     outputs:
-      success: ${{ steps.handle.outputs.success }}
-      draft_release_url: ${{ steps.handle.outputs.draft_release_url }}
-      error_message: ${{ steps.handle.outputs.error_message }}
+      success: ${{ steps.create-draft.outputs.success }}
+      draft_release_url: ${{ steps.create-draft.outputs.draft_release_url }}
+      error_message: ${{ steps.create-draft.outputs.error_message }}
     steps:
-      - name: Create Draft Release
-        id: handle
+      - name: Extract CHANGELOG release notes
+        id: changelog
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const snapshotBranch = '${{ needs.derive-state.outputs.snapshot_branch }}';
+
+            // Fetch CHANGELOG.md from the snapshot branch
+            let changelogContent = '';
+            try {
+              const response = await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: 'CHANGELOG.md',
+                ref: snapshotBranch
+              });
+              changelogContent = Buffer.from(response.data.content, 'base64').toString('utf-8');
+              console.log(`Fetched CHANGELOG.md (${changelogContent.length} chars)`);
+            } catch (error) {
+              console.log(`::warning::Could not fetch CHANGELOG.md: ${error.message}`);
+              core.setOutput('release_notes', '');
+              return;
+            }
+
+            // Extract section from "## Release Notes" to next "# rX.Y" heading or EOF
+            const lines = changelogContent.split('\n');
+            let startIdx = -1;
+            let endIdx = lines.length;
+
+            // Find "## Release Notes" line
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].match(/^## Release Notes/i)) {
+                startIdx = i;
+                break;
+              }
+            }
+
+            if (startIdx === -1) {
+              console.log('::warning::No "## Release Notes" section found in CHANGELOG.md');
+              core.setOutput('release_notes', '');
+              return;
+            }
+
+            // Find end: next "# rX.Y" heading (top-level release heading)
+            for (let i = startIdx + 1; i < lines.length; i++) {
+              if (lines[i].match(/^# r\d+/)) {
+                endIdx = i;
+                break;
+              }
+            }
+
+            // Trim trailing blank lines
+            while (endIdx > startIdx && lines[endIdx - 1].trim() === '') {
+              endIdx--;
+            }
+
+            const releaseNotes = lines.slice(startIdx, endIdx).join('\n');
+            console.log(`Extracted release notes: ${releaseNotes.length} chars (lines ${startIdx + 1}-${endIdx})`);
+
+            // Write to output using delimiter for multiline
+            const outputFile = process.env.GITHUB_OUTPUT;
+            const fs = require('fs');
+            const delimiter = 'RELEASE_NOTES_EOF';
+            fs.appendFileSync(outputFile, `release_notes<<${delimiter}\n${releaseNotes}\n${delimiter}\n`);
+
+      - name: Create Draft Release
+        id: create-draft
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        env:
+          RELEASE_NOTES: ${{ steps.changelog.outputs.release_notes }}
         with:
           script: |
             const releaseTag = '${{ needs.derive-state.outputs.release_tag }}';
             const snapshotBranch = '${{ needs.derive-state.outputs.snapshot_branch }}';
             const releaseType = '${{ needs.derive-state.outputs.release_type }}';
-            const apisJson = '${{ needs.derive-state.outputs.apis_json }}';
+            const releaseNotes = process.env.RELEASE_NOTES || '';
 
             console.log(`Creating draft release for ${releaseTag}`);
             console.log(`  Snapshot branch: ${snapshotBranch}`);
@@ -696,31 +836,20 @@ jobs:
               // Determine if this is a pre-release
               const isPrerelease = releaseType.startsWith('pre-release');
 
-              // Parse API info for release body
-              let apis = [];
-              try {
-                apis = JSON.parse(apisJson || '[]');
-              } catch (e) {
-                console.log('Could not parse apis_json, continuing without API list');
+              // Build release body from CHANGELOG content or fallback
+              let body = '';
+              if (releaseNotes) {
+                body = releaseNotes;
+                body += `\n\n---\n\n`;
+                body += `_Draft created automatically from merged Release PR._\n`;
+                body += `_Review the release content, then publish when ready._\n`;
+              } else {
+                body = `## Release ${releaseTag}\n\n`;
+                body += `**Release type:** ${releaseType}\n\n`;
+                body += `---\n\n`;
+                body += `_Draft created automatically from merged Release PR._\n`;
+                body += `_CHANGELOG.md content was not available — please add release notes manually._\n`;
               }
-
-              // Build release body
-              let body = `## Release ${releaseTag}\n\n`;
-              body += `**Release type:** ${releaseType}\n\n`;
-
-              if (apis.length > 0) {
-                body += `### API Versions\n\n`;
-                for (const api of apis) {
-                  const name = api.api_name || api.api_title || '';
-                  const version = api.api_version || '';
-                  body += `- **${name}**: \`${version}\`\n`;
-                }
-                body += '\n';
-              }
-
-              body += `---\n\n`;
-              body += `_Draft created automatically from merged Release PR._\n`;
-              body += `_Review the release content, then publish when ready._\n`;
 
               // Create draft release
               const release = await github.rest.repos.createRelease({
@@ -743,6 +872,56 @@ jobs:
               core.setOutput('success', 'false');
               core.setOutput('draft_release_url', '');
               core.setOutput('error_message', error.message);
+            }
+
+      - name: Set release date in release-metadata.yaml
+        if: steps.create-draft.outputs.success == 'true'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const snapshotBranch = '${{ needs.derive-state.outputs.snapshot_branch }}';
+            const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+            console.log(`Setting release_date to ${today} in release-metadata.yaml on ${snapshotBranch}`);
+
+            try {
+              // Fetch current release-metadata.yaml
+              const response = await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: 'release-metadata.yaml',
+                ref: snapshotBranch
+              });
+
+              const content = Buffer.from(response.data.content, 'base64').toString('utf-8');
+              const sha = response.data.sha;
+
+              // Replace release_date: null with today's date
+              const updated = content.replace(
+                /^(\s*release_date:\s*)null\s*$/m,
+                `$1${today}`
+              );
+
+              if (updated === content) {
+                console.log('release_date field not found as null or already set, skipping update');
+                return;
+              }
+
+              // Commit the update
+              await github.rest.repos.createOrUpdateFileContents({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: 'release-metadata.yaml',
+                message: `Set release_date to ${today}`,
+                content: Buffer.from(updated).toString('base64'),
+                sha: sha,
+                branch: snapshotBranch
+              });
+
+              console.log(`Updated release-metadata.yaml with release_date: ${today}`);
+            } catch (error) {
+              // Non-fatal: release date is a convenience field
+              console.log(`::warning::Could not update release_date: ${error.message}`);
             }
 
   # ─────────────────────────────────────────────────────────────────────────────

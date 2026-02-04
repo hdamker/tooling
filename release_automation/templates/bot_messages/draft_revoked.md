@@ -11,6 +11,7 @@
 
 - Draft release has been deleted
 - Snapshot branch has been deleted
+- Release-review branch has been renamed to `{{release_review_branch}}-discarded`
 - Release tag has **not** been created
 
 ### State
