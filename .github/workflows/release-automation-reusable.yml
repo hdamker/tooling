@@ -49,6 +49,7 @@ jobs:
       issue_number: ${{ steps.detect.outputs.issue_number }}
       user: ${{ steps.detect.outputs.user }}
       should_continue: ${{ steps.detect.outputs.should_continue }}
+      confirm_tag: ${{ steps.detect.outputs.confirm_tag }}
       # Note: release_tag is NOT output here - it comes from derive-state job
       # which reads from authoritative sources (release-plan.yaml or release-metadata.yaml)
     steps:
@@ -64,6 +65,7 @@ jobs:
             let issueNumber = '';
             let user = '';
             let shouldContinue = 'false';
+            let confirmTag = '';
 
             console.log(`Event: ${eventName}`);
             console.log(`Action: ${context.payload.action || 'N/A'}`);
@@ -115,6 +117,14 @@ jobs:
                 triggerType = 'slash_command';
                 command = 'sync-issue';
                 commandArgs = body.replace('/sync-issue', '').trim();
+                shouldContinue = 'true';
+              } else if (body.startsWith('/publish-release')) {
+                triggerType = 'slash_command';
+                command = 'publish-release';
+                commandArgs = body.replace('/publish-release', '').trim();
+                // Parse --confirm <tag> argument
+                const confirmMatch = commandArgs.match(/--confirm\s+(\S+)/);
+                confirmTag = confirmMatch ? confirmMatch[1] : '';
                 shouldContinue = 'true';
               } else {
                 console.log('Comment is not a recognized slash command');
@@ -187,6 +197,7 @@ jobs:
             console.log(`Issue number: ${issueNumber}`);
             console.log(`User: ${user}`);
             console.log(`Should continue: ${shouldContinue}`);
+            console.log(`Confirm tag: ${confirmTag}`);
             console.log('Note: release_tag will come from derive-state job');
 
             core.setOutput('trigger_type', triggerType);
@@ -195,6 +206,7 @@ jobs:
             core.setOutput('issue_number', issueNumber);
             core.setOutput('user', user);
             core.setOutput('should_continue', shouldContinue);
+            core.setOutput('confirm_tag', confirmTag);
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 2: Derive current state (runs first to get release_tag from artifacts)
@@ -386,7 +398,7 @@ jobs:
             const allowedCommands = {
               'planned': ['create-snapshot', 'sync-issue'],
               'snapshot-active': ['discard-snapshot', 'sync-issue'],
-              'draft-ready': ['delete-draft', 'sync-issue'],
+              'draft-ready': ['delete-draft', 'publish-release', 'sync-issue'],
               'published': ['sync-issue'],
               'cancelled': ['sync-issue']
             };
@@ -429,6 +441,16 @@ jobs:
               core.setOutput('allowed', 'false');
               core.setOutput('error_message', `Failed to verify permissions: ${error.message}`);
               return;
+            }
+
+            // For publish-release with --confirm, validate the tag matches
+            const confirmTag = '${{ needs.check-trigger.outputs.confirm_tag }}';
+            if (command === 'publish-release' && confirmTag) {
+              if (confirmTag !== releaseTag) {
+                core.setOutput('allowed', 'false');
+                core.setOutput('error_message', `Confirm tag \`${confirmTag}\` does not match expected release tag \`${releaseTag}\`. Use: /publish-release --confirm ${releaseTag}`);
+                return;
+              }
             }
 
             // All checks passed
@@ -742,7 +764,45 @@ jobs:
             }
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 5e: Handle PR merge (draft release creation)
+  # Phase 5e: Handle publish-release confirmation (no --confirm flag)
+  # ─────────────────────────────────────────────────────────────────────────────
+  publish-confirmation:
+    needs: [check-trigger, derive-state, post-interim, validate-command]
+    if: |
+      needs.check-trigger.outputs.command == 'publish-release' &&
+      needs.validate-command.outputs.allowed == 'true' &&
+      needs.check-trigger.outputs.confirm_tag == ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          ref: release-automation-mvp
+          path: _tooling
+          sparse-checkout: |
+            release_automation
+            shared-actions
+
+      - name: Post confirmation message
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
+          template: publish_confirmation
+          context: |
+            {
+              "release_tag": "${{ needs.derive-state.outputs.release_tag }}",
+              "apis": ${{ needs.derive-state.outputs.apis_json || '[]' }},
+              "commonalities_release": "${{ needs.derive-state.outputs.commonalities_release }}",
+              "identity_consent_management_release": "${{ needs.derive-state.outputs.identity_consent_management_release }}"
+            }
+          comment_id: ${{ needs.post-interim.outputs.comment_id }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5f: Handle PR merge (draft release creation)
   # ─────────────────────────────────────────────────────────────────────────────
   handle-pr-merge:
     needs: [check-trigger, derive-state]

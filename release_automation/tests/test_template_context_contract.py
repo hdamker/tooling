@@ -21,6 +21,7 @@ KNOWN_TEMPLATES = [
     "interim_processing",
     "issue_created",
     "issue_reopened",
+    "publish_confirmation",
     "snapshot_created",
     "snapshot_discarded",
     "snapshot_failed",
@@ -105,7 +106,7 @@ class TestTemplateContextContract:
             )
 
     def test_all_known_templates_exist(self, responder):
-        """All 10 known templates are present in the template directory."""
+        """All 11 known templates are present in the template directory."""
         templates = responder.list_templates()
 
         for name in KNOWN_TEMPLATES:
@@ -114,10 +115,10 @@ class TestTemplateContextContract:
             )
 
     def test_list_templates_returns_expected_count(self, responder):
-        """list_templates() returns at least 10 templates."""
+        """list_templates() returns at least 11 templates."""
         templates = responder.list_templates()
-        assert len(templates) >= 10, (
-            f"Expected at least 10 templates, got {len(templates)}: {templates}"
+        assert len(templates) >= 11, (
+            f"Expected at least 11 templates, got {len(templates)}: {templates}"
         )
 
     def test_build_context_no_none_values(self):

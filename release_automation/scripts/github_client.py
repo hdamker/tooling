@@ -238,6 +238,150 @@ class GitHubClient:
 
         return releases
 
+    def get_draft_release(self, tag: str) -> Optional[Release]:
+        """Get draft release by tag name.
+
+        Args:
+            tag: Release tag to search for
+
+        Returns:
+            Release object if found, None otherwise
+        """
+        try:
+            releases = self.get_releases(include_drafts=True)
+            for release in releases:
+                if release.draft and release.tag_name == tag:
+                    return release
+            return None
+        except GitHubClientError:
+            return None
+
+    def get_release_id(self, tag: str, draft_only: bool = False) -> Optional[int]:
+        """Get release ID by tag name.
+
+        Args:
+            tag: Release tag to search for
+            draft_only: If True, only return ID for draft releases
+
+        Returns:
+            Release ID if found, None otherwise
+        """
+        try:
+            jq_filter = f'.[] | select(.tag_name == "{tag}"'
+            if draft_only:
+                jq_filter += ' and .draft == true'
+            jq_filter += ') | .id'
+
+            output = self._run_gh([
+                "api",
+                f"repos/{self.repo}/releases",
+                "--jq", jq_filter
+            ])
+            if output.strip():
+                return int(output.strip())
+        except (GitHubClientError, ValueError):
+            pass
+        return None
+
+    def update_release(
+        self,
+        release_id: int,
+        draft: Optional[bool] = None,
+        name: Optional[str] = None,
+        body: Optional[str] = None
+    ) -> dict:
+        """Update a release.
+
+        Args:
+            release_id: Release ID to update
+            draft: Set draft status (False to publish)
+            name: New release name
+            body: New release body
+
+        Returns:
+            Updated release data
+
+        Raises:
+            GitHubClientError: If update fails
+        """
+        args = ["api", "-X", "PATCH", f"repos/{self.repo}/releases/{release_id}"]
+
+        if draft is not None:
+            args.extend(["-f", f"draft={str(draft).lower()}"])
+        if name is not None:
+            args.extend(["-f", f"name={name}"])
+        if body is not None:
+            args.extend(["-f", f"body={body}"])
+
+        output = self._run_gh(args)
+        return json.loads(output)
+
+    def get_release_by_id(self, release_id: int) -> dict:
+        """Get release by ID.
+
+        Args:
+            release_id: Release ID
+
+        Returns:
+            Release data dict
+
+        Raises:
+            GitHubClientError: If not found
+        """
+        output = self._run_gh(["api", f"repos/{self.repo}/releases/{release_id}"])
+        return json.loads(output)
+
+    def update_file(
+        self,
+        path: str,
+        content: str,
+        message: str,
+        branch: str
+    ) -> dict:
+        """Update a file on a branch via GitHub Contents API.
+
+        Args:
+            path: File path in repository
+            content: New file content
+            message: Commit message
+            branch: Target branch
+
+        Returns:
+            API response with commit info
+
+        Raises:
+            GitHubClientError: If update fails
+        """
+        import base64
+
+        # Get current file SHA (required for update)
+        try:
+            file_info = self._run_gh([
+                "api",
+                f"repos/{self.repo}/contents/{path}?ref={branch}"
+            ])
+            file_data = json.loads(file_info)
+            sha = file_data.get("sha")
+        except GitHubClientError:
+            sha = None  # File doesn't exist, will create
+
+        # Encode content as base64
+        encoded_content = base64.b64encode(content.encode()).decode()
+
+        # Build API call
+        args = [
+            "api", "-X", "PUT",
+            f"repos/{self.repo}/contents/{path}",
+            "-f", f"message={message}",
+            "-f", f"content={encoded_content}",
+            "-f", f"branch={branch}"
+        ]
+        if sha:
+            args.extend(["-f", f"sha={sha}"])
+
+        output = self._run_gh(args)
+        return json.loads(output)
+
     def get_branch_creation_time(self, branch: str) -> Optional[str]:
         """
         Get the creation time of a branch (approximated by first commit time).
