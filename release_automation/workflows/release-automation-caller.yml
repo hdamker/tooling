@@ -6,7 +6,7 @@
 # Copy this file as: .github/workflows/release-automation.yml
 #
 # Triggers:
-# - Slash commands: /create-snapshot, /discard-snapshot, /delete-draft, /sync-issue
+# - Slash commands: /create-snapshot, /discard-snapshot, /delete-draft, /publish-release, /sync-issue
 # - Issue events: close (with auto-reopen), reopen
 # - PR merge: on release-snapshot branches (creates draft release)
 # - Manual: workflow_dispatch for testing and recovery
@@ -40,6 +40,7 @@ on:
           - create-snapshot
           - discard-snapshot
           - delete-draft
+          - publish-release
       reason:
         description: 'Reason (required for discard-snapshot and delete-draft)'
         type: string
@@ -67,6 +68,7 @@ jobs:
        (startsWith(github.event.comment.body, '/create-snapshot') ||
         startsWith(github.event.comment.body, '/discard-snapshot') ||
         startsWith(github.event.comment.body, '/delete-draft') ||
+        startsWith(github.event.comment.body, '/publish-release') ||
         startsWith(github.event.comment.body, '/sync-issue'))) ||
       (github.event_name == 'issues' &&
        contains(github.event.issue.labels.*.name, 'release-issue')) ||
