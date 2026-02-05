@@ -147,7 +147,11 @@ class IssueSyncManager:
             if state == ReleaseState.PLANNED:
                 # Create new Release Issue
                 new_issue = self.create_release_issue(release_plan, trigger_pr)
-                return SyncResult(action="created", issue=new_issue)
+                # Populate sections with initial content
+                self._update_release_issue(new_issue, state, release_plan)
+                # Refetch issue after update
+                updated_issue = self.gh.get_issue(new_issue["number"])
+                return SyncResult(action="created", issue=updated_issue)
             else:
                 return SyncResult(action="none", reason="no_planned_release")
 
@@ -374,6 +378,11 @@ class IssueSyncManager:
                     api_versions[api_name] = api_version
             commonalities_release = snapshot.commonalities_release
             icm_release = snapshot.identity_consent_management_release
+        else:
+            # No snapshot - get dependencies from release_plan
+            deps = release_plan.get("dependencies", {})
+            commonalities_release = deps.get("commonalities_release", "")
+            icm_release = deps.get("identity_consent_management_release", "")
 
         new_config_content = self.issue_manager.generate_config_section(
             release_plan=release_plan,
