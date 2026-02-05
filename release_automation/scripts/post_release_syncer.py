@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from .github_client import GitHubClient, GitHubClientError
+from .template_loader import render_template
 
 logger = logging.getLogger(__name__)
 
@@ -299,18 +300,7 @@ class PostReleaseSyncer:
             Dict with 'number' and 'url', or None on error
         """
         title = f"chore: post-release sync for {release_tag}"
-        body = f"""## Post-Release Sync
-
-This PR syncs the following changes from release `{release_tag}` to main:
-
-- CHANGELOG.md updates
-- README.md release info section
-
-**Review required:** Please verify the changes before merging.
-
----
-_This PR was automatically created by release automation._
-"""
+        body = render_template("sync_pr", {"release_tag": release_tag})
 
         try:
             # Use gh pr create

@@ -177,16 +177,15 @@ jobs:
             }
 
             // ─────────────────────────────────────────────────────────────────
-            // Event: workflow_dispatch
+            // Event: workflow_dispatch (IMP-022: sync-issue only)
             // ─────────────────────────────────────────────────────────────────
             else if (eventName === 'workflow_dispatch') {
               triggerType = 'workflow_dispatch';
-              command = '${{ inputs.command }}' || 'sync-issue';
-              commandArgs = '${{ inputs.reason }}' || '';
+              command = 'sync-issue';  // IMP-022: hardcode to sync-issue only
+              commandArgs = '';  // No args needed for sync-issue
               user = context.actor;
 
-              // For workflow_dispatch, we need release_tag from inputs or derive from branch
-              // For now, this will be populated by the derive-state step
+              // For workflow_dispatch, release_tag will be populated by derive-state
               shouldContinue = 'true';
             }
 
@@ -785,6 +784,15 @@ jobs:
             release_automation
             shared-actions
 
+      - name: Derive context values
+        id: context
+        run: |
+          # Get short SHA (first 7 chars)
+          SRC_SHA="${{ needs.derive-state.outputs.src_commit_sha }}"
+          echo "src_commit_sha_short=${SRC_SHA:0:7}" >> $GITHUB_OUTPUT
+          # Construct releases page URL (draft releases don't have direct URLs)
+          echo "draft_release_url=https://github.com/${{ github.repository }}/releases" >> $GITHUB_OUTPUT
+
       - name: Post confirmation message
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
@@ -797,13 +805,194 @@ jobs:
               "release_tag": "${{ needs.derive-state.outputs.release_tag }}",
               "apis": ${{ needs.derive-state.outputs.apis_json || '[]' }},
               "commonalities_release": "${{ needs.derive-state.outputs.commonalities_release }}",
-              "identity_consent_management_release": "${{ needs.derive-state.outputs.identity_consent_management_release }}"
+              "identity_consent_management_release": "${{ needs.derive-state.outputs.identity_consent_management_release }}",
+              "draft_release_url": "${{ steps.context.outputs.draft_release_url }}",
+              "src_commit_sha_short": "${{ steps.context.outputs.src_commit_sha_short }}"
             }
           comment_id: ${{ needs.post-interim.outputs.comment_id }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 5f: Handle PR merge (draft release creation)
+  # Phase 5f: Handle publish-release (with --confirm flag)
+  # ─────────────────────────────────────────────────────────────────────────────
+  publish-release:
+    name: "Publish Release"
+    needs: [check-trigger, derive-state, validate-command]
+    if: |
+      needs.check-trigger.outputs.command == 'publish-release' &&
+      needs.check-trigger.outputs.confirm_tag != '' &&
+      needs.validate-command.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      success: ${{ steps.publish.outputs.success }}
+      release_url: ${{ steps.publish.outputs.release_url }}
+      reference_tag: ${{ steps.publish.outputs.reference_tag }}
+      sync_pr_url: ${{ steps.publish.outputs.sync_pr_url }}
+      sync_pr_number: ${{ steps.publish.outputs.sync_pr_number }}
+      error_message: ${{ steps.publish.outputs.error_message }}
+    steps:
+      - name: Checkout tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          repository: hdamker/tooling
+          ref: release-automation-mvp
+          path: _tooling
+          sparse-checkout: |
+            release_automation
+            shared-actions
+
+      - name: Setup Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pyyaml pystache requests
+
+      - name: Execute Publish Flow
+        id: publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+          RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
+          SNAPSHOT_BRANCH: ${{ needs.derive-state.outputs.snapshot_branch }}
+          RELEASE_REVIEW_BRANCH: ${{ needs.derive-state.outputs.release_review_branch }}
+          SRC_COMMIT_SHA: ${{ needs.derive-state.outputs.src_commit_sha }}
+          RELEASE_ISSUE_NUMBER: ${{ needs.derive-state.outputs.release_issue_number }}
+        run: |
+          cd _tooling
+          python3 -u - <<'PYTHON_SCRIPT'
+          import os
+          import sys
+          import json
+
+          sys.path.insert(0, '.')
+          from release_automation.scripts.github_client import GitHubClient
+          from release_automation.scripts.release_publisher import ReleasePublisher
+          from release_automation.scripts.post_release_syncer import PostReleaseSyncer
+          from release_automation.scripts.issue_sync import IssueSyncManager
+
+          def set_output(name, value):
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  # Handle multi-line values
+                  if '\n' in str(value):
+                      import uuid
+                      delimiter = uuid.uuid4().hex
+                      f.write(f'{name}<<{delimiter}\n{value}\n{delimiter}\n')
+                  else:
+                      f.write(f'{name}={value}\n')
+
+          # Initialize clients
+          token = os.environ['GITHUB_TOKEN']
+          owner = os.environ['OWNER']
+          repo = os.environ['REPO']
+          release_tag = os.environ['RELEASE_TAG']
+          snapshot_branch = os.environ['SNAPSHOT_BRANCH']
+          release_review_branch = os.environ['RELEASE_REVIEW_BRANCH']
+          src_commit_sha = os.environ['SRC_COMMIT_SHA']
+          issue_number_str = os.environ.get('RELEASE_ISSUE_NUMBER', '')
+          issue_number = int(issue_number_str) if issue_number_str else None
+
+          gh = GitHubClient(f'{owner}/{repo}', token)
+          publisher = ReleasePublisher(gh)
+          syncer = PostReleaseSyncer(gh)
+          issue_sync = IssueSyncManager(gh, None)  # No state manager needed for closure
+
+          warnings = []
+          release_url = ''
+          reference_tag = ''
+          sync_pr_url = ''
+          sync_pr_number = ''
+
+          # Step 1: Publish the release (CRITICAL)
+          print('Step 1: Publishing release...')
+          publish_result = publisher.publish_release(release_tag, snapshot_branch)
+          if not publish_result.success:
+              set_output('success', 'false')
+              set_output('error_message', publish_result.error_message or 'Unknown error')
+              set_output('release_url', '')
+              set_output('reference_tag', '')
+              set_output('sync_pr_url', '')
+              set_output('sync_pr_number', '')
+              print(f'::error::Publication failed: {publish_result.error_message}')
+              sys.exit(0)  # Exit cleanly to allow post-result to run
+
+          release_url = publish_result.release_url or ''
+          print(f'Release published: {release_url}')
+
+          # Step 2: Create reference tag (non-critical)
+          print('Step 2: Creating reference tag...')
+          ref_tag = publisher.create_reference_tag(release_tag, src_commit_sha)
+          if ref_tag:
+              reference_tag = ref_tag
+              print(f'Reference tag created: {reference_tag}')
+          else:
+              warnings.append('Failed to create reference tag')
+              print('::warning::Failed to create reference tag')
+
+          # Step 3: Create sync PR (non-critical)
+          print('Step 3: Creating sync PR...')
+          # Read release metadata for sync PR
+          try:
+              metadata_content = gh.get_file_content('release-metadata.yaml', snapshot_branch)
+              import yaml
+              release_metadata = yaml.safe_load(metadata_content) if metadata_content else {}
+          except Exception as e:
+              release_metadata = {}
+              print(f'::warning::Could not read release metadata: {e}')
+
+          sync_result = syncer.create_sync_pr(release_tag, snapshot_branch, release_metadata)
+          if sync_result.success:
+              sync_pr_url = sync_result.pr_url or ''
+              sync_pr_number = str(sync_result.pr_number or '')
+              print(f'Sync PR created: {sync_pr_url}')
+          else:
+              warnings.append(f'Failed to create sync PR: {sync_result.error_message}')
+              print(f'::warning::Failed to create sync PR: {sync_result.error_message}')
+
+          # Step 4: Cleanup branches (non-critical)
+          print('Step 4: Cleaning up branches...')
+          cleanup_result = publisher.cleanup_branches(snapshot_branch, release_review_branch)
+          for op, status in cleanup_result.items():
+              if status == 'error':
+                  warnings.append(f'Branch cleanup issue: {op}')
+              print(f'  {op}: {status}')
+
+          # Step 5: Close release issue (non-critical)
+          if issue_number:
+              print(f'Step 5: Closing release issue #{issue_number}...')
+              try:
+                  issue_sync.close_release_issue(
+                      issue_number=issue_number,
+                      release_tag=release_tag,
+                      release_url=release_url,
+                      reference_tag=reference_tag,
+                      sync_pr_url=sync_pr_url
+                  )
+                  print('Issue closed successfully')
+              except Exception as e:
+                  warnings.append(f'Failed to close issue: {e}')
+                  print(f'::warning::Failed to close issue: {e}')
+          else:
+              print('Step 5: No release issue number, skipping closure')
+
+          # Set outputs
+          set_output('success', 'true')
+          set_output('release_url', release_url)
+          set_output('reference_tag', reference_tag)
+          set_output('sync_pr_url', sync_pr_url)
+          set_output('sync_pr_number', sync_pr_number)
+          if warnings:
+              set_output('error_message', '; '.join(warnings))
+          else:
+              set_output('error_message', '')
+
+          print('Publish flow completed successfully')
+          PYTHON_SCRIPT
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5g: Handle PR merge (draft release creation)
   # ─────────────────────────────────────────────────────────────────────────────
   handle-pr-merge:
     needs: [check-trigger, derive-state]
@@ -1175,7 +1364,7 @@ jobs:
   # Phase 7: Post final result comment
   # ─────────────────────────────────────────────────────────────────────────────
   post-result:
-    needs: [check-trigger, post-interim, derive-state, validate-command, create-snapshot, discard-snapshot, delete-draft]
+    needs: [check-trigger, post-interim, derive-state, validate-command, create-snapshot, discard-snapshot, delete-draft, publish-release]
     if: |
       always() &&
       needs.check-trigger.outputs.trigger_type == 'slash_command' &&
@@ -1225,8 +1414,16 @@ jobs:
             sync-issue)
               echo "template=interim_processing" >> $GITHUB_OUTPUT
               ;;
+            publish-release)
+              if [ "${{ needs.publish-release.outputs.success }}" == "true" ]; then
+                echo "template=release_published" >> $GITHUB_OUTPUT
+              else
+                echo "template=publish_failed" >> $GITHUB_OUTPUT
+              fi
+              ;;
             *)
-              echo "template=command_rejected" >> $GITHUB_OUTPUT
+              # No handler matched - this is a workflow bug (IMP-024)
+              echo "template=internal_error" >> $GITHUB_OUTPUT
               ;;
           esac
 
@@ -1298,6 +1495,27 @@ jobs:
               '. + {snapshot_id: $sid, snapshot_branch: $sb, snapshot_branch_url: $sb_url, release_review_branch: $rrb, release_review_branch_url: $rrb_url, release_pr_number: $prn, release_pr_url: $pru, apis_json: $apis}')
           fi
 
+          # Add publish-release outputs if that job ran
+          if [ "${{ needs.publish-release.outputs.success }}" == "true" ]; then
+            # Construct reference tag URL
+            REF_TAG="${{ needs.publish-release.outputs.reference_tag }}"
+            REF_TAG_URL=""
+            if [ -n "$REF_TAG" ]; then
+              REF_TAG_URL="${{ github.server_url }}/${{ github.repository }}/tree/${REF_TAG}"
+            fi
+            # Get short SHA for display
+            SRC_SHA="${{ needs.derive-state.outputs.src_commit_sha }}"
+            SRC_SHA_SHORT="${SRC_SHA:0:7}"
+            CONTEXT=$(echo "$CONTEXT" | jq \
+              --arg release_url "${{ needs.publish-release.outputs.release_url }}" \
+              --arg reference_tag "$REF_TAG" \
+              --arg reference_tag_url "$REF_TAG_URL" \
+              --arg sync_pr_url "${{ needs.publish-release.outputs.sync_pr_url }}" \
+              --arg sync_pr_number "${{ needs.publish-release.outputs.sync_pr_number }}" \
+              --arg src_commit_sha_short "$SRC_SHA_SHORT" \
+              '. + {release_url: $release_url, reference_tag: $reference_tag, reference_tag_url: $reference_tag_url, sync_pr_url: $sync_pr_url, sync_pr_number: $sync_pr_number, src_commit_sha_short: $src_commit_sha_short}')
+          fi
+
           # Add error message for command failure cases
           if [ "${{ needs.create-snapshot.outputs.success }}" == "false" ]; then
             CONTEXT=$(echo "$CONTEXT" | jq \
@@ -1310,6 +1528,10 @@ jobs:
           elif [ "${{ needs.delete-draft.outputs.success }}" == "false" ]; then
             CONTEXT=$(echo "$CONTEXT" | jq \
               --arg err "${{ needs.delete-draft.outputs.error_message }}" \
+              '. + {error_message: $err}')
+          elif [ "${{ needs.publish-release.outputs.success }}" == "false" ]; then
+            CONTEXT=$(echo "$CONTEXT" | jq \
+              --arg err "${{ needs.publish-release.outputs.error_message }}" \
               '. + {error_message: $err}')
           fi
 

@@ -28,25 +28,13 @@ on:
     branches:
       - 'release-snapshot/**'
 
-  # Manual trigger for testing and recovery
+  # Manual trigger for sync-issue only (IMP-022)
+  # Use this for: initial setup, recovery after manual repo changes, or forced sync
+  # All other commands must be issued via slash commands in the Release Issue
   workflow_dispatch:
     inputs:
-      command:
-        description: 'Command to execute'
-        type: choice
-        default: 'sync-issue'
-        options:
-          - sync-issue
-          - create-snapshot
-          - discard-snapshot
-          - delete-draft
-          - publish-release
-      reason:
-        description: 'Reason (required for discard-snapshot and delete-draft)'
-        type: string
-        required: false
-      trigger_pr:
-        description: 'PR number that triggered this (for traceability)'
+      release_tag:
+        description: 'Optional: target specific release tag (e.g., r4.1)'
         type: string
         required: false
 
@@ -78,8 +66,6 @@ jobs:
 
     # For testing: use hdamker fork; production will use camaraproject/tooling
     uses: hdamker/tooling/.github/workflows/release-automation-reusable.yml@release-automation-mvp
-    with:
-      command: ${{ github.event.inputs.command || '' }}
-      reason: ${{ github.event.inputs.reason || '' }}
-      trigger_pr: ${{ github.event.inputs.trigger_pr || '' }}
+    # No command input needed for workflow_dispatch (IMP-022: sync-issue only)
+    # Other triggers (slash commands, PR merge) derive command from context
     secrets: inherit

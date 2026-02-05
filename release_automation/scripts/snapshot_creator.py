@@ -20,6 +20,7 @@ from .mechanical_transformer import MechanicalTransformer, TransformationContext
 from .metadata_generator import MetadataGenerator
 from .readme_updater import ReadmeUpdater, ReadmeUpdateError
 from .state_manager import ReleaseState, ReleaseStateManager
+from .template_loader import render_template
 from .version_calculator import VersionCalculator
 
 
@@ -450,39 +451,16 @@ class SnapshotCreator:
         """
         title = f"Release {release_tag} (snapshot: {snapshot_id})"
 
-        # Build PR body
-        body_lines = [
-            f"## Release {release_tag}",
-            "",
-            "This pull request was created by the CAMARA release automation.",
-            "",
-            "### APIs in this release",
-            "",
+        # Build PR body from template
+        apis = [
+            {"api_name": name, "api_version": version}
+            for name, version in api_versions.items()
         ]
-
-        for api_name, version in api_versions.items():
-            body_lines.append(f"- **{api_name}**: `{version}`")
-
-        body_lines.extend([
-            "",
-            "### Review checklist",
-            "",
-            "- [ ] Verify API version numbers are correct",
-            "- [ ] Check transformation replacements (server URLs, references)",
-            "- [ ] Review release-metadata.yaml content",
-            "- [ ] Confirm CHANGELOG entries are accurate",
-            "",
-            "### Next steps",
-            "",
-            "1. Review the changes in this PR",
-            "2. Add any manual documentation updates",
-            "3. When ready, merge this PR to create a draft release",
-            "",
-            "---",
-            f"Snapshot ID: `{snapshot_id}`",
-        ])
-
-        body = "\n".join(body_lines)
+        body = render_template("release_review_pr", {
+            "release_tag": release_tag,
+            "snapshot_id": snapshot_id,
+            "apis": apis,
+        })
 
         return git_ops.create_pr(
             title=title,
