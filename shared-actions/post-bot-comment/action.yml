@@ -76,12 +76,18 @@ runs:
             print(f"::error::Invalid JSON context: {e}")
             sys.exit(1)
 
-        # Convert apis_json string to apis list if present
-        # (workflow passes serialized JSON string for list-type outputs)
-        if 'apis_json' in raw_context and isinstance(raw_context['apis_json'], str):
-            try:
-                raw_context['apis'] = json.loads(raw_context['apis_json'])
-            except (json.JSONDecodeError, TypeError):
+        # Convert apis_json to apis list if present
+        # Handle both cases: string (from shell) or list (from jq JSON parsing)
+        if 'apis_json' in raw_context:
+            apis_val = raw_context['apis_json']
+            if isinstance(apis_val, str):
+                try:
+                    raw_context['apis'] = json.loads(apis_val)
+                except (json.JSONDecodeError, TypeError):
+                    raw_context['apis'] = []
+            elif isinstance(apis_val, list):
+                raw_context['apis'] = apis_val
+            else:
                 raw_context['apis'] = []
             del raw_context['apis_json']
 
