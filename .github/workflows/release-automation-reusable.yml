@@ -1222,7 +1222,8 @@ jobs:
               --arg rrb "${{ needs.create-snapshot.outputs.release_review_branch }}" \
               --arg prn "${{ needs.create-snapshot.outputs.release_pr_number }}" \
               --arg pru "${{ needs.create-snapshot.outputs.release_pr_url }}" \
-              '. + {snapshot_id: $sid, snapshot_branch: $sb, release_review_branch: $rrb, release_pr_number: $prn, release_pr_url: $pru}')
+              --arg apis "${{ needs.create-snapshot.outputs.apis_json }}" \
+              '. + {snapshot_id: $sid, snapshot_branch: $sb, release_review_branch: $rrb, release_pr_number: $prn, release_pr_url: $pru, apis_json: $apis}')
           fi
 
           # Add error message for command failure cases

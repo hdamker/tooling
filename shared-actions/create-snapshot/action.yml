@@ -48,6 +48,9 @@ outputs:
   error_message:
     description: 'Error message if creation failed'
     value: ${{ steps.create.outputs.error_message }}
+  apis_json:
+    description: 'JSON array of {api_name, api_version} objects for calculated versions'
+    value: ${{ steps.create.outputs.apis_json }}
 
 runs:
   using: composite
@@ -101,7 +104,7 @@ runs:
 
         def write_outputs(success='false', snapshot_id='', snapshot_branch='',
                           release_review_branch='', release_pr_number='',
-                          release_pr_url='', error_message=''):
+                          release_pr_url='', error_message='', apis_json=''):
             """Write outputs to GITHUB_OUTPUT file."""
             with open(output_file, 'a') as f:
                 f.write(f"success={success}\n")
@@ -111,6 +114,7 @@ runs:
                 f.write(f"release_pr_number={release_pr_number}\n")
                 f.write(f"release_pr_url={release_pr_url}\n")
                 f.write(f"error_message={error_message}\n")
+                f.write(f"apis_json={apis_json}\n")
 
         # Validate release_tag provided
         if not release_tag:
@@ -205,6 +209,13 @@ runs:
                 for warning in result.warnings:
                     print(f"::warning::{warning}")
 
+            # Build apis_json for bot comment context
+            apis_list = [
+                {"api_name": name, "api_version": version}
+                for name, version in result.api_versions.items()
+            ]
+            apis_json_str = json.dumps(apis_list)
+
             write_outputs(
                 success='true',
                 snapshot_id=result.snapshot_id or '',
@@ -212,6 +223,7 @@ runs:
                 release_review_branch=result.release_review_branch or '',
                 release_pr_number=str(result.release_pr_number) if result.release_pr_number else '',
                 release_pr_url=result.release_pr_url or '',
+                apis_json=apis_json_str,
             )
         else:
             error_msg = '; '.join(result.errors) if result.errors else 'Unknown error'
