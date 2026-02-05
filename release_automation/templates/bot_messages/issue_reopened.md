@@ -1,28 +1,17 @@
-## Issue Reopened Automatically
+### 🔄 Issue reopened automatically
 
-This Release Issue was automatically reopened because the release process is still active.
+This issue was reopened because active release artifacts exist. The issue cannot be closed while a {{#state_snapshot_active}}snapshot{{/state_snapshot_active}}{{#state_draft_ready}}draft release{{/state_draft_ready}} is pending.
 
-**Release:** `{{release_tag}}`
-**State:** `{{state}}`
+**Current state:** `{{state}}`
 
-### Why This Happened
-
+**Valid actions:**
 {{#state_snapshot_active}}
-A snapshot is currently active. The issue cannot be closed while a snapshot exists.
-
-Use `/discard-snapshot` to discard the snapshot before closing this issue.
+- Merge the Release PR to create a draft release
+- `/discard-snapshot <reason>` to discard and return to `planned`
 {{/state_snapshot_active}}
-
 {{#state_draft_ready}}
-A draft release exists. The issue cannot be closed while a draft is pending.
-
-Either:
-- Publish the draft release to complete the release
-- Use `/delete-draft` to delete the draft
+- Publish the draft release in GitHub Releases
+- `/delete-draft <reason>` to delete and return to `planned`
 {{/state_draft_ready}}
 
----
-
-**To close this issue:**
-1. Complete or cancel the release process
-2. The issue will close automatically when the release reaches `published` or `cancelled` state
+The issue will close automatically when the release reaches `published` or `cancelled` state.

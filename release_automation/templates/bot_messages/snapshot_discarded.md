@@ -1,25 +1,11 @@
-## Snapshot Discarded
+### 🗑️ Snapshot discarded: `{{snapshot_id}}`
 
-**Release:** `{{release_tag}}`
-**Snapshot ID:** `{{snapshot_id}}`
-**Discarded by:** @{{user}}
+**State:** `snapshot-active` → `planned`{{#reason}} | **Reason:** {{reason}}{{/reason}}
 
-{{#reason}}
-**Reason:** {{reason}}
-{{/reason}}
+**Cleanup:**
+- Snapshot branch `{{snapshot_branch}}` deleted
+- Release PR closed
+- Review branch `{{release_review_branch}}` preserved for reference
 
-### Cleanup Summary
-
-- Snapshot branch `{{snapshot_branch}}` has been deleted
-- Release PR has been closed
-- Release-review branch has been renamed to `{{release_review_branch}}-discarded`
-
-### State
-
-The release is now back in `planned` state.
-
----
-
-**Next steps:**
-1. Make any needed changes to main branch
-2. Run `/create-snapshot` to create a new snapshot
+**Valid actions:**
+- `/create-snapshot` to create a new snapshot from updated `main`

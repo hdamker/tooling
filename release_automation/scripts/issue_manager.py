@@ -17,6 +17,9 @@ class SnapshotHistoryEntry:
     """
     Represents an entry in the snapshot history table.
 
+    Note: HISTORY section is deferred to backlog (not MVP).
+    This dataclass is preserved for future implementation.
+
     Attributes:
         snapshot_id: Unique identifier (e.g., "r4.1-abc1234")
         status: Either "Current" or "Discarded"
@@ -35,8 +38,8 @@ class SnapshotHistoryEntry:
 
 class IssueManager:
     """
-    Manages Release Issue content - updating reserved sections,
-    maintaining snapshot history table, and generating standardized titles.
+    Manages Release Issue content - updating reserved sections
+    and generating standardized titles.
 
     Reserved sections in issue body are marked with HTML comments:
         <!-- BEGIN:SECTION_NAME -->
@@ -44,9 +47,12 @@ class IssueManager:
         <!-- END:SECTION_NAME -->
 
     Supported sections:
-        - STATE: Current release state and timestamp
-        - HISTORY: Snapshot history table
-        - CONFIG: Release configuration (APIs, dependencies, etc.)
+        - STATE: Current release state, timestamp, and active artifact links
+        - CONFIG: Release configuration (APIs, dependencies)
+        - ACTIONS: Valid actions for the current state
+
+    Note: HISTORY section has been deferred to backlog (not MVP).
+    The comment trail serves as the audit log.
     """
 
     # Pattern for matching sections (use .format(name=section_name))
@@ -108,6 +114,9 @@ class IssueManager:
         """
         Add a new entry to the snapshot history table.
 
+        Note: HISTORY section is deferred to backlog (not MVP).
+        This method is preserved for future implementation.
+
         The entry is inserted after the table header row.
 
         Args:
@@ -165,6 +174,9 @@ class IssueManager:
     ) -> str:
         """
         Update an existing snapshot entry from 'Current' to 'Discarded'.
+
+        Note: HISTORY section is deferred to backlog (not MVP).
+        This method is preserved for future implementation.
 
         Finds the row with the matching snapshot_id and updates:
         - Status: Current → Discarded
@@ -255,63 +267,124 @@ class IssueManager:
         )
         return current_title != expected_title
 
-    def generate_state_section(self, state: str) -> str:
+    def generate_state_section(
+        self,
+        state: str,
+        snapshot_id: str = "",
+        release_pr_url: str = "",
+        draft_release_url: str = ""
+    ) -> str:
         """
         Generate content for the STATE section.
 
         Args:
-            state: Current release state (e.g., "PLANNED", "SNAPSHOT_ACTIVE")
+            state: Current release state (e.g., "planned", "snapshot-active")
+            snapshot_id: Active snapshot ID (if any)
+            release_pr_url: Release PR URL (if any)
+            draft_release_url: Draft release URL (if any)
 
         Returns:
             Formatted state section content
         """
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        return f"**State**: {state.upper()}\n**Last Updated**: {timestamp}"
+        state_lower = state.lower().replace("_", "-")
+
+        lines = [f"**State:** `{state_lower}` | **Last Updated:** {timestamp}"]
+
+        # Add active artifact links based on state
+        if state_lower == "snapshot-active" and snapshot_id:
+            lines.append("")
+            lines.append(f"**Active snapshot:** `{snapshot_id}`")
+            if release_pr_url:
+                lines.append(f"**Release PR:** {release_pr_url}")
+
+        elif state_lower == "draft-ready":
+            if draft_release_url:
+                lines.append("")
+                lines.append(f"**Draft release:** {draft_release_url}")
+
+        return "\n".join(lines)
+
+    def generate_actions_section(self, state: str, release_pr_url: str = "") -> str:
+        """
+        Generate content for the ACTIONS section showing valid actions.
+
+        Args:
+            state: Current release state
+            release_pr_url: Release PR URL (for snapshot-active state)
+
+        Returns:
+            Formatted actions section content
+        """
+        state_lower = state.lower().replace("_", "-")
+
+        if state_lower == "planned":
+            return "**Valid actions:** `/create-snapshot` to begin the release process"
+
+        elif state_lower == "snapshot-active":
+            pr_text = f"[Release PR]({release_pr_url})" if release_pr_url else "Release PR"
+            return (
+                f"**Valid actions:** Merge {pr_text} to create draft release | "
+                "`/discard-snapshot <reason>` to discard"
+            )
+
+        elif state_lower == "draft-ready":
+            return (
+                "**Valid actions:** Publish the draft release in GitHub Releases | "
+                "`/delete-draft <reason>` to delete"
+            )
+
+        return ""
 
     def generate_config_section(
         self,
         release_plan: Dict[str, Any],
-        api_versions: Dict[str, str]
+        api_versions: Dict[str, str],
+        commonalities_release: str = "",
+        icm_release: str = ""
     ) -> str:
         """
         Generate content for the CONFIG section.
 
         Displays release configuration including:
-        - Release tag and type
-        - Meta-release (if applicable)
-        - API versions table
+        - APIs table with target and calculated versions
+        - Dependencies (Commonalities, ICM)
 
         Args:
             release_plan: Parsed release-plan.yaml content
             api_versions: Dict mapping API name to calculated version
+            commonalities_release: Required Commonalities version
+            icm_release: Required ICM version
 
         Returns:
             Formatted config section content
         """
-        repo = release_plan.get("repository", {})
-
-        lines = [
-            f"**Release Tag**: `{repo.get('target_release_tag', 'unknown')}`",
-            f"**Release Type**: {repo.get('target_release_type', 'unknown')}",
-        ]
-
-        meta_release = repo.get("meta_release")
-        if meta_release:
-            lines.append(f"**Meta-Release**: {meta_release}")
+        lines = []
 
         # Add APIs table
         apis = release_plan.get("apis", [])
         if apis:
-            lines.append("")
-            lines.append("**APIs**:")
-            lines.append("| API | Target Version | Calculated Version |")
-            lines.append("|-----|----------------|-------------------|")
+            lines.append("| API | Target | Calculated |")
+            lines.append("|-----|--------|------------|")
 
             for api in apis:
                 name = api.get("api_name", "unknown")
                 target = api.get("target_api_version", "—")
                 calculated = api_versions.get(name, "—")
                 lines.append(f"| {name} | {target} | `{calculated}` |")
+
+        # Add dependencies
+        deps = []
+        if commonalities_release:
+            deps.append(f"Commonalities {commonalities_release}")
+        if icm_release:
+            deps.append(f"ICM {icm_release}")
+
+        if deps:
+            lines.append("")
+            lines.append(f"**Dependencies:** {', '.join(deps)}")
+        elif not apis:
+            lines.append("_No APIs or dependencies configured_")
 
         return "\n".join(lines)
 
@@ -325,6 +398,7 @@ class IssueManager:
         Generate a complete issue body template for a new Release Issue.
 
         This creates the initial structure with all reserved sections.
+        The HISTORY section has been deferred to backlog (not MVP).
 
         Args:
             release_tag: Release tag (e.g., "r4.1")
@@ -336,11 +410,12 @@ class IssueManager:
         """
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        meta_line = f" | **Meta-Release**: {meta_release}" if meta_release else ""
+        meta_line = f" — {meta_release}" if meta_release else ""
 
-        return f"""## Release: {release_tag}
+        return f"""## Release: {release_tag} ({release_type}){meta_line}
 
-**Type**: {release_type}{meta_line}
+<!-- release-automation:workflow-owned -->
+<!-- release-automation:release-tag:{release_tag} -->
 
 ## Release Highlights
 
@@ -349,20 +424,16 @@ _Add release highlights here before creating snapshot._
 ---
 <!-- AUTOMATION MANAGED SECTION - DO NOT EDIT BELOW THIS LINE -->
 
-## Current State
+## Release Status
 <!-- BEGIN:STATE -->
-**State**: PLANNED
-**Last Updated**: {timestamp}
+**State:** `planned` | **Last Updated:** {timestamp}
 <!-- END:STATE -->
 
-## Snapshot History
-<!-- BEGIN:HISTORY -->
-| Snapshot | Status | Created | Discarded | Reason | Review Branch |
-|----------|--------|---------|-----------|--------|---------------|
-<!-- END:HISTORY -->
-
-## Configuration
 <!-- BEGIN:CONFIG -->
-_Configuration will be shown after first /create-snapshot_
+_Configuration from release-plan.yaml will be shown here._
 <!-- END:CONFIG -->
+
+<!-- BEGIN:ACTIONS -->
+**Valid actions:** `/create-snapshot` to begin the release process
+<!-- END:ACTIONS -->
 """

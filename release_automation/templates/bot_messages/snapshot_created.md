@@ -1,38 +1,24 @@
-## Snapshot Created
+### ✅ Snapshot created: `{{snapshot_id}}`
 
-**Release:** `{{release_tag}}`{{#meta_release}} ({{meta_release}}){{/meta_release}}
-**Snapshot ID:** `{{snapshot_id}}`
-**State:** `{{state}}`
+**State:** `snapshot-active`{{#release_pr_url}} | **Release PR:** {{release_pr_url}}{{/release_pr_url}}{{#src_commit_sha}} | **Base commit:** `{{src_commit_sha}}`{{/src_commit_sha}}
 
-### Created Branches
+<details>
+<summary>Release configuration</summary>
 
-| Branch | Purpose |
-|--------|---------|
-| `{{snapshot_branch}}` | Contains transformed API definitions |
-| `{{release_review_branch}}` | For review changes before merge |
-
-### Release PR
-
-{{#release_pr_url}}
-**PR:** {{release_pr_url}}
-
-Review the Release PR and merge when ready to create a draft release.
-{{/release_pr_url}}
-{{^release_pr_url}}
-*Release PR creation pending...*
-{{/release_pr_url}}
-
-### API Versions
-
+**APIs:**
+| API | Version |
+|-----|---------|
 {{#apis}}
-- **{{api_name}}**: `{{api_version}}`
+| {{api_name}} | `{{api_version}}` |
 {{/apis}}
 
----
+{{#commonalities_release}}**Dependencies:** Commonalities {{commonalities_release}}{{#identity_consent_management_release}}, ICM {{identity_consent_management_release}}{{/identity_consent_management_release}}{{/commonalities_release}}
 
-**Next steps:**
-1. Review the Release PR
-2. Merge to create a draft release
-3. Publish the draft release when ready
+**Branches:**
+- Snapshot: `{{snapshot_branch}}`
+- Review: `{{release_review_branch}}`
+</details>
 
-Use `/discard-snapshot` to discard this snapshot and start over.
+**Valid actions:**
+- Review and merge {{#release_pr_url}}[Release PR]({{release_pr_url}}){{/release_pr_url}}{{^release_pr_url}}Release PR{{/release_pr_url}} to create draft release
+- `/discard-snapshot <reason>` to discard and create a new snapshot from updated `main`

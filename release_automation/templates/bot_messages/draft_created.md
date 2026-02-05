@@ -1,26 +1,20 @@
-## Draft Release Created
+### 📦 Draft release created: `{{release_tag}}`
 
-**Release:** `{{release_tag}}`{{#meta_release}} ({{meta_release}}){{/meta_release}}
-**State:** `draft-ready`
+**State:** `draft-ready`{{#draft_release_url}} | **Draft:** {{draft_release_url}}{{/draft_release_url}}{{#src_commit_sha}} | **Base commit:** `{{src_commit_sha}}`{{/src_commit_sha}}
 
-### Draft Release
+<details>
+<summary>Release configuration</summary>
 
-{{#draft_release_url}}
-**URL:** {{draft_release_url}}
-{{/draft_release_url}}
-
-The Release PR has been merged and a draft release has been created.
-
-### API Versions
-
+**APIs:**
+| API | Version |
+|-----|---------|
 {{#apis}}
-- **{{api_name}}**: `{{api_version}}`
+| {{api_name}} | `{{api_version}}` |
 {{/apis}}
 
----
+{{#commonalities_release}}**Dependencies:** Commonalities {{commonalities_release}}{{#identity_consent_management_release}}, ICM {{identity_consent_management_release}}{{/identity_consent_management_release}}{{/commonalities_release}}
+</details>
 
-**Next steps:**
-1. Review the draft release notes
-2. Publish the release when ready
-
-Use `/delete-draft` to delete the draft and return to `planned` state.
+**Valid actions:**
+- Publish the draft release in GitHub Releases
+- `/delete-draft <reason>` to delete the draft and return to `planned`

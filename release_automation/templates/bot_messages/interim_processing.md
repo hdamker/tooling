@@ -1,9 +1,8 @@
-## Processing Command
+### ⏳ Processing: `/{{command}}`
 
-**Command:** `{{command}}`
-**Requested by:** @{{user}}
+**Requested by:** @{{user}}{{#state}} | **Current state:** `{{state}}`{{/state}}
 
 Processing your request...
 
 ---
-*This message will be updated with results.*
+*This comment will be updated with results.*
