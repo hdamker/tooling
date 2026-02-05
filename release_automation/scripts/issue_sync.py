@@ -455,3 +455,84 @@ class IssueSyncManager:
             Label name (e.g., "release-state:planned")
         """
         return f"{self.STATE_LABEL_PREFIX}{state.value}"
+
+    def close_release_issue(
+        self,
+        issue_number: int,
+        release_tag: str,
+        release_url: str,
+        reference_tag: str,
+        sync_pr_url: str = ""
+    ) -> bool:
+        """
+        Update and close Release Issue after publication.
+
+        Steps:
+        1. Update STATE section with publication info
+        2. Update ACTIONS section (no actions available)
+        3. Change label to release-state:published
+        4. Close issue with reason "completed"
+
+        Args:
+            issue_number: Issue number to close
+            release_tag: Release tag (e.g., "r4.1")
+            release_url: URL to the published release
+            reference_tag: Reference tag (e.g., "src/r4.1")
+            sync_pr_url: Optional URL to the post-release sync PR
+
+        Returns:
+            True if successful, False on error
+        """
+        try:
+            # Get current issue
+            issue = self.gh.get_issue(issue_number)
+            current_body = issue.get("body", "")
+
+            # Update STATE section
+            new_state_content = self.issue_manager.generate_published_state_section(
+                release_tag=release_tag,
+                release_url=release_url,
+                reference_tag=reference_tag,
+                sync_pr_url=sync_pr_url or None
+            )
+            updated_body = self.issue_manager.update_section(
+                current_body, "STATE", new_state_content
+            )
+
+            # Update ACTIONS section
+            new_actions_content = self.issue_manager.generate_published_actions_section()
+            updated_body = self.issue_manager.update_section(
+                updated_body, "ACTIONS", new_actions_content
+            )
+
+            # Update issue body if changed
+            if updated_body != current_body:
+                self.gh.update_issue(issue_number, body=updated_body)
+
+            # Update labels: remove old state labels, add published
+            current_labels = [
+                label.get("name", "") if isinstance(label, dict) else label
+                for label in issue.get("labels", [])
+            ]
+            old_state_labels = [
+                l for l in current_labels
+                if l.startswith(self.STATE_LABEL_PREFIX)
+            ]
+            if old_state_labels:
+                self.gh.remove_labels(issue_number, old_state_labels)
+
+            new_state_label = f"{self.STATE_LABEL_PREFIX}published"
+            self.gh.add_labels(issue_number, [new_state_label])
+
+            # Close the issue
+            self.gh.close_issue(issue_number, state_reason="completed")
+
+            return True
+
+        except Exception as e:
+            # Log error but don't raise - issue closure is non-critical
+            import logging
+            logging.getLogger(__name__).error(
+                f"Failed to close release issue #{issue_number}: {e}"
+            )
+            return False

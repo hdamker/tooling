@@ -505,3 +505,59 @@ Content with <!-- inner comment -->
         content = manager.get_section_content(body, "STATE")
         assert content is not None
         assert "inner comment" in content
+
+
+class TestIssueManagerPublishedSections:
+    """Tests for published state section generators (WP42)."""
+
+    def test_generate_published_state_section_basic(self):
+        """Test generating published state section."""
+        manager = IssueManager()
+
+        content = manager.generate_published_state_section(
+            release_tag="r4.1",
+            release_url="https://github.com/test/releases/tag/r4.1",
+            reference_tag="src/r4.1"
+        )
+
+        assert "**State:** `published`" in content
+        assert "**Release:** [r4.1](https://github.com/test/releases/tag/r4.1)" in content
+        assert "**Reference tag:** `src/r4.1`" in content
+        # No sync PR line when not provided
+        assert "Sync PR" not in content
+
+    def test_generate_published_state_section_with_sync_pr(self):
+        """Test published state with sync PR URL."""
+        manager = IssueManager()
+
+        content = manager.generate_published_state_section(
+            release_tag="r4.1",
+            release_url="https://github.com/test/releases/tag/r4.1",
+            reference_tag="src/r4.1",
+            sync_pr_url="https://github.com/test/pull/123"
+        )
+
+        assert "**Sync PR:** https://github.com/test/pull/123" in content
+
+    def test_generate_published_state_section_has_timestamp(self):
+        """Test that published state includes timestamp."""
+        manager = IssueManager()
+
+        content = manager.generate_published_state_section(
+            release_tag="r4.1",
+            release_url="https://github.com/test/releases/tag/r4.1",
+            reference_tag="src/r4.1"
+        )
+
+        # Should contain a timestamp in ISO format
+        assert "**Last Updated:**" in content
+        assert "202" in content  # Year starts with 202x
+
+    def test_generate_published_actions_section(self):
+        """Test generating published actions section."""
+        manager = IssueManager()
+
+        content = manager.generate_published_actions_section()
+
+        assert "No further actions available" in content
+        assert "release is published" in content

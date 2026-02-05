@@ -26,6 +26,12 @@ def mock_github_client():
     client.get_file_content.return_value = None
     client.update_file.return_value = {"commit": {"sha": "abc123"}}
     client.update_release.return_value = {"html_url": "https://github.com/test/releases/1"}
+    # WP39: Reference tag methods
+    client.tag_exists.return_value = False
+    client.create_tag.return_value = {"ref": "refs/tags/src/r4.1"}
+    # WP41: Branch cleanup methods
+    client.delete_branch.return_value = True
+    client.rename_branch.return_value = True
     return client
 
 
@@ -293,3 +299,124 @@ class TestPublishResult:
         assert result.error_message == "Something went wrong"
         assert result.release_url is None
         assert result.release_id is None
+
+
+class TestCreateReferenceTag:
+    """Tests for create_reference_tag method."""
+
+    def test_create_reference_tag_success(self, publisher, mock_github_client):
+        """Successfully creates src/rX.Y tag."""
+        mock_github_client.tag_exists.return_value = False
+        mock_github_client.create_tag.return_value = {"ref": "refs/tags/src/r4.1"}
+
+        result = publisher.create_reference_tag("r4.1", "abc123def456")
+
+        assert result == "src/r4.1"
+        mock_github_client.tag_exists.assert_called_once_with("src/r4.1")
+        mock_github_client.create_tag.assert_called_once_with("src/r4.1", "abc123def456")
+
+    def test_create_reference_tag_already_exists(self, publisher, mock_github_client):
+        """Tag already exists - returns tag name without error."""
+        mock_github_client.tag_exists.return_value = True
+
+        result = publisher.create_reference_tag("r4.1", "abc123def456")
+
+        assert result == "src/r4.1"
+        mock_github_client.tag_exists.assert_called_once_with("src/r4.1")
+        mock_github_client.create_tag.assert_not_called()
+
+    def test_create_reference_tag_race_condition(self, publisher, mock_github_client):
+        """Tag created between check and create - handles gracefully."""
+        mock_github_client.tag_exists.return_value = False
+        mock_github_client.create_tag.side_effect = GitHubClientError(
+            "422: Reference already exists"
+        )
+
+        result = publisher.create_reference_tag("r4.1", "abc123def456")
+
+        assert result == "src/r4.1"
+
+    def test_create_reference_tag_api_error(self, publisher, mock_github_client):
+        """API error - returns None."""
+        mock_github_client.tag_exists.return_value = False
+        mock_github_client.create_tag.side_effect = GitHubClientError(
+            "500: Internal server error"
+        )
+
+        result = publisher.create_reference_tag("r4.1", "abc123def456")
+
+        assert result is None
+
+
+class TestCleanupBranches:
+    """Tests for cleanup_branches method."""
+
+    def test_cleanup_branches_success(self, publisher, mock_github_client):
+        """Both operations succeed."""
+        mock_github_client.delete_branch.return_value = True
+        mock_github_client.rename_branch.return_value = True
+
+        result = publisher.cleanup_branches(
+            "release-snapshot/r4.1-abc1234",
+            "release-review/r4.1-abc1234"
+        )
+
+        assert result["snapshot_deleted"] == "deleted"
+        assert result["review_renamed"] == "renamed"
+        mock_github_client.delete_branch.assert_called_once_with("release-snapshot/r4.1-abc1234")
+        mock_github_client.rename_branch.assert_called_once_with(
+            "release-review/r4.1-abc1234",
+            "release-review/r4.1-abc1234-published"
+        )
+
+    def test_cleanup_snapshot_already_deleted(self, publisher, mock_github_client):
+        """Snapshot branch already deleted - reports not_found."""
+        mock_github_client.delete_branch.return_value = False
+        mock_github_client.rename_branch.return_value = True
+
+        result = publisher.cleanup_branches(
+            "release-snapshot/r4.1-abc1234",
+            "release-review/r4.1-abc1234"
+        )
+
+        assert result["snapshot_deleted"] == "not_found"
+        assert result["review_renamed"] == "renamed"
+
+    def test_cleanup_review_already_renamed(self, publisher, mock_github_client):
+        """Review branch already renamed - reports not_found."""
+        mock_github_client.delete_branch.return_value = True
+        mock_github_client.rename_branch.return_value = False
+
+        result = publisher.cleanup_branches(
+            "release-snapshot/r4.1-abc1234",
+            "release-review/r4.1-abc1234"
+        )
+
+        assert result["snapshot_deleted"] == "deleted"
+        assert result["review_renamed"] == "not_found"
+
+    def test_cleanup_partial_failure(self, publisher, mock_github_client):
+        """One operation fails - continues with other."""
+        mock_github_client.delete_branch.side_effect = GitHubClientError("API error")
+        mock_github_client.rename_branch.return_value = True
+
+        result = publisher.cleanup_branches(
+            "release-snapshot/r4.1-abc1234",
+            "release-review/r4.1-abc1234"
+        )
+
+        assert result["snapshot_deleted"] == "error"
+        assert result["review_renamed"] == "renamed"
+
+    def test_cleanup_both_not_found(self, publisher, mock_github_client):
+        """Both branches not found - idempotent behavior."""
+        mock_github_client.delete_branch.return_value = False
+        mock_github_client.rename_branch.return_value = False
+
+        result = publisher.cleanup_branches(
+            "release-snapshot/r4.1-abc1234",
+            "release-review/r4.1-abc1234"
+        )
+
+        assert result["snapshot_deleted"] == "not_found"
+        assert result["review_renamed"] == "not_found"

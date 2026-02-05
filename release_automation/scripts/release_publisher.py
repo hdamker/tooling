@@ -180,3 +180,88 @@ class ReleasePublisher:
                 success=False,
                 error_message=f"Failed to publish release: {e}"
             )
+
+    def create_reference_tag(
+        self,
+        release_tag: str,
+        src_commit_sha: str
+    ) -> Optional[str]:
+        """Create src/rX.Y reference tag on main at the branch point.
+
+        The reference tag marks the commit on main where the release
+        snapshot was created, providing a stable reference point.
+
+        Args:
+            release_tag: Release tag (e.g., "r4.1")
+            src_commit_sha: SHA of the source commit on main
+
+        Returns:
+            Created tag name (e.g., "src/r4.1") or None on error
+        """
+        tag_name = f"src/{release_tag}"
+
+        # Check if tag already exists
+        if self.gh.tag_exists(tag_name):
+            logger.warning(f"Reference tag {tag_name} already exists")
+            return tag_name
+
+        try:
+            self.gh.create_tag(tag_name, src_commit_sha)
+            logger.info(f"Created reference tag {tag_name} at {src_commit_sha[:8]}")
+            return tag_name
+        except GitHubClientError as e:
+            # Handle race condition where tag was created between check and create
+            error_msg = str(e).lower()
+            if "422" in error_msg or "reference already exists" in error_msg:
+                logger.warning(f"Reference tag {tag_name} already exists (race condition)")
+                return tag_name
+            logger.error(f"Failed to create reference tag {tag_name}: {e}")
+            return None
+
+    def cleanup_branches(
+        self,
+        snapshot_branch: str,
+        release_review_branch: str
+    ) -> Dict[str, str]:
+        """Clean up branches after publication.
+
+        Deletes the snapshot branch and renames the release-review branch
+        to indicate it has been published.
+
+        Args:
+            snapshot_branch: e.g., "release-snapshot/r4.1-abc1234"
+            release_review_branch: e.g., "release-review/r4.1-abc1234"
+
+        Returns:
+            Dict with status for each operation:
+            - "snapshot_deleted": "deleted", "not_found", or "error"
+            - "review_renamed": "renamed", "not_found", or "error"
+        """
+        result: Dict[str, str] = {}
+
+        # Delete snapshot branch
+        try:
+            deleted = self.gh.delete_branch(snapshot_branch)
+            result["snapshot_deleted"] = "deleted" if deleted else "not_found"
+            if deleted:
+                logger.info(f"Deleted branch {snapshot_branch}")
+            else:
+                logger.warning(f"Branch {snapshot_branch} not found (already deleted)")
+        except GitHubClientError as e:
+            logger.error(f"Failed to delete {snapshot_branch}: {e}")
+            result["snapshot_deleted"] = "error"
+
+        # Rename release-review branch to -published
+        new_review_branch = f"{release_review_branch}-published"
+        try:
+            renamed = self.gh.rename_branch(release_review_branch, new_review_branch)
+            result["review_renamed"] = "renamed" if renamed else "not_found"
+            if renamed:
+                logger.info(f"Renamed {release_review_branch} to {new_review_branch}")
+            else:
+                logger.warning(f"Branch {release_review_branch} not found (already renamed)")
+        except GitHubClientError as e:
+            logger.error(f"Failed to rename {release_review_branch}: {e}")
+            result["review_renamed"] = "error"
+
+        return result

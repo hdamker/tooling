@@ -60,11 +60,21 @@ class BotContext:
     is_missing_field: bool = False
     state_snapshot_active: bool = False
     state_draft_ready: bool = False
+    state_published: bool = False
 
     # Display fields
     workflow_run_url: str = ""
     draft_release_url: str = ""
     reason: str = ""
+
+    # Publication fields
+    release_url: str = ""
+    reference_tag: str = ""
+    reference_tag_url: str = ""
+    sync_pr_number: str = ""
+    sync_pr_url: str = ""
+    src_commit_sha_short: str = ""  # First 7 chars of src_commit_sha
+    confirm_tag: str = ""  # Tag from --confirm argument
 
     def derive_flags(self) -> None:
         """Compute boolean flags from string fields."""
@@ -73,6 +83,7 @@ class BotContext:
         self.is_missing_field = self.error_type == "missing_field"
         self.state_snapshot_active = self.state == "snapshot-active"
         self.state_draft_ready = self.state == "draft-ready"
+        self.state_published = self.state == "published"
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -118,8 +129,17 @@ class BotContext:
             "is_missing_field": self.is_missing_field,
             "state_snapshot_active": self.state_snapshot_active,
             "state_draft_ready": self.state_draft_ready,
+            "state_published": self.state_published,
             # Display fields
             "workflow_run_url": self.workflow_run_url,
             "draft_release_url": self.draft_release_url,
             "reason": self.reason,
+            # Publication fields
+            "release_url": self.release_url,
+            "reference_tag": self.reference_tag,
+            "reference_tag_url": self.reference_tag_url,
+            "sync_pr_number": self.sync_pr_number,
+            "sync_pr_url": self.sync_pr_url,
+            "src_commit_sha_short": self.src_commit_sha_short,
+            "confirm_tag": self.confirm_tag,
         }

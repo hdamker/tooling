@@ -36,6 +36,15 @@ class TestBotContext:
         assert ctx.draft_release_url == ""
         assert ctx.reason == ""
 
+        # Publication fields default to empty string
+        assert ctx.release_url == ""
+        assert ctx.reference_tag == ""
+        assert ctx.reference_tag_url == ""
+        assert ctx.sync_pr_number == ""
+        assert ctx.sync_pr_url == ""
+        assert ctx.src_commit_sha_short == ""
+        assert ctx.confirm_tag == ""
+
         # List field defaults to empty list
         assert ctx.apis == []
 
@@ -45,6 +54,7 @@ class TestBotContext:
         assert ctx.is_missing_field is False
         assert ctx.state_snapshot_active is False
         assert ctx.state_draft_ready is False
+        assert ctx.state_published is False
 
     def test_derive_flags_missing_file(self):
         """error_type 'missing_file' sets is_missing_file flag."""
@@ -96,6 +106,16 @@ class TestBotContext:
 
         assert ctx.state_snapshot_active is False
         assert ctx.state_draft_ready is False
+        assert ctx.state_published is False
+
+    def test_derive_flags_published(self):
+        """state 'published' sets state_published flag."""
+        ctx = BotContext(state="published")
+        ctx.derive_flags()
+
+        assert ctx.state_snapshot_active is False
+        assert ctx.state_draft_ready is False
+        assert ctx.state_published is True
 
     def test_derive_flags_empty_error_type(self):
         """Empty error_type sets no error flags."""
@@ -132,8 +152,12 @@ class TestBotContext:
             "commonalities_release", "identity_consent_management_release",
             "error_message", "error_type",
             "is_missing_file", "is_malformed_yaml", "is_missing_field",
-            "state_snapshot_active", "state_draft_ready",
+            "state_snapshot_active", "state_draft_ready", "state_published",
             "workflow_run_url", "draft_release_url", "reason",
+            # Publication fields
+            "release_url", "reference_tag", "reference_tag_url",
+            "sync_pr_number", "sync_pr_url",
+            "src_commit_sha_short", "confirm_tag",
         }
         assert set(d.keys()) == expected_keys
 
@@ -201,8 +225,12 @@ class TestBuildContext:
             "commonalities_release", "identity_consent_management_release",
             "error_message", "error_type",
             "is_missing_file", "is_malformed_yaml", "is_missing_field",
-            "state_snapshot_active", "state_draft_ready",
+            "state_snapshot_active", "state_draft_ready", "state_published",
             "workflow_run_url", "draft_release_url", "reason",
+            # Publication fields
+            "release_url", "reference_tag", "reference_tag_url",
+            "sync_pr_number", "sync_pr_url",
+            "src_commit_sha_short", "confirm_tag",
         }
         assert set(result.keys()) == expected_keys
 

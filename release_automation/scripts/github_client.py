@@ -817,3 +817,131 @@ class GitHubClient:
             return output.strip() if output.strip() else None
         except GitHubClientError:
             return None
+
+    def create_tag(self, tag_name: str, sha: str) -> dict:
+        """Create a lightweight tag at a specific commit.
+
+        Args:
+            tag_name: Name of the tag to create (e.g., "src/r4.1")
+            sha: Full commit SHA to tag
+
+        Returns:
+            API response dict with ref info
+
+        Raises:
+            GitHubClientError: If creation fails (except for already exists)
+        """
+        args = [
+            "api",
+            f"repos/{self.repo}/git/refs",
+            "-X", "POST",
+            "-f", f"ref=refs/tags/{tag_name}",
+            "-f", f"sha={sha}"
+        ]
+        output = self._run_gh(args)
+        return json.loads(output)
+
+    def delete_branch(self, branch_name: str) -> bool:
+        """Delete a branch from the repository.
+
+        Args:
+            branch_name: Branch name to delete (without refs/heads/)
+
+        Returns:
+            True if deleted, False if branch didn't exist
+
+        Raises:
+            GitHubClientError: If deletion fails for other reasons
+        """
+        try:
+            self._run_gh([
+                "api",
+                f"repos/{self.repo}/git/refs/heads/{branch_name}",
+                "-X", "DELETE"
+            ])
+            return True
+        except GitHubClientError as e:
+            error_msg = str(e).lower()
+            if "404" in error_msg or "not found" in error_msg:
+                return False
+            raise
+
+    def rename_branch(self, old_name: str, new_name: str) -> bool:
+        """Rename a branch by creating new at same SHA and deleting old.
+
+        Args:
+            old_name: Current branch name
+            new_name: New branch name
+
+        Returns:
+            True if renamed, False if old branch didn't exist
+
+        Raises:
+            GitHubClientError: If operation fails
+        """
+        # Get SHA of old branch
+        try:
+            sha_output = self._run_gh([
+                "api",
+                f"repos/{self.repo}/branches/{old_name}",
+                "--jq", ".commit.sha"
+            ])
+            sha = sha_output.strip()
+        except GitHubClientError as e:
+            error_msg = str(e).lower()
+            if "404" in error_msg or "not found" in error_msg:
+                return False
+            raise
+
+        # Create new branch at same SHA
+        self._run_gh([
+            "api",
+            f"repos/{self.repo}/git/refs",
+            "-X", "POST",
+            "-f", f"ref=refs/heads/{new_name}",
+            "-f", f"sha={sha}"
+        ])
+
+        # Delete old branch
+        self._run_gh([
+            "api",
+            f"repos/{self.repo}/git/refs/heads/{old_name}",
+            "-X", "DELETE"
+        ])
+
+        return True
+
+    def close_issue(
+        self,
+        issue_number: int,
+        state_reason: str = "completed"
+    ) -> dict:
+        """Close an issue.
+
+        Args:
+            issue_number: Issue number to close
+            state_reason: Reason for closing ("completed" or "not_planned")
+
+        Returns:
+            Updated issue dict
+
+        Raises:
+            GitHubClientError: If close fails
+        """
+        args = [
+            "api",
+            f"repos/{self.repo}/issues/{issue_number}",
+            "-X", "PATCH",
+            "-f", "state=closed",
+            "-f", f"state_reason={state_reason}"
+        ]
+        output = self._run_gh(args)
+        issue = json.loads(output)
+        return {
+            "number": issue["number"],
+            "title": issue["title"],
+            "body": issue.get("body", ""),
+            "labels": issue.get("labels", []),
+            "html_url": issue["html_url"],
+            "state": issue["state"]
+        }

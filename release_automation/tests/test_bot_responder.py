@@ -156,6 +156,10 @@ class TestListTemplates:
             "draft_revoked",
             "command_rejected",
             "issue_reopened",
+            "publish_confirmation",
+            "release_published",
+            "publish_failed",
+            "internal_error",
         ]
         for name in expected:
             assert name in templates, f"Missing template: {name}"
@@ -401,3 +405,106 @@ class TestContextIntegration:
         # WP33: Template shows state and command, not user
         assert "snapshot-active" in result
         assert "create-snapshot" in result
+
+
+class TestPublicationTemplates:
+    """Tests for publication-related bot message templates (WP43)."""
+
+    def test_publish_confirmation_template(self, bot_responder):
+        """publish_confirmation template renders with draft details."""
+        from release_automation.scripts.context_builder import build_context
+
+        context = build_context(
+            release_tag="r4.1",
+            state="draft-ready",
+            draft_release_url="https://github.com/org/repo/releases/tag/untagged-abc123",
+            src_commit_sha_short="abc1234",
+            apis=[
+                {"api_name": "quality-on-demand", "api_version": "1.0.0"},
+                {"api_name": "qos-profiles", "api_version": "0.11.0-rc.1"},
+            ],
+            commonalities_release="0.5.0",
+            identity_consent_management_release="0.3.0",
+        )
+        result = bot_responder.render("publish_confirmation", context)
+        assert "Confirmation required" in result
+        assert "draft-ready" in result
+        assert "r4.1" in result
+        assert "abc1234" in result
+        assert "/publish-release --confirm r4.1" in result
+        assert "quality-on-demand" in result
+
+    def test_release_published_template(self, bot_responder):
+        """release_published template renders with release details."""
+        from release_automation.scripts.context_builder import build_context
+
+        context = build_context(
+            release_tag="r4.1",
+            state="published",
+            release_url="https://github.com/org/repo/releases/tag/r4.1",
+            reference_tag_url="https://github.com/org/repo/tree/src/r4.1",
+            sync_pr_url="https://github.com/org/repo/pull/99",
+            apis=[
+                {"api_name": "quality-on-demand", "api_version": "1.0.0"},
+            ],
+            commonalities_release="0.5.0",
+        )
+        result = bot_responder.render("release_published", context)
+        assert "Release published" in result
+        assert "published" in result
+        assert "r4.1" in result
+        assert "src/r4.1" in result
+        assert "pull/99" in result
+        assert "human approval" in result
+        assert "closed automatically" in result
+
+    def test_release_published_template_without_sync_pr(self, bot_responder):
+        """release_published template renders without sync PR."""
+        from release_automation.scripts.context_builder import build_context
+
+        context = build_context(
+            release_tag="r4.1",
+            state="published",
+            release_url="https://github.com/org/repo/releases/tag/r4.1",
+            reference_tag_url="https://github.com/org/repo/tree/src/r4.1",
+            apis=[],
+        )
+        result = bot_responder.render("release_published", context)
+        assert "Release published" in result
+        assert "human approval" not in result  # sync_pr_url section not shown
+
+    def test_publish_failed_template(self, bot_responder):
+        """publish_failed template renders with error message."""
+        from release_automation.scripts.context_builder import build_context
+
+        context = build_context(
+            release_tag="r4.1",
+            state="draft-ready",
+            error_message="Failed to publish release: GitHub API returned 500",
+            workflow_run_url="https://github.com/org/repo/actions/runs/12345",
+        )
+        result = bot_responder.render("publish_failed", context)
+        assert "Publication failed" in result
+        assert "draft-ready" in result
+        assert "unchanged" in result
+        assert "GitHub API returned 500" in result
+        assert "/publish-release --confirm r4.1" in result
+        assert "workflow logs" in result
+        assert "/delete-draft" in result
+
+    def test_internal_error_template(self, bot_responder):
+        """internal_error template renders with debug info."""
+        from release_automation.scripts.context_builder import build_context
+
+        context = build_context(
+            command="/publish-release",
+            state="draft-ready",
+            workflow_run_url="https://github.com/org/repo/actions/runs/12345",
+        )
+        result = bot_responder.render("internal_error", context)
+        assert "Internal error" in result
+        assert "/publish-release" in result
+        assert "draft-ready" in result
+        assert "workflow bug" in result
+        assert "View logs" in result
+        assert "actions/runs/12345" in result

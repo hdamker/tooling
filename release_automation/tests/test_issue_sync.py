@@ -578,3 +578,142 @@ class TestSyncReleaseIssueWithLabels:
 
         # Labels should have been ensured
         assert gh.create_label.call_count == 6
+
+
+class TestCloseReleaseIssue:
+    """Tests for close_release_issue method (WP42)."""
+
+    def test_close_release_issue_success(self):
+        """Test successful issue closure flow."""
+        gh = MagicMock()
+        state_manager = MagicMock()
+        issue_manager = MagicMock()
+        bot_responder = MagicMock()
+
+        # Setup issue
+        gh.get_issue.return_value = {
+            "number": 42,
+            "body": "<!-- BEGIN:STATE -->\nold\n<!-- END:STATE -->\n<!-- BEGIN:ACTIONS -->\nold\n<!-- END:ACTIONS -->",
+            "labels": [{"name": "release-state:draft-ready"}]
+        }
+
+        # Setup issue_manager section generators
+        issue_manager.generate_published_state_section.return_value = "published state"
+        issue_manager.generate_published_actions_section.return_value = "no actions"
+        issue_manager.update_section.side_effect = lambda body, section, content: body.replace(
+            f"<!-- BEGIN:{section} -->\nold\n<!-- END:{section} -->",
+            f"<!-- BEGIN:{section} -->\n{content}\n<!-- END:{section} -->"
+        )
+
+        manager = IssueSyncManager(gh, state_manager, issue_manager, bot_responder)
+
+        result = manager.close_release_issue(
+            issue_number=42,
+            release_tag="r4.1",
+            release_url="https://github.com/test/releases/tag/r4.1",
+            reference_tag="src/r4.1",
+            sync_pr_url="https://github.com/test/pull/123"
+        )
+
+        assert result is True
+
+        # Verify STATE section was updated
+        issue_manager.generate_published_state_section.assert_called_once_with(
+            release_tag="r4.1",
+            release_url="https://github.com/test/releases/tag/r4.1",
+            reference_tag="src/r4.1",
+            sync_pr_url="https://github.com/test/pull/123"
+        )
+
+        # Verify ACTIONS section was updated
+        issue_manager.generate_published_actions_section.assert_called_once()
+
+        # Verify labels were updated
+        gh.remove_labels.assert_called_once_with(42, ["release-state:draft-ready"])
+        gh.add_labels.assert_called_once_with(42, ["release-state:published"])
+
+        # Verify issue was closed
+        gh.close_issue.assert_called_once_with(42, state_reason="completed")
+
+    def test_close_release_issue_without_sync_pr(self):
+        """Test closure without sync PR URL."""
+        gh = MagicMock()
+        state_manager = MagicMock()
+        issue_manager = MagicMock()
+        bot_responder = MagicMock()
+
+        gh.get_issue.return_value = {
+            "number": 42,
+            "body": "body content",
+            "labels": []
+        }
+        issue_manager.update_section.side_effect = lambda body, section, content: body
+
+        manager = IssueSyncManager(gh, state_manager, issue_manager, bot_responder)
+
+        result = manager.close_release_issue(
+            issue_number=42,
+            release_tag="r4.1",
+            release_url="https://github.com/test/releases/tag/r4.1",
+            reference_tag="src/r4.1"
+        )
+
+        assert result is True
+
+        # sync_pr_url should be None when empty string passed
+        issue_manager.generate_published_state_section.assert_called_once()
+        call_kwargs = issue_manager.generate_published_state_section.call_args
+        assert call_kwargs.kwargs.get("sync_pr_url") is None
+
+    def test_close_release_issue_api_error(self):
+        """Test graceful handling of API errors."""
+        gh = MagicMock()
+        state_manager = MagicMock()
+        issue_manager = MagicMock()
+        bot_responder = MagicMock()
+
+        # Simulate API error
+        gh.get_issue.side_effect = Exception("API error")
+
+        manager = IssueSyncManager(gh, state_manager, issue_manager, bot_responder)
+
+        result = manager.close_release_issue(
+            issue_number=42,
+            release_tag="r4.1",
+            release_url="https://github.com/test/releases/tag/r4.1",
+            reference_tag="src/r4.1"
+        )
+
+        # Should return False on error, not raise
+        assert result is False
+
+    def test_close_release_issue_no_existing_state_labels(self):
+        """Test closure when no state labels exist."""
+        gh = MagicMock()
+        state_manager = MagicMock()
+        issue_manager = MagicMock()
+        bot_responder = MagicMock()
+
+        gh.get_issue.return_value = {
+            "number": 42,
+            "body": "body",
+            "labels": [{"name": "release-issue"}]  # No state label
+        }
+        issue_manager.update_section.side_effect = lambda body, section, content: body
+
+        manager = IssueSyncManager(gh, state_manager, issue_manager, bot_responder)
+
+        result = manager.close_release_issue(
+            issue_number=42,
+            release_tag="r4.1",
+            release_url="https://github.com/test/releases/tag/r4.1",
+            reference_tag="src/r4.1"
+        )
+
+        assert result is True
+
+        # Should not call remove_labels if no state labels
+        gh.remove_labels.assert_not_called()
+
+        # Should still add published label
+        gh.add_labels.assert_called_once_with(42, ["release-state:published"])

@@ -440,3 +440,45 @@ _Configuration from release-plan.yaml will be shown here._
 **Valid actions:** `/create-snapshot` to begin the release process
 <!-- END:ACTIONS -->
 """
+
+    def generate_published_state_section(
+        self,
+        release_tag: str,
+        release_url: str,
+        reference_tag: str,
+        sync_pr_url: Optional[str] = None
+    ) -> str:
+        """
+        Generate content for the STATE section in published state.
+
+        Args:
+            release_tag: Release tag (e.g., "r4.1")
+            release_url: URL to the published release
+            reference_tag: Reference tag (e.g., "src/r4.1")
+            sync_pr_url: Optional URL to the post-release sync PR
+
+        Returns:
+            Formatted state section content
+        """
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        lines = [
+            f"**State:** `published` | **Last Updated:** {timestamp}",
+            "",
+            f"**Release:** [{release_tag}]({release_url})",
+            f"**Reference tag:** `{reference_tag}`",
+        ]
+
+        if sync_pr_url:
+            lines.append(f"**Sync PR:** {sync_pr_url}")
+
+        return "\n".join(lines)
+
+    def generate_published_actions_section(self) -> str:
+        """
+        Generate content for the ACTIONS section in published state.
+
+        Returns:
+            Formatted actions section content (no actions available)
+        """
+        return "**Valid actions:** No further actions available — release is published"
