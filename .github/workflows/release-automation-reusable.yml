@@ -445,6 +445,7 @@ jobs:
 
             // For publish-release with --confirm, validate the tag matches
             const confirmTag = '${{ needs.check-trigger.outputs.confirm_tag }}';
+            const releaseTag = '${{ needs.derive-state.outputs.release_tag }}';
             if (command === 'publish-release' && confirmTag) {
               if (confirmTag !== releaseTag) {
                 core.setOutput('allowed', 'false');
