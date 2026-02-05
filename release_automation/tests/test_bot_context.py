@@ -125,7 +125,8 @@ class TestBotContext:
         expected_keys = {
             "command", "command_args", "user", "trigger_pr_number",
             "release_tag", "state", "release_type", "meta_release",
-            "snapshot_id", "snapshot_branch", "release_review_branch",
+            "snapshot_id", "snapshot_branch", "snapshot_branch_url",
+            "release_review_branch", "release_review_branch_url",
             "src_commit_sha", "release_pr_number", "release_pr_url",
             "apis",
             "commonalities_release", "identity_consent_management_release",
@@ -193,7 +194,8 @@ class TestBuildContext:
         expected_keys = {
             "command", "command_args", "user", "trigger_pr_number",
             "release_tag", "state", "release_type", "meta_release",
-            "snapshot_id", "snapshot_branch", "release_review_branch",
+            "snapshot_id", "snapshot_branch", "snapshot_branch_url",
+            "release_review_branch", "release_review_branch_url",
             "src_commit_sha", "release_pr_number", "release_pr_url",
             "apis",
             "commonalities_release", "identity_consent_management_release",

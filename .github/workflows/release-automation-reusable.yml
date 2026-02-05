@@ -1220,14 +1220,21 @@ jobs:
           if [ "${{ needs.create-snapshot.outputs.success }}" == "true" ]; then
             # Use env var for apis_json to avoid shell quote issues with embedded JSON
             CREATE_APIS_JSON='${{ needs.create-snapshot.outputs.apis_json }}'
+            # Construct branch URLs
+            SB="${{ needs.create-snapshot.outputs.snapshot_branch }}"
+            RRB="${{ needs.create-snapshot.outputs.release_review_branch }}"
+            SB_URL="${{ github.server_url }}/${{ github.repository }}/tree/${SB}"
+            RRB_URL="${{ github.server_url }}/${{ github.repository }}/tree/${RRB}"
             CONTEXT=$(echo "$CONTEXT" | jq \
               --arg sid "${{ needs.create-snapshot.outputs.snapshot_id }}" \
-              --arg sb "${{ needs.create-snapshot.outputs.snapshot_branch }}" \
-              --arg rrb "${{ needs.create-snapshot.outputs.release_review_branch }}" \
+              --arg sb "$SB" \
+              --arg sb_url "$SB_URL" \
+              --arg rrb "$RRB" \
+              --arg rrb_url "$RRB_URL" \
               --arg prn "${{ needs.create-snapshot.outputs.release_pr_number }}" \
               --arg pru "${{ needs.create-snapshot.outputs.release_pr_url }}" \
               --arg apis "$CREATE_APIS_JSON" \
-              '. + {snapshot_id: $sid, snapshot_branch: $sb, release_review_branch: $rrb, release_pr_number: $prn, release_pr_url: $pru, apis_json: $apis}')
+              '. + {snapshot_id: $sid, snapshot_branch: $sb, snapshot_branch_url: $sb_url, release_review_branch: $rrb, release_review_branch_url: $rrb_url, release_pr_number: $prn, release_pr_url: $pru, apis_json: $apis}')
           fi
 
           # Add error message for command failure cases

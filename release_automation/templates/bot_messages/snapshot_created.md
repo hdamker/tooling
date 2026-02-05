@@ -15,8 +15,8 @@
 {{#commonalities_release}}**Dependencies:** Commonalities {{commonalities_release}}{{#identity_consent_management_release}}, ICM {{identity_consent_management_release}}{{/identity_consent_management_release}}{{/commonalities_release}}
 
 **Branches:**
-- Snapshot: `{{snapshot_branch}}`
-- Review: `{{release_review_branch}}`
+- Snapshot: [`{{snapshot_branch}}`]({{snapshot_branch_url}})
+- Review: [`{{release_review_branch}}`]({{release_review_branch_url}})
 </details>
 
 **Valid actions:**

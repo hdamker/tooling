@@ -3,8 +3,7 @@
 **State:** `draft-ready` → `planned`{{#reason}} | **Reason:** {{reason}}{{/reason}}
 
 **Cleanup:**
-- Draft release deleted
-- Snapshot branch deleted
+- Draft release and snapshot branch deleted
 - Review branch `{{release_review_branch}}` preserved for reference
 
 **Valid actions:**

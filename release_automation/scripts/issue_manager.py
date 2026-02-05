@@ -272,7 +272,8 @@ class IssueManager:
         state: str,
         snapshot_id: str = "",
         release_pr_url: str = "",
-        draft_release_url: str = ""
+        draft_release_url: str = "",
+        snapshot_branch_url: str = ""
     ) -> str:
         """
         Generate content for the STATE section.
@@ -282,6 +283,7 @@ class IssueManager:
             snapshot_id: Active snapshot ID (if any)
             release_pr_url: Release PR URL (if any)
             draft_release_url: Draft release URL (if any)
+            snapshot_branch_url: URL to snapshot branch tree view (if any)
 
         Returns:
             Formatted state section content
@@ -294,7 +296,8 @@ class IssueManager:
         # Add active artifact links based on state
         if state_lower == "snapshot-active" and snapshot_id:
             lines.append("")
-            lines.append(f"**Active snapshot:** `{snapshot_id}`")
+            snapshot_link = f"[{snapshot_id}]({snapshot_branch_url})" if snapshot_branch_url else f"`{snapshot_id}`"
+            lines.append(f"**Active snapshot:** {snapshot_link}")
             if release_pr_url:
                 lines.append(f"**Release PR:** {release_pr_url}")
 

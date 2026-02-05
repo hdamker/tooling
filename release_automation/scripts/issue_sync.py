@@ -340,14 +340,18 @@ class IssueSyncManager:
         # Get snapshot info and artifact URLs
         snapshot = self.state_manager.get_current_snapshot(release_tag)
         snapshot_id = snapshot.snapshot_id if snapshot else ""
+        snapshot_branch = snapshot.snapshot_branch if snapshot else ""
         release_pr_url = ""
         draft_release_url = ""
+        snapshot_branch_url = ""
 
         if snapshot and snapshot.release_pr_number:
             # Construct PR URL
-            repo_parts = self.gh.repo.split("/")
-            if len(repo_parts) == 2:
-                release_pr_url = f"https://github.com/{self.gh.repo}/pull/{snapshot.release_pr_number}"
+            release_pr_url = f"https://github.com/{self.gh.repo}/pull/{snapshot.release_pr_number}"
+
+        if snapshot_branch:
+            # Construct snapshot branch tree URL
+            snapshot_branch_url = f"https://github.com/{self.gh.repo}/tree/{snapshot_branch}"
 
         # Get draft release URL if in draft-ready state
         if state == ReleaseState.DRAFT_READY:
@@ -358,7 +362,8 @@ class IssueSyncManager:
             state=state.value,
             snapshot_id=snapshot_id,
             release_pr_url=release_pr_url,
-            draft_release_url=draft_release_url
+            draft_release_url=draft_release_url,
+            snapshot_branch_url=snapshot_branch_url
         )
         current_body = issue.get("body", "")
         updated_body = self.issue_manager.update_section(

@@ -35,7 +35,9 @@ class BotContext:
     # Snapshot fields
     snapshot_id: str = ""
     snapshot_branch: str = ""
+    snapshot_branch_url: str = ""
     release_review_branch: str = ""
+    release_review_branch_url: str = ""
     src_commit_sha: str = ""
     release_pr_number: str = ""
     release_pr_url: str = ""
@@ -96,7 +98,9 @@ class BotContext:
             # Snapshot fields
             "snapshot_id": self.snapshot_id,
             "snapshot_branch": self.snapshot_branch,
+            "snapshot_branch_url": self.snapshot_branch_url,
             "release_review_branch": self.release_review_branch,
+            "release_review_branch_url": self.release_review_branch_url,
             "src_commit_sha": self.src_commit_sha,
             "release_pr_number": self.release_pr_number,
             "release_pr_url": self.release_pr_url,
