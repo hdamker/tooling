@@ -1217,13 +1217,15 @@ jobs:
 
           # Add create-snapshot outputs if that job ran successfully
           if [ "${{ needs.create-snapshot.outputs.success }}" == "true" ]; then
+            # Use env var for apis_json to avoid shell quote issues with embedded JSON
+            CREATE_APIS_JSON='${{ needs.create-snapshot.outputs.apis_json }}'
             CONTEXT=$(echo "$CONTEXT" | jq \
               --arg sid "${{ needs.create-snapshot.outputs.snapshot_id }}" \
               --arg sb "${{ needs.create-snapshot.outputs.snapshot_branch }}" \
               --arg rrb "${{ needs.create-snapshot.outputs.release_review_branch }}" \
               --arg prn "${{ needs.create-snapshot.outputs.release_pr_number }}" \
               --arg pru "${{ needs.create-snapshot.outputs.release_pr_url }}" \
-              --arg apis "${{ needs.create-snapshot.outputs.apis_json }}" \
+              --arg apis "$CREATE_APIS_JSON" \
               '. + {snapshot_id: $sid, snapshot_branch: $sb, release_review_branch: $rrb, release_pr_number: $prn, release_pr_url: $pru, apis_json: $apis}')
           fi
 
