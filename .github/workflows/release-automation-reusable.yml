@@ -210,6 +210,7 @@ jobs:
       snapshot_branch: ${{ steps.state.outputs.snapshot_branch }}
       release_review_branch: ${{ steps.state.outputs.release_review_branch }}
       release_pr_number: ${{ steps.state.outputs.release_pr_number }}
+      release_issue_number: ${{ steps.state.outputs.release_issue_number }}
       src_commit_sha: ${{ steps.state.outputs.src_commit_sha }}
       release_type: ${{ steps.state.outputs.release_type }}
       apis_json: ${{ steps.state.outputs.apis_json }}
