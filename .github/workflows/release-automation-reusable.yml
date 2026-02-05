@@ -491,6 +491,7 @@ jobs:
       release_pr_number: ${{ steps.create.outputs.release_pr_number }}
       release_pr_url: ${{ steps.create.outputs.release_pr_url }}
       error_message: ${{ steps.create.outputs.error_message }}
+      apis_json: ${{ steps.create.outputs.apis_json }}
     steps:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
