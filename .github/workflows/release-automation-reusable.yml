@@ -944,6 +944,38 @@ jobs:
               console.log(`::warning::Could not update release_date: ${error.message}`);
             }
 
+      - name: Checkout tooling for bot comment
+        if: steps.create-draft.outputs.success == 'true' && needs.derive-state.outputs.release_issue_number != ''
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          ref: release-automation-mvp
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+            shared-actions/post-bot-comment
+
+      - name: Post draft_created comment
+        if: steps.create-draft.outputs.success == 'true' && needs.derive-state.outputs.release_issue_number != ''
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ needs.derive-state.outputs.release_issue_number }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
+          template: draft_created
+          context: |
+            {
+              "release_tag": "${{ needs.derive-state.outputs.release_tag }}",
+              "state": "draft-ready",
+              "draft_release_url": "${{ steps.create-draft.outputs.draft_release_url }}",
+              "snapshot_id": "${{ needs.derive-state.outputs.snapshot_id }}",
+              "release_type": "${{ needs.derive-state.outputs.release_type }}",
+              "apis_json": ${{ needs.derive-state.outputs.apis_json || '[]' }},
+              "commonalities_release": "${{ needs.derive-state.outputs.commonalities_release }}",
+              "identity_consent_management_release": "${{ needs.derive-state.outputs.identity_consent_management_release }}"
+            }
+
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 5f: Handle issue close/reopen events
   # ─────────────────────────────────────────────────────────────────────────────

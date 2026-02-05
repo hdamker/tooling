@@ -59,6 +59,9 @@ outputs:
   config_error_type:
     description: 'Type of configuration error: missing_file|malformed_yaml|missing_field (empty if successful)'
     value: ${{ steps.derive.outputs.config_error_type }}
+  release_issue_number:
+    description: 'Release Issue number if found (empty if no workflow-owned issue exists)'
+    value: ${{ steps.derive.outputs.release_issue_number }}
 
 runs:
   using: composite
@@ -126,6 +129,7 @@ runs:
                 f.write("identity_consent_management_release=\n")
                 f.write(f"config_error={error.message}\n")
                 f.write(f"config_error_type={error.error_type}\n")
+                f.write("release_issue_number=\n")
 
             # Log error (but don't fail the action - let workflow decide)
             print(f"::warning::Configuration error: {error.message}")
@@ -140,6 +144,7 @@ runs:
         state = release_info.state
         snapshot_branch = release_info.snapshot_branch
         source = release_info.source or ''
+        release_issue_number = release_info.release_issue_number
 
         # Get snapshot details if available
         snapshot = None
@@ -154,6 +159,8 @@ runs:
             # Clear config_error outputs on success
             f.write("config_error=\n")
             f.write("config_error_type=\n")
+            issue_num = release_issue_number if release_issue_number else ''
+            f.write(f"release_issue_number={issue_num}\n")
 
             if snapshot:
                 import json
@@ -181,6 +188,7 @@ runs:
         # Log result for debugging
         print(f"Release tag: {release_tag} (from {source})")
         print(f"State: {state.value}")
+        print(f"Release Issue: #{release_issue_number}" if release_issue_number else "Release Issue: None")
         if snapshot:
             print(f"  Snapshot ID: {snapshot.snapshot_id}")
             print(f"  Snapshot branch: {snapshot.snapshot_branch}")

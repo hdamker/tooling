@@ -358,12 +358,13 @@ class TestIssueManagerGenerateStateSection:
 
         content = manager.generate_state_section("snapshot_active")
 
-        assert "**State**: SNAPSHOT_ACTIVE" in content
-        assert "**Last Updated**: 2026-01-30T10:00:00Z" in content
+        # WP33: Updated format uses backticks and lowercased state
+        assert "**State:** `snapshot-active`" in content
+        assert "**Last Updated:** 2026-01-30T10:00:00Z" in content
 
 
 class TestIssueManagerGenerateConfigSection:
-    """Tests for generate_config_section method."""
+    """Tests for generate_config_section method (WP33 format)."""
 
     def test_generate_config_with_apis(self):
         """Test generating config section with APIs."""
@@ -388,14 +389,13 @@ class TestIssueManagerGenerateConfigSection:
 
         content = manager.generate_config_section(release_plan, api_versions)
 
-        assert "**Release Tag**: `r4.1`" in content
-        assert "**Release Type**: pre-release-rc" in content
-        assert "**Meta-Release**: Fall26" in content
+        # WP33: Config section shows APIs table
+        assert "| API | Target | Calculated |" in content
         assert "| location-verification | 3.2.0 | `3.2.0-rc.1` |" in content
         assert "| location-retrieval | 0.5.0 | `0.5.0-rc.1` |" in content
 
-    def test_generate_config_without_meta_release(self):
-        """Test generating config section without meta-release."""
+    def test_generate_config_without_apis(self):
+        """Test generating config section without APIs shows placeholder."""
         manager = IssueManager()
 
         release_plan = {
@@ -408,12 +408,12 @@ class TestIssueManagerGenerateConfigSection:
 
         content = manager.generate_config_section(release_plan, {})
 
-        assert "**Release Tag**: `r4.1`" in content
-        assert "Meta-Release" not in content
+        # WP33: Shows placeholder when no APIs or dependencies
+        assert "_No APIs or dependencies configured_" in content
 
 
 class TestIssueManagerGenerateIssueBodyTemplate:
-    """Tests for generate_issue_body_template method."""
+    """Tests for generate_issue_body_template method (WP33 format)."""
 
     def test_generate_complete_template(self):
         """Test generating a complete issue body template."""
@@ -425,24 +425,24 @@ class TestIssueManagerGenerateIssueBodyTemplate:
             meta_release="Fall26"
         )
 
-        # Check header
-        assert "## Release: r4.1" in body
-        assert "**Type**: pre-release-rc" in body
-        assert "**Meta-Release**: Fall26" in body
+        # WP33: Header format changed
+        assert "## Release: r4.1 (pre-release-rc) — Fall26" in body
 
         # Check sections exist
         assert "<!-- BEGIN:STATE -->" in body
         assert "<!-- END:STATE -->" in body
-        assert "<!-- BEGIN:HISTORY -->" in body
-        assert "<!-- END:HISTORY -->" in body
+        # WP33: HISTORY section removed (deferred to backlog)
         assert "<!-- BEGIN:CONFIG -->" in body
         assert "<!-- END:CONFIG -->" in body
+        # WP33: ACTIONS section added
+        assert "<!-- BEGIN:ACTIONS -->" in body
+        assert "<!-- END:ACTIONS -->" in body
 
-        # Check initial state
-        assert "**State**: PLANNED" in body
+        # WP33: State format changed
+        assert "**State:** `planned`" in body
 
-        # Check history table header
-        assert "| Snapshot | Status | Created | Discarded | Reason | Review Branch |" in body
+        # WP33: Actions shown for planned state
+        assert "`/create-snapshot`" in body
 
     def test_generate_template_without_meta_release(self):
         """Test generating template without meta-release."""
@@ -453,9 +453,9 @@ class TestIssueManagerGenerateIssueBodyTemplate:
             release_type="pre-release-alpha"
         )
 
-        assert "## Release: r4.1" in body
-        assert "**Type**: pre-release-alpha" in body
-        assert "Meta-Release" not in body
+        # WP33: Header without meta-release
+        assert "## Release: r4.1 (pre-release-alpha)" in body
+        assert "—" not in body.split("\n")[0]  # No em-dash in header without meta
 
 
 class TestIssueManagerEdgeCases:

@@ -302,7 +302,9 @@ class IssueSyncManager:
 
         Updates:
         - State label (removes old, adds new)
-        - STATE section content
+        - STATE section content (with artifact links)
+        - CONFIG section content (API versions, dependencies)
+        - ACTIONS section content (valid commands)
         - Title if needed
 
         Args:
@@ -311,6 +313,7 @@ class IssueSyncManager:
             release_plan: Current release plan
         """
         issue_number = issue["number"]
+        release_tag = release_plan.get("repository", {}).get("target_release_tag", "")
 
         # Update state label
         current_labels = [
@@ -330,11 +333,65 @@ class IssueSyncManager:
         new_state_label = f"{self.STATE_LABEL_PREFIX}{state.value}"
         self.gh.add_labels(issue_number, [new_state_label])
 
-        # Update STATE section
-        new_state_content = self.issue_manager.generate_state_section(state.value)
+        # Get snapshot info and artifact URLs
+        snapshot = self.state_manager.get_current_snapshot(release_tag)
+        snapshot_id = snapshot.snapshot_id if snapshot else ""
+        release_pr_url = ""
+        draft_release_url = ""
+
+        if snapshot and snapshot.release_pr_number:
+            # Construct PR URL
+            repo_parts = self.gh.repo.split("/")
+            if len(repo_parts) == 2:
+                release_pr_url = f"https://github.com/{self.gh.repo}/pull/{snapshot.release_pr_number}"
+
+        # Get draft release URL if in draft-ready state
+        if state == ReleaseState.DRAFT_READY:
+            draft_release_url = self._get_draft_release_url(release_tag)
+
+        # Update STATE section with artifact links
+        new_state_content = self.issue_manager.generate_state_section(
+            state=state.value,
+            snapshot_id=snapshot_id,
+            release_pr_url=release_pr_url,
+            draft_release_url=draft_release_url
+        )
         current_body = issue.get("body", "")
         updated_body = self.issue_manager.update_section(
             current_body, "STATE", new_state_content
+        )
+
+        # Update CONFIG section with API versions and dependencies
+        api_versions = {}
+        commonalities_release = ""
+        icm_release = ""
+        if snapshot:
+            # Extract calculated versions from snapshot APIs
+            for api in snapshot.apis:
+                api_name = api.get("api_name", "")
+                api_version = api.get("api_version", "")
+                if api_name and api_version:
+                    api_versions[api_name] = api_version
+            commonalities_release = snapshot.commonalities_release
+            icm_release = snapshot.identity_consent_management_release
+
+        new_config_content = self.issue_manager.generate_config_section(
+            release_plan=release_plan,
+            api_versions=api_versions,
+            commonalities_release=commonalities_release,
+            icm_release=icm_release
+        )
+        updated_body = self.issue_manager.update_section(
+            updated_body, "CONFIG", new_config_content
+        )
+
+        # Update ACTIONS section with valid commands
+        new_actions_content = self.issue_manager.generate_actions_section(
+            state=state.value,
+            release_pr_url=release_pr_url
+        )
+        updated_body = self.issue_manager.update_section(
+            updated_body, "ACTIONS", new_actions_content
         )
 
         # Check if title needs updating
@@ -353,6 +410,25 @@ class IssueSyncManager:
             title=new_title,
             body=updated_body if updated_body != current_body else None
         )
+
+    def _get_draft_release_url(self, release_tag: str) -> str:
+        """
+        Get the URL of the draft release for a given tag.
+
+        Args:
+            release_tag: Release tag to search for
+
+        Returns:
+            Draft release URL if found, empty string otherwise
+        """
+        try:
+            releases = self.gh.get_releases(include_drafts=True)
+            for release in releases:
+                if release.draft and release.tag_name == release_tag:
+                    return release.html_url
+        except Exception:
+            pass
+        return ""
 
     def get_state_label(self, state: ReleaseState) -> str:
         """

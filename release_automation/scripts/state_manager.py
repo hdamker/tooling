@@ -15,6 +15,11 @@ import yaml
 from .github_client import GitHubClient
 
 
+# Constants for release issue identification (duplicated from issue_sync to avoid circular imports)
+WORKFLOW_MARKER = "<!-- release-automation:workflow-owned -->"
+RELEASE_ISSUE_LABEL = "release-issue"
+
+
 class ReleaseState(Enum):
     """
     Possible states for a CAMARA release.
@@ -101,6 +106,7 @@ class ReleaseInfoResult:
     snapshot_branch: Optional[str] = None
     source: Optional[str] = None  # 'release-plan.yaml' | 'release-metadata.yaml' | 'tag'
     config_error: Optional[ConfigurationError] = None
+    release_issue_number: Optional[int] = None  # GitHub issue number if found
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -117,6 +123,7 @@ class ReleaseInfoResult:
                 "source": self.source,
                 "config_error": None,
                 "config_error_type": None,
+                "release_issue_number": self.release_issue_number,
             }
         else:
             return {
@@ -126,6 +133,7 @@ class ReleaseInfoResult:
                 "source": None,
                 "config_error": self.config_error.message if self.config_error else "Unknown error",
                 "config_error_type": self.config_error.error_type if self.config_error else "unknown",
+                "release_issue_number": None,
             }
 
 
@@ -290,6 +298,39 @@ class ReleaseStateManager:
             return [current]
         return []
 
+    def find_release_issue(self, release_tag: str) -> Optional[int]:
+        """
+        Find the Release Issue number for a given release tag.
+
+        Searches for open issues with the 'release-issue' label that:
+        1. Contain the WORKFLOW_MARKER in the body (workflow-owned)
+        2. Have the release_tag in the title
+
+        Args:
+            release_tag: Release tag to search for (e.g., "r4.1")
+
+        Returns:
+            Issue number if found, None otherwise
+        """
+        issues = self.gh.search_issues(
+            labels=[RELEASE_ISSUE_LABEL],
+            state="open"
+        )
+
+        for issue in issues:
+            body = issue.get("body", "") or ""
+            title = issue.get("title", "") or ""
+
+            # Check for workflow marker
+            if WORKFLOW_MARKER not in body:
+                continue
+
+            # Check for release tag in title
+            if release_tag in title:
+                return issue.get("number")
+
+        return None
+
     def get_current_release_info(self) -> ReleaseInfoResult:
         """
         Get the current release tag and state from repository artifacts.
@@ -329,7 +370,8 @@ class ReleaseStateManager:
                 release_tag=plan_release_tag,
                 state=ReleaseState.PUBLISHED,
                 snapshot_branch=None,
-                source="tag"
+                source="tag",
+                release_issue_number=self.find_release_issue(plan_release_tag)
             )
 
         # Check for any snapshot branches for the planned release
@@ -354,12 +396,14 @@ class ReleaseStateManager:
             else:
                 state = ReleaseState.SNAPSHOT_ACTIVE
 
+            effective_tag = metadata_release_tag or plan_release_tag
             return ReleaseInfoResult(
                 success=True,
-                release_tag=metadata_release_tag or plan_release_tag,
+                release_tag=effective_tag,
                 state=state,
                 snapshot_branch=snapshot_branch,
-                source="release-metadata.yaml"
+                source="release-metadata.yaml",
+                release_issue_number=self.find_release_issue(effective_tag)
             )
 
         # No snapshot - use release-plan.yaml state
@@ -374,7 +418,8 @@ class ReleaseStateManager:
             release_tag=plan_release_tag,
             state=state,
             snapshot_branch=None,
-            source="release-plan.yaml"
+            source="release-plan.yaml",
+            release_issue_number=self.find_release_issue(plan_release_tag)
         )
 
     def _read_release_plan_with_validation(

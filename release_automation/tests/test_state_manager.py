@@ -29,6 +29,7 @@ def mock_github_client():
     client.get_file_content.return_value = None
     client.get_branch_creation_time.return_value = "2026-01-29T12:00:00Z"
     client.find_pr_for_branch.return_value = None
+    client.search_issues.return_value = []  # No release issues by default
     return client
 
 
@@ -461,6 +462,7 @@ repository:
 """
         mock_github_client.list_branches.return_value = []
         mock_github_client.tag_exists.return_value = False
+        mock_github_client.search_issues.return_value = []
 
         result = state_manager.get_current_release_info()
         result_dict = result.to_dict()
@@ -469,3 +471,137 @@ repository:
         assert result_dict["state"] == ReleaseState.PLANNED
         assert result_dict["config_error"] is None
         assert result_dict["config_error_type"] is None
+        assert result_dict["release_issue_number"] is None
+
+
+class TestFindReleaseIssue:
+    """Tests for find_release_issue method."""
+
+    def test_returns_none_when_no_issues(self, state_manager, mock_github_client):
+        """Returns None when no release issues exist."""
+        mock_github_client.search_issues.return_value = []
+
+        result = state_manager.find_release_issue("r4.1")
+
+        assert result is None
+        mock_github_client.search_issues.assert_called_once_with(
+            labels=["release-issue"], state="open"
+        )
+
+    def test_returns_issue_number_when_found(self, state_manager, mock_github_client):
+        """Returns issue number when workflow-owned issue exists."""
+        mock_github_client.search_issues.return_value = [
+            {
+                "number": 42,
+                "title": "Release r4.1 - Tracking Issue",
+                "body": "<!-- release-automation:workflow-owned -->\nRelease content",
+            }
+        ]
+
+        result = state_manager.find_release_issue("r4.1")
+
+        assert result == 42
+
+    def test_ignores_issues_without_workflow_marker(
+        self, state_manager, mock_github_client
+    ):
+        """Ignores issues that don't have the workflow marker."""
+        mock_github_client.search_issues.return_value = [
+            {
+                "number": 99,
+                "title": "Release r4.1 - Manual Issue",
+                "body": "This is a manually created issue without marker",
+            }
+        ]
+
+        result = state_manager.find_release_issue("r4.1")
+
+        assert result is None
+
+    def test_ignores_issues_with_different_release_tag(
+        self, state_manager, mock_github_client
+    ):
+        """Ignores issues for different release tags."""
+        mock_github_client.search_issues.return_value = [
+            {
+                "number": 50,
+                "title": "Release r3.0 - Tracking Issue",
+                "body": "<!-- release-automation:workflow-owned -->\nRelease content",
+            }
+        ]
+
+        result = state_manager.find_release_issue("r4.1")
+
+        assert result is None
+
+    def test_handles_none_body(self, state_manager, mock_github_client):
+        """Handles issues with None body gracefully."""
+        mock_github_client.search_issues.return_value = [
+            {
+                "number": 10,
+                "title": "Release r4.1",
+                "body": None,
+            }
+        ]
+
+        result = state_manager.find_release_issue("r4.1")
+
+        assert result is None
+
+    def test_handles_none_title(self, state_manager, mock_github_client):
+        """Handles issues with None title gracefully."""
+        mock_github_client.search_issues.return_value = [
+            {
+                "number": 10,
+                "title": None,
+                "body": "<!-- release-automation:workflow-owned -->\nContent",
+            }
+        ]
+
+        result = state_manager.find_release_issue("r4.1")
+
+        assert result is None
+
+
+class TestGetCurrentReleaseInfoWithIssue:
+    """Tests for get_current_release_info including release_issue_number."""
+
+    def test_includes_issue_number_when_found(self, state_manager, mock_github_client):
+        """Includes release issue number when issue exists."""
+        mock_github_client.get_file_content.return_value = """
+repository:
+  target_release_tag: r4.1
+  target_release_type: initial
+"""
+        mock_github_client.list_branches.return_value = []
+        mock_github_client.tag_exists.return_value = False
+        mock_github_client.search_issues.return_value = [
+            {
+                "number": 123,
+                "title": "Release r4.1 - Tracking Issue",
+                "body": "<!-- release-automation:workflow-owned -->\nRelease content",
+            }
+        ]
+
+        result = state_manager.get_current_release_info()
+
+        assert result.success
+        assert result.release_issue_number == 123
+
+    def test_issue_number_is_none_when_not_found(
+        self, state_manager, mock_github_client
+    ):
+        """release_issue_number is None when no issue exists."""
+        mock_github_client.get_file_content.return_value = """
+repository:
+  target_release_tag: r4.1
+  target_release_type: initial
+"""
+        mock_github_client.list_branches.return_value = []
+        mock_github_client.tag_exists.return_value = False
+        mock_github_client.search_issues.return_value = []
+
+        result = state_manager.get_current_release_info()
+
+        assert result.success
+        assert result.release_issue_number is None
