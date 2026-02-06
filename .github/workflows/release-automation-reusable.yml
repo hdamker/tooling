@@ -431,7 +431,7 @@ jobs:
 
               if (!hasPermission) {
                 core.setOutput('allowed', 'false');
-                core.setOutput('error_message', `You must be a maintainer (write access or higher) to run release commands. Your current permission: ${userPermission}`);
+                core.setOutput('error_message', `You must have write access or higher to run release commands. Your current permission: ${userPermission}`);
                 return;
               }
             } catch (error) {
@@ -440,6 +440,68 @@ jobs:
               core.setOutput('allowed', 'false');
               core.setOutput('error_message', `Failed to verify permissions: ${error.message}`);
               return;
+            }
+
+            // For /publish-release, additionally check CODEOWNERS membership (IMP-029)
+            if (command === 'publish-release') {
+              console.log('Checking CODEOWNERS membership for publish-release...');
+
+              try {
+                // Fetch CODEOWNERS file from main branch
+                const { data: codeownersFile } = await github.rest.repos.getContent({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  path: 'CODEOWNERS',
+                  ref: 'main'
+                });
+
+                const codeownersContent = Buffer.from(codeownersFile.content, 'base64').toString('utf-8');
+                console.log('CODEOWNERS content fetched');
+
+                // Parse * pattern line to get codeowners
+                // Example: "* @hdamker @rartych"
+                const lines = codeownersContent.split('\n');
+                const codeowners = [];
+                for (const line of lines) {
+                  const trimmed = line.trim();
+                  // Skip comments and empty lines
+                  if (trimmed.startsWith('#') || !trimmed) continue;
+                  // Look for * pattern (applies to all files)
+                  if (trimmed.startsWith('* ') || trimmed === '*') {
+                    // Extract usernames (@user1 @user2)
+                    const matches = trimmed.match(/@(\S+)/g);
+                    if (matches) {
+                      for (const match of matches) {
+                        codeowners.push(match.substring(1).toLowerCase()); // Remove @ prefix
+                      }
+                    }
+                    break; // Only use first * pattern found
+                  }
+                }
+
+                console.log(`Codeowners: ${codeowners.join(', ')}`);
+
+                // Check if user is in codeowners list
+                if (codeowners.length > 0 && !codeowners.includes(user.toLowerCase())) {
+                  core.setOutput('allowed', 'false');
+                  core.setOutput('error_message', `Only codeowners can publish releases. @${user} is not listed in CODEOWNERS.`);
+                  return;
+                }
+
+                console.log(`User ${user} is a codeowner`);
+              } catch (error) {
+                // CODEOWNERS file not found or other error
+                console.log(`Could not check CODEOWNERS: ${error.message}`);
+                if (error.status === 404) {
+                  // No CODEOWNERS file - fall back to permission-only check (already passed)
+                  console.log('No CODEOWNERS file found, skipping codeowner check');
+                } else {
+                  // For other errors, deny by default
+                  core.setOutput('allowed', 'false');
+                  core.setOutput('error_message', `Failed to verify codeowner status: ${error.message}`);
+                  return;
+                }
+              }
             }
 
             // For publish-release with --confirm, validate the tag matches
@@ -871,8 +933,6 @@ jobs:
           from release_automation.scripts.github_client import GitHubClient
           from release_automation.scripts.release_publisher import ReleasePublisher
           from release_automation.scripts.post_release_syncer import PostReleaseSyncer
-          from release_automation.scripts.issue_sync import IssueSyncManager
-          from release_automation.scripts.issue_manager import IssueManager
 
           def set_output(name, value):
               with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
@@ -898,8 +958,7 @@ jobs:
           gh = GitHubClient(f'{owner}/{repo}', token)
           publisher = ReleasePublisher(gh)
           syncer = PostReleaseSyncer(gh)
-          issue_manager = IssueManager()
-          issue_sync = IssueSyncManager(gh, issue_manager=issue_manager)  # Needed for close_release_issue()
+          # Note: issue close moved to post-result job (IMP-030)
 
           warnings = []
           release_url = ''
@@ -961,23 +1020,7 @@ jobs:
                   warnings.append(f'Branch cleanup issue: {op}')
               print(f'  {op}: {status}')
 
-          # Step 5: Close release issue (non-critical)
-          if issue_number:
-              print(f'Step 5: Closing release issue #{issue_number}...')
-              try:
-                  issue_sync.close_release_issue(
-                      issue_number=issue_number,
-                      release_tag=release_tag,
-                      release_url=release_url,
-                      reference_tag=reference_tag,
-                      sync_pr_url=sync_pr_url
-                  )
-                  print('Issue closed successfully')
-              except Exception as e:
-                  warnings.append(f'Failed to close issue: {e}')
-                  print(f'::warning::Failed to close issue: {e}')
-          else:
-              print('Step 5: No release issue number, skipping closure')
+          # Note: Issue close is done in post-result job AFTER success message (IMP-030)
 
           # Set outputs
           set_output('success', 'true')
@@ -1559,3 +1602,113 @@ jobs:
           template: ${{ steps.template.outputs.template }}
           context: ${{ steps.context.outputs.context }}
           comment_id: ${{ needs.post-interim.outputs.comment_id }}
+
+      # IMP-030: Close issue AFTER success message is posted (not in publish-release job)
+      - name: Close Release Issue
+        if: |
+          needs.publish-release.outputs.success == 'true' &&
+          needs.derive-state.outputs.release_issue_number != ''
+        env:
+          ISSUE_NUMBER: ${{ needs.derive-state.outputs.release_issue_number }}
+          RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
+          RELEASE_URL: ${{ needs.publish-release.outputs.release_url }}
+          REFERENCE_TAG: ${{ needs.publish-release.outputs.reference_tag }}
+          SYNC_PR_URL: ${{ needs.publish-release.outputs.sync_pr_url }}
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const issueNumber = parseInt(process.env.ISSUE_NUMBER);
+            const releaseTag = process.env.RELEASE_TAG;
+            const releaseUrl = process.env.RELEASE_URL;
+            const referenceTag = process.env.REFERENCE_TAG;
+            const syncPrUrl = process.env.SYNC_PR_URL;
+            const repoUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}`;
+
+            console.log(`Closing release issue #${issueNumber} after success message`);
+
+            try {
+              // Get current issue
+              const { data: issue } = await github.rest.issues.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber
+              });
+
+              let body = issue.body || '';
+
+              // Build STATE section content
+              let stateLines = [];
+              stateLines.push('**State:** `published`');
+              stateLines.push('');
+              stateLines.push(`✅ **Release published:** [${releaseTag}](${releaseUrl})`);
+              stateLines.push(`📌 **Reference tag:** [\`${referenceTag}\`](${repoUrl}/tree/${referenceTag})`);
+              if (syncPrUrl) {
+                stateLines.push(`🔄 **Sync PR:** [View PR](${syncPrUrl})`);
+              }
+              const stateContent = stateLines.join('\n');
+
+              // Replace STATE section
+              const stateStartMarker = '<!-- BEGIN:STATE -->';
+              const stateEndMarker = '<!-- END:STATE -->';
+              const stateStartIdx = body.indexOf(stateStartMarker);
+              const stateEndIdx = body.indexOf(stateEndMarker);
+              if (stateStartIdx !== -1 && stateEndIdx !== -1) {
+                body = body.substring(0, stateStartIdx + stateStartMarker.length) +
+                       '\n' + stateContent + '\n' +
+                       body.substring(stateEndIdx);
+              }
+
+              // Update ACTIONS section (no actions available)
+              const actionsContent = '_No actions available - release is published._';
+              const actionsStartMarker = '<!-- BEGIN:ACTIONS -->';
+              const actionsEndMarker = '<!-- END:ACTIONS -->';
+              const actionsStartIdx = body.indexOf(actionsStartMarker);
+              const actionsEndIdx = body.indexOf(actionsEndMarker);
+              if (actionsStartIdx !== -1 && actionsEndIdx !== -1) {
+                body = body.substring(0, actionsStartIdx + actionsStartMarker.length) +
+                       '\n' + actionsContent + '\n' +
+                       body.substring(actionsEndIdx);
+              }
+
+              // Update issue body
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: body
+              });
+
+              // Update labels - remove old state labels, add published
+              const currentLabels = issue.labels.map(l => l.name);
+              const oldStateLabels = currentLabels.filter(l => l.startsWith('release-state:'));
+              for (const label of oldStateLabels) {
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    name: label
+                  });
+                } catch (e) { /* ignore */ }
+              }
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: ['release-state:published']
+              });
+
+              // Close the issue
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                state: 'closed',
+                state_reason: 'completed'
+              });
+
+              console.log(`Issue #${issueNumber} closed successfully`);
+            } catch (error) {
+              console.log(`::warning::Failed to close issue: ${error.message}`);
+              // Non-fatal - the release was already published
+            }
