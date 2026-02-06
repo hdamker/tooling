@@ -1364,12 +1364,13 @@ jobs:
   # Phase 7: Post final result comment
   # ─────────────────────────────────────────────────────────────────────────────
   post-result:
-    needs: [check-trigger, post-interim, derive-state, validate-command, create-snapshot, discard-snapshot, delete-draft, publish-release]
+    needs: [check-trigger, post-interim, derive-state, validate-command, create-snapshot, discard-snapshot, delete-draft, publish-release, publish-confirmation]
     if: |
       always() &&
       needs.check-trigger.outputs.trigger_type == 'slash_command' &&
       needs.validate-command.outputs.allowed == 'true' &&
-      needs.post-interim.result == 'success'
+      needs.post-interim.result == 'success' &&
+      needs.publish-confirmation.result != 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout tooling
