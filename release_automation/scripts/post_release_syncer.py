@@ -299,7 +299,7 @@ class PostReleaseSyncer:
         Returns:
             Dict with 'number' and 'url', or None on error
         """
-        title = f"chore: post-release sync for {release_tag}"
+        title = f"Release Automation: Post-release sync ({release_tag})"
         body = render_template("sync_pr", {"release_tag": release_tag})
 
         try:

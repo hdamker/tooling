@@ -1313,7 +1313,7 @@ jobs:
   # Phase 6: Update Release Issue state (after command execution)
   # ─────────────────────────────────────────────────────────────────────────────
   update-issue:
-    name: "Phase 6: Update Release Issue"
+    name: "sync-issue"
     needs: [check-trigger, derive-state, create-snapshot, discard-snapshot, delete-draft, handle-pr-merge, handle-issue-event]
     if: |
       always() &&
