@@ -17,7 +17,7 @@
 </details>
 
 {{#sync_pr_url}}
-**Post-release sync:** {{sync_pr_url}} (requires human approval)
+**Post-release sync:** {{sync_pr_url}} (requires Codeowner approval and merge)
 {{/sync_pr_url}}
 
 **Valid actions:** None (release is published).

@@ -287,16 +287,20 @@ class GitHubClient:
         self,
         release_id: int,
         draft: Optional[bool] = None,
+        prerelease: Optional[bool] = None,
         name: Optional[str] = None,
-        body: Optional[str] = None
+        body: Optional[str] = None,
+        make_latest: Optional[str] = None
     ) -> dict:
         """Update a release.
 
         Args:
             release_id: Release ID to update
             draft: Set draft status (False to publish)
+            prerelease: Set prerelease status (re-enforce on publish)
             name: New release name
             body: New release body
+            make_latest: "true", "false", or "legacy" to control latest status
 
         Returns:
             Updated release data
@@ -308,10 +312,14 @@ class GitHubClient:
 
         if draft is not None:
             args.extend(["-f", f"draft={str(draft).lower()}"])
+        if prerelease is not None:
+            args.extend(["-f", f"prerelease={str(prerelease).lower()}"])
         if name is not None:
             args.extend(["-f", f"name={name}"])
         if body is not None:
             args.extend(["-f", f"body={body}"])
+        if make_latest is not None:
+            args.extend(["-f", f"make_latest={make_latest}"])
 
         output = self._run_gh(args)
         return json.loads(output)

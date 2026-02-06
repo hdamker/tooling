@@ -443,8 +443,9 @@ jobs:
             }
 
             // For /publish-release, additionally check CODEOWNERS membership (IMP-029)
-            if (command === 'publish-release') {
-              console.log('Checking CODEOWNERS membership for publish-release...');
+            // Break glass: maintain and admin users bypass CODEOWNERS check
+            if (command === 'publish-release' && userPermission === 'write') {
+              console.log('Checking CODEOWNERS membership for publish-release (write-level user)...');
 
               try {
                 // Fetch CODEOWNERS file from main branch
@@ -484,7 +485,7 @@ jobs:
                 // Check if user is in codeowners list
                 if (codeowners.length > 0 && !codeowners.includes(user.toLowerCase())) {
                   core.setOutput('allowed', 'false');
-                  core.setOutput('error_message', `Only codeowners can publish releases. @${user} is not listed in CODEOWNERS.`);
+                  core.setOutput('error_message', `Only codeowners or admins can publish releases. @${user} is not listed in CODEOWNERS.`);
                   return;
                 }
 
@@ -502,6 +503,9 @@ jobs:
                   return;
                 }
               }
+            } else if (command === 'publish-release') {
+              // Maintain/admin user - bypass CODEOWNERS check (break glass)
+              console.log(`User ${user} has ${userPermission} permission - bypassing CODEOWNERS check`);
             }
 
             // For publish-release with --confirm, validate the tag matches

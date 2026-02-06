@@ -65,7 +65,8 @@ class ReleasePublisher:
             "tag_name": release.tag_name,
             "name": release.name,
             "html_url": release.html_url,
-            "draft": release.draft
+            "draft": release.draft,
+            "prerelease": release.prerelease
         }
 
     def finalize_metadata(
@@ -168,8 +169,17 @@ class ReleasePublisher:
             )
 
         # Step 3: Publish (set draft=false)
+        # Re-enforce prerelease flag and set make_latest appropriately
+        is_prerelease = draft.get("prerelease", False)
+        make_latest = "false" if is_prerelease else "true"
+
         try:
-            updated = self.gh.update_release(release_id, draft=False)
+            updated = self.gh.update_release(
+                release_id,
+                draft=False,
+                prerelease=is_prerelease,  # Re-enforce in case UI changed it
+                make_latest=make_latest
+            )
             return PublishResult(
                 success=True,
                 release_url=updated.get("html_url"),

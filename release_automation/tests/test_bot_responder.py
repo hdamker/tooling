@@ -455,7 +455,7 @@ class TestPublicationTemplates:
         assert "r4.1" in result
         assert "src/r4.1" in result
         assert "pull/99" in result
-        assert "human approval" in result
+        assert "Codeowner approval" in result
         assert "closed automatically" in result
 
     def test_release_published_template_without_sync_pr(self, bot_responder):
@@ -471,7 +471,7 @@ class TestPublicationTemplates:
         )
         result = bot_responder.render("release_published", context)
         assert "Release published" in result
-        assert "human approval" not in result  # sync_pr_url section not shown
+        assert "Codeowner approval" not in result  # sync_pr_url section not shown
 
     def test_publish_failed_template(self, bot_responder):
         """publish_failed template renders with error message."""
