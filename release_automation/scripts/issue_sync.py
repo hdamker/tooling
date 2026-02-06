@@ -66,18 +66,18 @@ class IssueSyncManager:
     def __init__(
         self,
         github_client: GitHubClient,
-        state_manager: ReleaseStateManager,
-        issue_manager: IssueManager,
-        bot_responder: BotResponder
+        state_manager: Optional[ReleaseStateManager] = None,
+        issue_manager: Optional[IssueManager] = None,
+        bot_responder: Optional[BotResponder] = None
     ):
         """
         Initialize the issue sync manager.
 
         Args:
             github_client: GitHubClient for repository operations
-            state_manager: ReleaseStateManager for state derivation
-            issue_manager: IssueManager for issue content management
-            bot_responder: BotResponder for message templates
+            state_manager: ReleaseStateManager for state derivation (optional for close_release_issue)
+            issue_manager: IssueManager for issue content management (optional for close_release_issue)
+            bot_responder: BotResponder for message templates (optional for close_release_issue)
         """
         self.gh = github_client
         self.state_manager = state_manager

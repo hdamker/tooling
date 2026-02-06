@@ -897,7 +897,7 @@ jobs:
           gh = GitHubClient(f'{owner}/{repo}', token)
           publisher = ReleasePublisher(gh)
           syncer = PostReleaseSyncer(gh)
-          issue_sync = IssueSyncManager(gh, None)  # No state manager needed for closure
+          issue_sync = IssueSyncManager(gh)  # Other params optional for close_release_issue()
 
           warnings = []
           release_url = ''
