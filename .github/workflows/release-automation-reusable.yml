@@ -872,6 +872,7 @@ jobs:
           from release_automation.scripts.release_publisher import ReleasePublisher
           from release_automation.scripts.post_release_syncer import PostReleaseSyncer
           from release_automation.scripts.issue_sync import IssueSyncManager
+          from release_automation.scripts.issue_manager import IssueManager
 
           def set_output(name, value):
               with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
@@ -897,7 +898,8 @@ jobs:
           gh = GitHubClient(f'{owner}/{repo}', token)
           publisher = ReleasePublisher(gh)
           syncer = PostReleaseSyncer(gh)
-          issue_sync = IssueSyncManager(gh)  # Other params optional for close_release_issue()
+          issue_manager = IssueManager()
+          issue_sync = IssueSyncManager(gh, issue_manager=issue_manager)  # Needed for close_release_issue()
 
           warnings = []
           release_url = ''
