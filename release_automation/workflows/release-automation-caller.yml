@@ -6,10 +6,10 @@
 # Copy this file as: .github/workflows/release-automation.yml
 #
 # Triggers:
-# - Slash commands: /create-snapshot, /discard-snapshot, /delete-draft, /publish-release, /sync-issue
+# - Slash commands: /create-snapshot, /discard-snapshot, /delete-draft, /publish-release
 # - Issue events: close (with auto-reopen), reopen
 # - PR merge: on release-snapshot branches (creates draft release)
-# - Manual: workflow_dispatch for testing and recovery
+# - Manual: workflow_dispatch triggers sync-issue (reads from release-plan.yaml)
 
 name: Release Automation
 
@@ -28,15 +28,11 @@ on:
     branches:
       - 'release-snapshot/**'
 
-  # Manual trigger for sync-issue only (IMP-022)
+  # Manual trigger for sync-issue only
   # Use this for: initial setup, recovery after manual repo changes, or forced sync
   # All other commands must be issued via slash commands in the Release Issue
+  # Future: will accept branch input (main by default, maintenance branches as option)
   workflow_dispatch:
-    inputs:
-      release_tag:
-        description: 'Optional: target specific release tag (e.g., r4.1)'
-        type: string
-        required: false
 
 permissions:
   contents: write
@@ -66,6 +62,4 @@ jobs:
 
     # For testing: use hdamker fork; production will use camaraproject/tooling
     uses: hdamker/tooling/.github/workflows/release-automation-reusable.yml@release-automation-mvp
-    # No command input needed for workflow_dispatch (IMP-022: sync-issue only)
-    # Other triggers (slash commands, PR merge) derive command from context
     secrets: inherit
