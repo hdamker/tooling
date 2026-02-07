@@ -281,7 +281,7 @@ class IssueSyncManager:
             for label in issue.get("labels", [])
         ]
 
-        expected_state_label = f"{self.STATE_LABEL_PREFIX}{state.value}"
+        expected_state_label = self.get_state_label(state)
 
         # Check if the expected state label is present
         state_labels = [l for l in current_labels if l.startswith(self.STATE_LABEL_PREFIX)]
@@ -334,7 +334,7 @@ class IssueSyncManager:
             self.gh.remove_labels(issue_number, old_state_labels)
 
         # Add new state label
-        new_state_label = f"{self.STATE_LABEL_PREFIX}{state.value}"
+        new_state_label = self.get_state_label(state)
         self.gh.add_labels(issue_number, [new_state_label])
 
         # Get snapshot info and artifact URLs
