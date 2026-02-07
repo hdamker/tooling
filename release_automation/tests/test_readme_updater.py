@@ -160,7 +160,7 @@ class TestTemplateRendering:
         assert "r3.2" in result
         assert "r4.1-rc.1" in result
         assert "Upcoming Release Preview" in result
-        assert "TIP" in result
+        assert "NOTE" in result
 
 
 # --- Content Replacement ---

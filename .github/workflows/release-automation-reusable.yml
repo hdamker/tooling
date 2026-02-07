@@ -893,8 +893,6 @@ jobs:
       success: ${{ steps.publish.outputs.success }}
       release_url: ${{ steps.publish.outputs.release_url }}
       reference_tag: ${{ steps.publish.outputs.reference_tag }}
-      sync_pr_url: ${{ steps.publish.outputs.sync_pr_url }}
-      sync_pr_number: ${{ steps.publish.outputs.sync_pr_number }}
       error_message: ${{ steps.publish.outputs.error_message }}
     steps:
       - name: Checkout tooling
@@ -936,7 +934,6 @@ jobs:
           sys.path.insert(0, '.')
           from release_automation.scripts.github_client import GitHubClient
           from release_automation.scripts.release_publisher import ReleasePublisher
-          from release_automation.scripts.post_release_syncer import PostReleaseSyncer
 
           def set_output(name, value):
               with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
@@ -956,19 +953,15 @@ jobs:
           snapshot_branch = os.environ['SNAPSHOT_BRANCH']
           release_review_branch = os.environ['RELEASE_REVIEW_BRANCH']
           src_commit_sha = os.environ['SRC_COMMIT_SHA']
-          issue_number_str = os.environ.get('RELEASE_ISSUE_NUMBER', '')
-          issue_number = int(issue_number_str) if issue_number_str else None
 
           gh = GitHubClient(f'{owner}/{repo}', token)
           publisher = ReleasePublisher(gh)
-          syncer = PostReleaseSyncer(gh)
           # Note: issue close moved to post-result job (IMP-030)
+          # Note: sync PR creation moved to create-sync-pr job (IMP-026)
 
           warnings = []
           release_url = ''
           reference_tag = ''
-          sync_pr_url = ''
-          sync_pr_number = ''
 
           # Step 1: Publish the release (CRITICAL)
           print('Step 1: Publishing release...')
@@ -978,8 +971,6 @@ jobs:
               set_output('error_message', publish_result.error_message or 'Unknown error')
               set_output('release_url', '')
               set_output('reference_tag', '')
-              set_output('sync_pr_url', '')
-              set_output('sync_pr_number', '')
               print(f'::error::Publication failed: {publish_result.error_message}')
               sys.exit(0)  # Exit cleanly to allow post-result to run
 
@@ -996,28 +987,8 @@ jobs:
               warnings.append('Failed to create reference tag')
               print('::warning::Failed to create reference tag')
 
-          # Step 3: Create sync PR (non-critical)
-          print('Step 3: Creating sync PR...')
-          # Read release metadata for sync PR
-          try:
-              metadata_content = gh.get_file_content('release-metadata.yaml', snapshot_branch)
-              import yaml
-              release_metadata = yaml.safe_load(metadata_content) if metadata_content else {}
-          except Exception as e:
-              release_metadata = {}
-              print(f'::warning::Could not read release metadata: {e}')
-
-          sync_result = syncer.create_sync_pr(release_tag, snapshot_branch, release_metadata)
-          if sync_result.success:
-              sync_pr_url = sync_result.pr_url or ''
-              sync_pr_number = str(sync_result.pr_number or '')
-              print(f'Sync PR created: {sync_pr_url}')
-          else:
-              warnings.append(f'Failed to create sync PR: {sync_result.error_message}')
-              print(f'::warning::Failed to create sync PR: {sync_result.error_message}')
-
-          # Step 4: Cleanup branches (non-critical)
-          print('Step 4: Cleaning up branches...')
+          # Step 3: Cleanup branches (non-critical)
+          print('Step 3: Cleaning up branches...')
           cleanup_result = publisher.cleanup_branches(snapshot_branch, release_review_branch)
           for op, status in cleanup_result.items():
               if status == 'error':
@@ -1030,8 +1001,6 @@ jobs:
           set_output('success', 'true')
           set_output('release_url', release_url)
           set_output('reference_tag', reference_tag)
-          set_output('sync_pr_url', sync_pr_url)
-          set_output('sync_pr_number', sync_pr_number)
           if warnings:
               set_output('error_message', '; '.join(warnings))
           else:
@@ -1039,6 +1008,301 @@ jobs:
 
           print('Publish flow completed successfully')
           PYTHON_SCRIPT
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5f.2: Create post-release sync PR (IMP-026)
+  # ─────────────────────────────────────────────────────────────────────────────
+  create-sync-pr:
+    name: "Create Post-Release Sync PR"
+    needs: [check-trigger, derive-state, validate-command, publish-release]
+    if: |
+      needs.publish-release.outputs.success == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      sync_pr_url: ${{ steps.sync.outputs.sync_pr_url }}
+      sync_pr_number: ${{ steps.sync.outputs.sync_pr_number }}
+      success: ${{ steps.sync.outputs.success }}
+    steps:
+      - name: Checkout API repo (main branch)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          path: api-repo
+          fetch-depth: 1
+
+      - name: Checkout tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          repository: hdamker/tooling
+          ref: release-automation-mvp
+          path: _tooling
+          sparse-checkout: |
+            release_automation
+            shared-actions
+
+      - name: Setup Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pyyaml pystache
+
+      - name: Read release metadata from tag
+        id: metadata
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const tag = process.env.RELEASE_TAG;
+            let content;
+            try {
+              const { data } = await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: 'release-metadata.yaml',
+                ref: tag
+              });
+              content = Buffer.from(data.content, 'base64').toString('utf8');
+            } catch (e) {
+              core.warning(`Could not read release-metadata.yaml from tag ${tag}: ${e.message}`);
+              core.setOutput('metadata_yaml', '');
+              return;
+            }
+            core.setOutput('metadata_yaml', content);
+
+      - name: Determine release state and build data
+        id: release-data
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          METADATA_YAML: ${{ steps.metadata.outputs.metadata_yaml }}
+          RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
+        shell: python
+        run: |
+          import os, sys, json, yaml
+
+          release_tag = os.environ['RELEASE_TAG']
+          metadata_yaml = os.environ.get('METADATA_YAML', '')
+
+          if not metadata_yaml:
+              print('::warning::No release metadata available')
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write('release_state=no_release\n')
+                  f.write('data_json={}\n')
+              sys.exit(0)
+
+          metadata = yaml.safe_load(metadata_yaml)
+          repo_info = metadata.get('repository', {})
+          release_type = repo_info.get('release_type', '')
+          meta_release = repo_info.get('meta_release', '')
+          is_prerelease = release_type in ('pre-release-alpha', 'pre-release-rc')
+
+          # Query existing public releases via gh CLI
+          import subprocess
+          result = subprocess.run(
+              ['gh', 'api', f'repos/{os.environ.get("GITHUB_REPOSITORY", "")}/releases',
+               '--jq', '[.[] | select(.draft == false and .prerelease == false)] | .[0].tag_name // empty'],
+              capture_output=True, text=True
+          )
+          existing_public = result.stdout.strip() if result.returncode == 0 else ''
+
+          # Determine release state
+          if is_prerelease and not existing_public:
+              release_state = 'prerelease_only'
+          elif is_prerelease and existing_public:
+              release_state = 'public_with_prerelease'
+          elif not is_prerelease:
+              release_state = 'public_release'
+          else:
+              release_state = 'no_release'
+
+          # Build API lists from metadata
+          apis = metadata.get('apis', [])
+          current_apis = []
+          for api in apis:
+              current_apis.append({
+                  'file_name': api.get('api_file_name', api.get('api_name', '')),
+                  'version': api.get('api_version', '')
+              })
+
+          # For public_with_prerelease, we need existing public release's API info
+          public_apis_json = '[]'
+          prerelease_apis_json = '[]'
+          latest_public = ''
+          newest_prerelease = ''
+          public_meta_release = ''
+
+          if release_state == 'public_release':
+              latest_public = release_tag
+              public_apis_json = json.dumps(current_apis)
+              public_meta_release = meta_release
+          elif release_state == 'prerelease_only':
+              newest_prerelease = release_tag
+              prerelease_apis_json = json.dumps(current_apis)
+          elif release_state == 'public_with_prerelease':
+              newest_prerelease = release_tag
+              prerelease_apis_json = json.dumps(current_apis)
+              latest_public = existing_public
+              # Read existing public release metadata for its API info
+              result2 = subprocess.run(
+                  ['gh', 'api',
+                   f'repos/{os.environ.get("GITHUB_REPOSITORY", "")}/contents/release-metadata.yaml?ref={existing_public}',
+                   '--jq', '.content'],
+                  capture_output=True, text=True
+              )
+              if result2.returncode == 0 and result2.stdout.strip():
+                  import base64
+                  try:
+                      pub_content = base64.b64decode(result2.stdout.strip()).decode('utf8')
+                      pub_metadata = yaml.safe_load(pub_content)
+                      pub_apis = []
+                      for api in pub_metadata.get('apis', []):
+                          pub_apis.append({
+                              'file_name': api.get('api_file_name', api.get('api_name', '')),
+                              'version': api.get('api_version', '')
+                          })
+                      public_apis_json = json.dumps(pub_apis)
+                      public_meta_release = pub_metadata.get('repository', {}).get('meta_release', '')
+                  except Exception as e:
+                      print(f'::warning::Could not parse public release metadata: {e}')
+
+          prerelease_type = ''
+          if is_prerelease:
+              prerelease_type = 'release candidate' if release_type == 'pre-release-rc' else 'pre-release'
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'release_state={release_state}\n')
+              f.write(f'latest_public={latest_public}\n')
+              f.write(f'newest_prerelease={newest_prerelease}\n')
+              f.write(f'public_apis_json={public_apis_json}\n')
+              f.write(f'prerelease_apis_json={prerelease_apis_json}\n')
+              f.write(f'meta_release={public_meta_release}\n')
+              f.write(f'prerelease_type={prerelease_type}\n')
+
+          print(f'Release state: {release_state}')
+          print(f'Latest public: {latest_public}')
+          print(f'Newest prerelease: {newest_prerelease}')
+
+      - name: Update README Release Information
+        id: readme
+        uses: ./_tooling/shared-actions/update-readme-release-info
+        with:
+          readme_path: api-repo/README.md
+          repo_name: ${{ github.event.repository.name }}
+          release_state: ${{ steps.release-data.outputs.release_state }}
+          latest_public_release: ${{ steps.release-data.outputs.latest_public }}
+          newest_prerelease: ${{ steps.release-data.outputs.newest_prerelease }}
+          public_apis_json: ${{ steps.release-data.outputs.public_apis_json }}
+          prerelease_apis_json: ${{ steps.release-data.outputs.prerelease_apis_json }}
+          meta_release: ${{ steps.release-data.outputs.meta_release }}
+          prerelease_type: ${{ steps.release-data.outputs.prerelease_type }}
+
+      - name: Copy CHANGELOG from release tag
+        id: changelog
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const tag = process.env.RELEASE_TAG;
+
+            // Extract cycle number from tag (r4.1 → 4)
+            const match = tag.match(/^r(\d+)\.\d+/);
+            if (!match) {
+              core.warning(`Cannot extract cycle from tag: ${tag}`);
+              core.setOutput('synced', 'false');
+              return;
+            }
+
+            const cycle = match[1];
+            const changelogPath = `CHANGELOG/CHANGELOG-r${cycle}.md`;
+
+            try {
+              const { data } = await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: changelogPath,
+                ref: tag
+              });
+              const content = Buffer.from(data.content, 'base64').toString('utf8');
+
+              // Write to local api-repo checkout
+              const localDir = path.join('api-repo', 'CHANGELOG');
+              if (!fs.existsSync(localDir)) {
+                fs.mkdirSync(localDir, { recursive: true });
+              }
+              fs.writeFileSync(path.join('api-repo', changelogPath), content);
+              core.setOutput('synced', 'true');
+              core.setOutput('changelog_path', changelogPath);
+              console.log(`Synced ${changelogPath} from tag ${tag}`);
+            } catch (e) {
+              core.warning(`CHANGELOG not found at ${changelogPath} on tag ${tag}: ${e.message}`);
+              core.setOutput('synced', 'false');
+            }
+
+      - name: Create sync PR
+        id: sync
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
+          README_CHANGED: ${{ steps.readme.outputs.changed }}
+          CHANGELOG_SYNCED: ${{ steps.changelog.outputs.synced }}
+        run: |
+          cd api-repo
+
+          # Check if there are any changes to commit
+          if [ "$README_CHANGED" != "true" ] && [ "$CHANGELOG_SYNCED" != "true" ]; then
+            echo "::warning::No content changes to sync"
+            echo "success=false" >> $GITHUB_OUTPUT
+            echo "sync_pr_url=" >> $GITHUB_OUTPUT
+            echo "sync_pr_number=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          SYNC_BRANCH="post-release/${RELEASE_TAG}"
+
+          # Create branch, stage, commit, push
+          git checkout -b "$SYNC_BRANCH"
+          git add -A
+          git diff --cached --quiet && {
+            echo "::warning::No actual file changes detected"
+            echo "success=false" >> $GITHUB_OUTPUT
+            echo "sync_pr_url=" >> $GITHUB_OUTPUT
+            echo "sync_pr_number=" >> $GITHUB_OUTPUT
+            exit 0
+          }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: post-release sync for ${RELEASE_TAG}"
+          git push origin "$SYNC_BRANCH"
+
+          # Create PR
+          PR_URL=$(gh pr create \
+            --title "Release Automation: Post-release sync (${RELEASE_TAG})" \
+            --body "Automated post-release sync PR for ${RELEASE_TAG}.
+
+          This PR updates:
+          - README.md Release Information section (template-based, matching snapshot format)
+          - CHANGELOG for the release cycle
+
+          Created by release automation workflow." \
+            --head "$SYNC_BRANCH" \
+            --base main)
+
+          PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+
+          # Add labels
+          gh pr edit "$PR_NUMBER" --add-label "post-release" --add-label "automated" 2>/dev/null || true
+
+          echo "sync_pr_url=$PR_URL" >> $GITHUB_OUTPUT
+          echo "sync_pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "success=true" >> $GITHUB_OUTPUT
+          echo "Sync PR created: $PR_URL"
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 5g: Handle PR merge (draft release creation)
@@ -1413,7 +1677,7 @@ jobs:
   # Phase 7: Post final result comment
   # ─────────────────────────────────────────────────────────────────────────────
   post-result:
-    needs: [check-trigger, post-interim, derive-state, validate-command, create-snapshot, discard-snapshot, delete-draft, publish-release, publish-confirmation]
+    needs: [check-trigger, post-interim, derive-state, validate-command, create-snapshot, discard-snapshot, delete-draft, publish-release, create-sync-pr, publish-confirmation]
     if: |
       always() &&
       needs.check-trigger.outputs.trigger_type == 'slash_command' &&
@@ -1560,8 +1824,8 @@ jobs:
               --arg release_url "${{ needs.publish-release.outputs.release_url }}" \
               --arg reference_tag "$REF_TAG" \
               --arg reference_tag_url "$REF_TAG_URL" \
-              --arg sync_pr_url "${{ needs.publish-release.outputs.sync_pr_url }}" \
-              --arg sync_pr_number "${{ needs.publish-release.outputs.sync_pr_number }}" \
+              --arg sync_pr_url "${{ needs.create-sync-pr.outputs.sync_pr_url }}" \
+              --arg sync_pr_number "${{ needs.create-sync-pr.outputs.sync_pr_number }}" \
               --arg src_commit_sha_short "$SRC_SHA_SHORT" \
               '. + {release_url: $release_url, reference_tag: $reference_tag, reference_tag_url: $reference_tag_url, sync_pr_url: $sync_pr_url, sync_pr_number: $sync_pr_number, src_commit_sha_short: $src_commit_sha_short}')
           fi
@@ -1617,7 +1881,7 @@ jobs:
           RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
           RELEASE_URL: ${{ needs.publish-release.outputs.release_url }}
           REFERENCE_TAG: ${{ needs.publish-release.outputs.reference_tag }}
-          SYNC_PR_URL: ${{ needs.publish-release.outputs.sync_pr_url }}
+          SYNC_PR_URL: ${{ needs.create-sync-pr.outputs.sync_pr_url }}
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         with:
           script: |

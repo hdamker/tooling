@@ -1,8 +1,8 @@
 """
 Unit tests for the post-release sync PR creator module.
 
-These tests verify the sync PR creation flow including CHANGELOG sync,
-README update, and PR creation.
+These tests verify the sync PR creation flow including CHANGELOG sync
+and PR creation. README update is handled by the workflow job.
 """
 
 import pytest
@@ -70,27 +70,10 @@ class TestCreateSyncPR:
 
     def test_create_sync_pr_success(self, syncer, mock_github_client):
         """Full sync PR flow succeeds."""
-        # Setup: CHANGELOG/CHANGELOG-r4.md exists
-        mock_github_client.get_file_content.side_effect = [
-            "# CHANGELOG\n\n## r4.1",  # CHANGELOG/CHANGELOG-r4.md from snapshot
-            "# README\n<!-- CAMARA:RELEASE-INFO:START -->\nold\n<!-- CAMARA:RELEASE-INFO:END -->"  # README
-        ]
+        # Setup: CHANGELOG/CHANGELOG-r4.md exists on release tag
+        mock_github_client.get_file_content.return_value = "# CHANGELOG\n\n## r4.1"
 
-        release_metadata = {
-            "repository": {
-                "release_type": "public-release",
-                "release_date": "2026-02-05"
-            },
-            "apis": [
-                {"api_name": "quality-on-demand", "api_version": "1.0.0"}
-            ]
-        }
-
-        result = syncer.create_sync_pr(
-            "r4.1",
-            "release-snapshot/r4.1-abc123",
-            release_metadata
-        )
+        result = syncer.create_sync_pr("r4.1", "r4.1")
 
         assert result.success is True
         assert result.pr_number == 42
@@ -100,65 +83,26 @@ class TestCreateSyncPR:
         """No main branch - returns error."""
         mock_github_client.list_branches.return_value = []
 
-        result = syncer.create_sync_pr(
-            "r4.1",
-            "release-snapshot/r4.1-abc123",
-            {}
-        )
+        result = syncer.create_sync_pr("r4.1", "r4.1")
 
         assert result.success is False
         assert "main branch SHA" in result.error_message
 
     def test_create_sync_pr_no_changelog(self, syncer, mock_github_client):
-        """No CHANGELOG but README updates - still succeeds."""
-        mock_github_client.get_file_content.side_effect = [
-            None,  # No CHANGELOG
-            "# README\n<!-- CAMARA:RELEASE-INFO:START -->\nold\n<!-- CAMARA:RELEASE-INFO:END -->"
-        ]
+        """No CHANGELOG on release tag - returns error."""
+        mock_github_client.get_file_content.return_value = None
 
-        release_metadata = {
-            "repository": {"release_type": "public-release"},
-            "apis": [{"api_name": "test-api", "api_version": "1.0.0"}]
-        }
-
-        result = syncer.create_sync_pr(
-            "r4.1",
-            "release-snapshot/r4.1-abc123",
-            release_metadata
-        )
-
-        assert result.success is True
-
-    def test_create_sync_pr_no_content_changes(self, syncer, mock_github_client):
-        """No CHANGELOG and no README delimiters - returns error."""
-        mock_github_client.get_file_content.side_effect = [
-            None,  # No CHANGELOG
-            "# README without markers"  # README without delimiters
-        ]
-
-        result = syncer.create_sync_pr(
-            "r4.1",
-            "release-snapshot/r4.1-abc123",
-            {}
-        )
+        result = syncer.create_sync_pr("r4.1", "r4.1")
 
         assert result.success is False
-        assert "No content changes" in result.error_message
+        assert "CHANGELOG sync failed" in result.error_message
 
     def test_create_sync_pr_api_error(self, syncer, mock_github_client):
         """GitHub API error during branch creation - returns error."""
-        # List branches works but branch creation fails
-        mock_github_client.get_file_content.side_effect = [
-            "# CHANGELOG",  # CHANGELOG exists
-            "# README\n<!-- CAMARA:RELEASE-INFO:START -->\nold\n<!-- CAMARA:RELEASE-INFO:END -->"
-        ]
+        mock_github_client.get_file_content.return_value = "# CHANGELOG"
         mock_github_client._run_gh.side_effect = GitHubClientError("API error")
 
-        result = syncer.create_sync_pr(
-            "r4.1",
-            "release-snapshot/r4.1-abc123",
-            {"repository": {"release_type": "public"}, "apis": []}
-        )
+        result = syncer.create_sync_pr("r4.1", "r4.1")
 
         assert result.success is False
         assert "GitHub API error" in result.error_message
@@ -219,93 +163,6 @@ class TestSyncChangelog:
 
         assert result is False
         mock_github_client.get_file_content.assert_not_called()
-
-
-class TestUpdateReadme:
-    """Tests for _update_readme method."""
-
-    def test_update_readme_success(self, syncer, mock_github_client):
-        """Successfully updates README release info."""
-        mock_github_client.get_file_content.return_value = """# README
-
-<!-- CAMARA:RELEASE-INFO:START -->
-old content
-<!-- CAMARA:RELEASE-INFO:END -->
-
-More content here.
-"""
-
-        release_metadata = {
-            "repository": {
-                "release_type": "public-release",
-                "release_date": "2026-02-05"
-            },
-            "apis": [
-                {"api_name": "quality-on-demand", "api_version": "1.0.0"}
-            ]
-        }
-
-        result = syncer._update_readme(
-            "post-release/r4.1",
-            "r4.1",
-            release_metadata
-        )
-
-        assert result is True
-        mock_github_client.update_file.assert_called_once()
-        call_kwargs = mock_github_client.update_file.call_args.kwargs
-        assert "r4.1" in call_kwargs["content"]
-        assert "public release" in call_kwargs["content"]
-
-    def test_update_readme_no_delimiters(self, syncer, mock_github_client):
-        """README without delimiters - returns False."""
-        mock_github_client.get_file_content.return_value = "# README without markers"
-
-        result = syncer._update_readme(
-            "post-release/r4.1",
-            "r4.1",
-            {}
-        )
-
-        assert result is False
-        mock_github_client.update_file.assert_not_called()
-
-    def test_update_readme_not_found(self, syncer, mock_github_client):
-        """README not found - returns False."""
-        mock_github_client.get_file_content.return_value = None
-
-        result = syncer._update_readme(
-            "post-release/r4.1",
-            "r4.1",
-            {}
-        )
-
-        assert result is False
-
-    def test_update_readme_prerelease(self, syncer, mock_github_client):
-        """Pre-release type shows correctly."""
-        mock_github_client.get_file_content.return_value = """# README
-<!-- CAMARA:RELEASE-INFO:START -->
-old
-<!-- CAMARA:RELEASE-INFO:END -->
-"""
-
-        release_metadata = {
-            "repository": {
-                "release_type": "pre-release-rc"
-            },
-            "apis": []
-        }
-
-        result = syncer._update_readme(
-            "post-release/r4.1",
-            "r4.1",
-            release_metadata
-        )
-
-        assert result is True
-        call_kwargs = mock_github_client.update_file.call_args.kwargs
-        assert "pre-release" in call_kwargs["content"]
 
 
 class TestCreatePR:
