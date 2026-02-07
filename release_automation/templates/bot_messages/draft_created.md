@@ -16,5 +16,5 @@
 </details>
 
 **Valid actions:**
-- Publish the draft release in GitHub Releases
+- `/publish-release --confirm {{release_tag}}` to publish the release
 - `/delete-draft <reason>` to delete the draft and return to `planned`

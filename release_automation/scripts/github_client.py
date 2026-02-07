@@ -311,9 +311,9 @@ class GitHubClient:
         args = ["api", "-X", "PATCH", f"repos/{self.repo}/releases/{release_id}"]
 
         if draft is not None:
-            args.extend(["-f", f"draft={str(draft).lower()}"])
+            args.extend(["-F", f"draft={str(draft).lower()}"])
         if prerelease is not None:
-            args.extend(["-f", f"prerelease={str(prerelease).lower()}"])
+            args.extend(["-F", f"prerelease={str(prerelease).lower()}"])
         if name is not None:
             args.extend(["-f", f"name={name}"])
         if body is not None:

@@ -169,27 +169,33 @@ class ReleasePublisher:
             )
 
         # Step 3: Publish (set draft=false)
-        # Re-enforce prerelease flag and set make_latest appropriately
         is_prerelease = draft.get("prerelease", False)
-        make_latest = "false" if is_prerelease else "true"
 
         try:
             updated = self.gh.update_release(
                 release_id,
                 draft=False,
                 prerelease=is_prerelease,  # Re-enforce in case UI changed it
-                make_latest=make_latest
-            )
-            return PublishResult(
-                success=True,
-                release_url=updated.get("html_url"),
-                release_id=release_id
             )
         except GitHubClientError as e:
             return PublishResult(
                 success=False,
                 error_message=f"Failed to publish release: {e}"
             )
+
+        # Step 3b: Set make_latest separately — GitHub ignores make_latest
+        # while the release is still a draft (same PATCH call)
+        if not is_prerelease:
+            try:
+                self.gh.update_release(release_id, make_latest="true")
+            except GitHubClientError:
+                logger.warning(f"Failed to mark {release_tag} as Latest release")
+
+        return PublishResult(
+            success=True,
+            release_url=updated.get("html_url"),
+            release_id=release_id
+        )
 
     def create_reference_tag(
         self,

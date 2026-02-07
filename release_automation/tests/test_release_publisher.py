@@ -204,8 +204,13 @@ repository:
         assert result.release_url == "https://github.com/test/releases/tag/r4.1"
         assert result.release_id == 12345
         assert result.error_message is None
-        mock_github_client.update_release.assert_called_once_with(
-            12345, draft=False, prerelease=False, make_latest='true'
+        # Publish call (draft=False) + separate make_latest call
+        assert mock_github_client.update_release.call_count == 2
+        mock_github_client.update_release.assert_any_call(
+            12345, draft=False, prerelease=False
+        )
+        mock_github_client.update_release.assert_any_call(
+            12345, make_latest='true'
         )
 
     def test_publish_release_no_draft(self, publisher, mock_github_client):
