@@ -26,7 +26,7 @@ REQUIRED_LABELS = [
     ("release-state:snapshot-active", "FBCA04", "Release snapshot is active"),
     ("release-state:draft-ready", "1D76DB", "Draft release is ready"),
     ("release-state:published", "0E8A16", "Release has been published"),
-    ("release-state:cancelled", "D93F0B", "Release has been cancelled"),
+    ("release-state:not-planned", "C2C9D1", "No release is currently planned"),
 ]
 
 
@@ -454,7 +454,7 @@ class IssueSyncManager:
         Returns:
             Label name (e.g., "release-state:planned")
         """
-        return f"{self.STATE_LABEL_PREFIX}{state.value}"
+        return f"{self.STATE_LABEL_PREFIX}{state.value.replace('_', '-')}"
 
     def close_release_issue(
         self,

@@ -106,9 +106,19 @@ runs:
             sys.exit(0)
 
         # Skip for states where no issue management is needed
-        skip_states = ['published', 'cancelled', 'not_planned', '']
+        skip_states = ['published', '']
         if current_state.lower() in skip_states:
             print(f"State '{current_state}' does not require issue sync - skipping")
+            # Write workflow summary for visibility
+            summary_file = os.environ.get('GITHUB_STEP_SUMMARY', '')
+            if summary_file:
+                with open(summary_file, 'a') as f:
+                    if current_state.lower() == 'published':
+                        f.write(f"## Release Status: Published\n\n")
+                        f.write(f"Release `{release_tag}` has already been published. No further actions needed.\n")
+                    else:
+                        f.write(f"## Release Status\n\n")
+                        f.write(f"No release state detected for `{release_tag}`. Check release-plan.yaml configuration.\n")
             write_outputs(issue_action='skipped')
             sys.exit(0)
 
@@ -168,6 +178,14 @@ runs:
 
             if action == 'none':
                 print(f"No action taken: {reason}")
+                # Write workflow summary when no issue exists for not-planned state
+                if reason == 'no_planned_release':
+                    summary_file = os.environ.get('GITHUB_STEP_SUMMARY', '')
+                    if summary_file:
+                        with open(summary_file, 'a') as f:
+                            f.write(f"## Release Status: Not Planned\n\n")
+                            f.write(f"No release is currently planned for `{release_tag}` (`target_release_type: none`).\n")
+                            f.write(f"No open Release Issue exists.\n")
                 write_outputs(issue_action='unchanged')
             elif issue:
                 issue_number = issue.get('number', '')

@@ -27,13 +27,13 @@ class ReleaseState(Enum):
     State Transition Flow:
         PLANNED → SNAPSHOT_ACTIVE → DRAFT_READY → PUBLISHED
                                  ↘ (discard)
-        Any state can transition to CANCELLED via release-plan.yaml changes
+        Any state can transition to NOT_PLANNED via release-plan.yaml changes
     """
     PLANNED = "planned"                # release-plan.yaml defines intent
     SNAPSHOT_ACTIVE = "snapshot-active"  # Snapshot branch exists
     DRAFT_READY = "draft-ready"        # Draft release created
     PUBLISHED = "published"            # Tag exists (final state)
-    CANCELLED = "cancelled"            # target_release_type set to "none"
+    NOT_PLANNED = "not_planned"        # target_release_type set to "none"
 
 
 @dataclass
@@ -73,7 +73,7 @@ class ConfigurationError:
     """
     Details about a configuration error that prevents state derivation.
 
-    Configuration errors are distinct from the CANCELLED state - they indicate
+    Configuration errors are distinct from the NOT_PLANNED state - they indicate
     the repository configuration is broken, not that no release is planned.
 
     Attributes:
@@ -128,7 +128,7 @@ class ReleaseInfoResult:
         else:
             return {
                 "release_tag": None,
-                "state": None,  # NOT CANCELLED - this is an error, not a state
+                "state": None,  # NOT NOT_PLANNED - this is an error, not a state
                 "snapshot_branch": None,
                 "source": None,
                 "config_error": self.config_error.message if self.config_error else "Unknown error",
@@ -165,9 +165,9 @@ class ReleaseStateManager:
            - If draft release exists → DRAFT_READY
            - Otherwise → SNAPSHOT_ACTIVE
         3. If release-plan.yaml defines this release:
-           - If target_release_type is "none" → CANCELLED
+           - If target_release_type is "none" → NOT_PLANNED
            - Otherwise → PLANNED
-        4. Default → CANCELLED
+        4. Default → NOT_PLANNED
 
         Args:
             release_tag: Release tag to check (e.g., "r4.1")
@@ -198,9 +198,9 @@ class ReleaseStateManager:
                 if release_type and release_type.lower() != "none":
                     return ReleaseState.PLANNED
                 elif release_type and release_type.lower() == "none":
-                    return ReleaseState.CANCELLED
+                    return ReleaseState.NOT_PLANNED
 
-        return ReleaseState.CANCELLED
+        return ReleaseState.NOT_PLANNED
 
     def get_current_snapshot(self, release_tag: str) -> Optional[SnapshotInfo]:
         """
@@ -344,9 +344,9 @@ class ReleaseStateManager:
         - DRAFT_READY: if snapshot branch and draft release exist
         - SNAPSHOT_ACTIVE: if snapshot branch exists
         - PLANNED: if release-plan.yaml has target_release_type != none
-        - CANCELLED: if release-plan.yaml has target_release_type == none or missing
+        - NOT_PLANNED: if release-plan.yaml has target_release_type == none or missing
 
-        Configuration errors are returned as error results, NOT as CANCELLED state.
+        Configuration errors are returned as error results, NOT as NOT_PLANNED state.
 
         Returns:
             ReleaseInfoResult with either:
@@ -410,8 +410,8 @@ class ReleaseStateManager:
         if plan_release_type and plan_release_type.lower() != "none":
             state = ReleaseState.PLANNED
         else:
-            # target_release_type is "none" or missing - intentional CANCELLED
-            state = ReleaseState.CANCELLED
+            # target_release_type is "none" or missing - intentional NOT_PLANNED
+            state = ReleaseState.NOT_PLANNED
 
         return ReleaseInfoResult(
             success=True,

@@ -298,14 +298,14 @@ class TestValidatePreconditions:
         assert len(errors) == 1
         assert "draft release already exists" in errors[0]
 
-    def test_invalid_cancelled_state(self, snapshot_creator, mock_state_manager):
-        """Test validation fails for CANCELLED state."""
-        mock_state_manager.derive_state.return_value = ReleaseState.CANCELLED
+    def test_invalid_not_planned_state(self, snapshot_creator, mock_state_manager):
+        """Test validation fails for NOT_PLANNED state."""
+        mock_state_manager.derive_state.return_value = ReleaseState.NOT_PLANNED
 
         errors = snapshot_creator.validate_preconditions("r4.1")
 
         assert len(errors) == 1
-        assert "cancelled" in errors[0]
+        assert "not planned" in errors[0]
 
 
 # --- Tests for create_snapshot ---

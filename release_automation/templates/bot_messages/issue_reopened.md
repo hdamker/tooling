@@ -14,4 +14,4 @@ This issue was reopened because active release artifacts exist. The issue cannot
 - `/delete-draft <reason>` to delete and return to `planned`
 {{/state_draft_ready}}
 
-The issue will close automatically when the release reaches `published` or `cancelled` state.
+The issue will close automatically when the release is published.

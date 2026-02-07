@@ -258,7 +258,7 @@ class TestSyncReleaseIssue:
             }
         }
 
-        state_manager.derive_state.return_value = ReleaseState.CANCELLED
+        state_manager.derive_state.return_value = ReleaseState.NOT_PLANNED
         gh.search_issues.return_value = []
 
         result = manager.sync_release_issue(release_plan)
@@ -435,7 +435,7 @@ class TestGetStateLabel:
         assert manager.get_state_label(ReleaseState.SNAPSHOT_ACTIVE) == "release-state:snapshot-active"
         assert manager.get_state_label(ReleaseState.DRAFT_READY) == "release-state:draft-ready"
         assert manager.get_state_label(ReleaseState.PUBLISHED) == "release-state:published"
-        assert manager.get_state_label(ReleaseState.CANCELLED) == "release-state:cancelled"
+        assert manager.get_state_label(ReleaseState.NOT_PLANNED) == "release-state:not-planned"
 
 
 class TestWorkflowMarkerConstant:
@@ -479,7 +479,7 @@ class TestRequiredLabels:
         assert "release-state:snapshot-active" in names
         assert "release-state:draft-ready" in names
         assert "release-state:published" in names
-        assert "release-state:cancelled" in names
+        assert "release-state:not-planned" in names
 
 
 class TestEnsureLabelsExist:
@@ -563,7 +563,7 @@ class TestSyncReleaseIssueWithLabels:
         gh = MagicMock()
         state_manager = MagicMock()
         gh.get_label.return_value = None  # All labels missing
-        state_manager.derive_state.return_value = ReleaseState.CANCELLED
+        state_manager.derive_state.return_value = ReleaseState.NOT_PLANNED
         gh.search_issues.return_value = []
 
         manager = IssueSyncManager(gh, state_manager, MagicMock(), MagicMock())

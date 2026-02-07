@@ -65,6 +65,7 @@ class IssueManager:
         "public-release": "public",
         "public": "public",
         "maintenance-release": "maintenance",
+        "none": "",
     }
 
     def update_section(self, body: str, section: str, content: str) -> str:
@@ -335,6 +336,12 @@ class IssueManager:
             return (
                 "**Valid actions:** Publish the draft release in GitHub Releases | "
                 "`/delete-draft <reason>` to delete"
+            )
+
+        elif state_lower == "not-planned":
+            return (
+                "**Valid actions:** Update `release-plan.yaml` with a planned release type to resume | "
+                "Close this issue — a new one will be created when a release is planned"
             )
 
         return ""

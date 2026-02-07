@@ -399,7 +399,7 @@ jobs:
               'snapshot-active': ['discard-snapshot', 'sync-issue'],
               'draft-ready': ['delete-draft', 'publish-release', 'sync-issue'],
               'published': ['sync-issue'],
-              'cancelled': ['sync-issue']
+              'not-planned': ['sync-issue']
             };
 
             // Check if command is allowed in current state
@@ -1606,6 +1606,7 @@ jobs:
             release_automation/scripts
             release_automation/templates
             shared-actions/sync-release-issue
+            shared-actions/post-bot-comment
 
       - name: Sync Release Issue
         id: sync
@@ -1624,6 +1625,23 @@ jobs:
           echo "  Action: ${{ steps.sync.outputs.issue_action }}"
           echo "  Issue: #${{ steps.sync.outputs.issue_number }}"
           echo "  URL: ${{ steps.sync.outputs.issue_url }}"
+
+      - name: Post Not-Planned Notification
+        if: |
+          steps.sync.outputs.issue_action == 'updated' &&
+          needs.derive-state.outputs.state == 'not_planned' &&
+          steps.sync.outputs.issue_number != ''
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ steps.sync.outputs.issue_number }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
+          template: state_not_planned
+          context: |
+            {
+              "release_tag": "${{ needs.derive-state.outputs.release_tag }}",
+              "state": "not-planned"
+            }
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 7: Post final result comment

@@ -99,10 +99,10 @@ repository:
 
         assert state == ReleaseState.PLANNED
 
-    def test_cancelled_when_release_type_is_none(
+    def test_not_planned_when_release_type_is_none(
         self, state_manager, mock_github_client
     ):
-        """release-plan.yaml with target_release_type: none → CANCELLED state."""
+        """release-plan.yaml with target_release_type: none → NOT_PLANNED state."""
         mock_github_client.tag_exists.return_value = False
         mock_github_client.list_branches.return_value = []
         mock_github_client.get_file_content.return_value = """
@@ -113,10 +113,10 @@ repository:
 
         state = state_manager.derive_state("r4.1")
 
-        assert state == ReleaseState.CANCELLED
+        assert state == ReleaseState.NOT_PLANNED
 
-    def test_cancelled_when_tag_mismatch(self, state_manager, mock_github_client):
-        """release-plan.yaml with different tag → CANCELLED state."""
+    def test_not_planned_when_tag_mismatch(self, state_manager, mock_github_client):
+        """release-plan.yaml with different tag → NOT_PLANNED state."""
         mock_github_client.tag_exists.return_value = False
         mock_github_client.list_branches.return_value = []
         mock_github_client.get_file_content.return_value = """
@@ -127,32 +127,32 @@ repository:
 
         state = state_manager.derive_state("r4.1")
 
-        assert state == ReleaseState.CANCELLED
+        assert state == ReleaseState.NOT_PLANNED
 
-    def test_cancelled_when_no_release_plan(self, state_manager, mock_github_client):
-        """No release-plan.yaml → CANCELLED state."""
+    def test_not_planned_when_no_release_plan(self, state_manager, mock_github_client):
+        """No release-plan.yaml → NOT_PLANNED state."""
         mock_github_client.tag_exists.return_value = False
         mock_github_client.list_branches.return_value = []
         mock_github_client.get_file_content.return_value = None
 
         state = state_manager.derive_state("r4.1")
 
-        assert state == ReleaseState.CANCELLED
+        assert state == ReleaseState.NOT_PLANNED
 
-    def test_cancelled_when_malformed_yaml(self, state_manager, mock_github_client):
-        """Malformed release-plan.yaml → CANCELLED state."""
+    def test_not_planned_when_malformed_yaml(self, state_manager, mock_github_client):
+        """Malformed release-plan.yaml → NOT_PLANNED state."""
         mock_github_client.tag_exists.return_value = False
         mock_github_client.list_branches.return_value = []
         mock_github_client.get_file_content.return_value = "{{invalid yaml::"
 
         state = state_manager.derive_state("r4.1")
 
-        assert state == ReleaseState.CANCELLED
+        assert state == ReleaseState.NOT_PLANNED
 
-    def test_cancelled_when_missing_repository_section(
+    def test_not_planned_when_missing_repository_section(
         self, state_manager, mock_github_client
     ):
-        """release-plan.yaml without repository section → CANCELLED state."""
+        """release-plan.yaml without repository section → NOT_PLANNED state."""
         mock_github_client.tag_exists.return_value = False
         mock_github_client.list_branches.return_value = []
         mock_github_client.get_file_content.return_value = """
@@ -163,7 +163,7 @@ apis:
 
         state = state_manager.derive_state("r4.1")
 
-        assert state == ReleaseState.CANCELLED
+        assert state == ReleaseState.NOT_PLANNED
 
 
 class TestGetCurrentSnapshot:
@@ -318,11 +318,11 @@ repository:
 class TestGetCurrentReleaseInfoErrors:
     """Tests for get_current_release_info() configuration error handling.
 
-    BLK-003: Configuration errors should return error results, not CANCELLED state.
+    BLK-003: Configuration errors should return error results, not NOT_PLANNED state.
     """
 
     def test_returns_error_when_file_missing(self, state_manager, mock_github_client):
-        """Missing release-plan.yaml returns config error, not CANCELLED."""
+        """Missing release-plan.yaml returns config error, not NOT_PLANNED."""
         mock_github_client.get_file_content.return_value = None
 
         result = state_manager.get_current_release_info()
@@ -332,10 +332,10 @@ class TestGetCurrentReleaseInfoErrors:
         assert result.config_error.error_type == "missing_file"
         assert "release-plan.yaml" in result.config_error.message
         assert result.config_error.file_path == "release-plan.yaml"
-        assert result.state is None  # NOT CANCELLED
+        assert result.state is None  # NOT NOT_PLANNED
 
     def test_returns_error_when_yaml_malformed(self, state_manager, mock_github_client):
-        """Malformed YAML returns config error, not CANCELLED."""
+        """Malformed YAML returns config error, not NOT_PLANNED."""
         mock_github_client.get_file_content.return_value = "{{invalid yaml:: missing"
 
         result = state_manager.get_current_release_info()
@@ -386,10 +386,10 @@ repository:
         assert result.config_error.error_type == "missing_field"
         assert result.config_error.field_path == "repository.target_release_tag"
 
-    def test_returns_cancelled_for_intentional_none(
+    def test_returns_not_planned_for_intentional_none(
         self, state_manager, mock_github_client
     ):
-        """target_release_type: none returns CANCELLED (success, not error)."""
+        """target_release_type: none returns NOT_PLANNED (success, not error)."""
         mock_github_client.get_file_content.return_value = """
 repository:
   target_release_tag: r4.1
@@ -401,14 +401,14 @@ repository:
         result = state_manager.get_current_release_info()
 
         assert result.success
-        assert result.state == ReleaseState.CANCELLED
+        assert result.state == ReleaseState.NOT_PLANNED
         assert result.config_error is None
         assert result.release_tag == "r4.1"
 
-    def test_returns_cancelled_when_release_type_missing(
+    def test_returns_not_planned_when_release_type_missing(
         self, state_manager, mock_github_client
     ):
-        """Missing target_release_type defaults to CANCELLED (like 'none')."""
+        """Missing target_release_type defaults to NOT_PLANNED (like 'none')."""
         mock_github_client.get_file_content.return_value = """
 repository:
   target_release_tag: r4.1
@@ -419,7 +419,7 @@ repository:
         result = state_manager.get_current_release_info()
 
         assert result.success
-        assert result.state == ReleaseState.CANCELLED
+        assert result.state == ReleaseState.NOT_PLANNED
         assert result.release_tag == "r4.1"
 
     def test_returns_planned_for_valid_config(

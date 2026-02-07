@@ -355,9 +355,9 @@ class SnapshotCreator:
                 f"A draft release already exists for {release_tag}. "
                 "Use /delete-draft first if you want to start over."
             )
-        elif state == ReleaseState.CANCELLED:
+        elif state == ReleaseState.NOT_PLANNED:
             errors.append(
-                f"Release {release_tag} is cancelled. "
+                f"Release {release_tag} is not planned. "
                 "Update release-plan.yaml to set target_release_type to a valid value."
             )
         elif state != ReleaseState.PLANNED:

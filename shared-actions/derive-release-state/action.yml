@@ -3,10 +3,10 @@ description: |
   Derives the current release state and release tag from repository artifacts.
   Examines tags, branches, releases, and release-plan.yaml to determine
   whether a release is planned, has an active snapshot, has a draft ready,
-  is published, or is cancelled.
+  is published, or is not planned.
 
   The release_tag is derived from the authoritative source:
-  - PLANNED/CANCELLED: from release-plan.yaml on main branch
+  - PLANNED/NOT_PLANNED: from release-plan.yaml on main branch
   - SNAPSHOT_ACTIVE/DRAFT_READY: from release-metadata.yaml on snapshot branch
   - PUBLISHED: from the git tag
 
@@ -21,7 +21,7 @@ outputs:
     description: 'Release tag from authoritative source (release-plan.yaml or release-metadata.yaml)'
     value: ${{ steps.derive.outputs.release_tag }}
   state:
-    description: 'Current release state (planned|snapshot-active|draft-ready|published|cancelled)'
+    description: 'Current release state (planned|snapshot-active|draft-ready|published|not_planned)'
     value: ${{ steps.derive.outputs.state }}
   snapshot_id:
     description: 'Current snapshot ID if active (e.g., "r4.1-abc1234")'
