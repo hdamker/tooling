@@ -416,6 +416,7 @@ jobs:
 
             // Check user permission (must be write or higher)
             console.log('Checking user permission...');
+            let userPermission;
 
             try {
               const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
@@ -424,7 +425,7 @@ jobs:
                 username: user
               });
 
-              const userPermission = permission.permission;
+              userPermission = permission.permission;
               console.log(`User permission: ${userPermission}`);
 
               const hasPermission = ['admin', 'maintain', 'write'].includes(userPermission);
