@@ -149,9 +149,16 @@ class TestTemplateRendering:
         """Public release template renders with release variables."""
         result = updater._render_template("public_release", public_release_data)
         assert "r3.2" in result
-        assert "Spring25" in result
+        assert "(Spring25)" in result
         assert "NEW" in result
         assert "releases/latest" in result
+
+    def test_render_public_release_without_meta_release(self, updater, public_release_data):
+        """Public release template omits parentheses when meta_release is empty (IMP-013)."""
+        public_release_data["meta_release"] = ""
+        result = updater._render_template("public_release", public_release_data)
+        assert "r3.2" in result
+        assert "()" not in result
 
     def test_render_public_with_prerelease_template(self, updater, public_release_data, prerelease_data):
         """Public+prerelease template renders both sections."""

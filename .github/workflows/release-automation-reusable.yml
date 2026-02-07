@@ -1459,56 +1459,7 @@ jobs:
               core.setOutput('error_message', error.message);
             }
 
-      - name: Set release date in release-metadata.yaml
-        if: steps.create-draft.outputs.success == 'true'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
-        with:
-          script: |
-            const snapshotBranch = '${{ needs.derive-state.outputs.snapshot_branch }}';
-            // ISO 8601 UTC timestamp per release-metadata-schema.yaml
-            const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'); // YYYY-MM-DDTHH:MM:SSZ
-
-            console.log(`Setting release_date to ${now} in release-metadata.yaml on ${snapshotBranch}`);
-
-            try {
-              // Fetch current release-metadata.yaml
-              const response = await github.rest.repos.getContent({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                path: 'release-metadata.yaml',
-                ref: snapshotBranch
-              });
-
-              const content = Buffer.from(response.data.content, 'base64').toString('utf-8');
-              const sha = response.data.sha;
-
-              // Replace release_date: null with current UTC timestamp
-              const updated = content.replace(
-                /^(\s*release_date:\s*)null\s*$/m,
-                `$1"${now}"`
-              );
-
-              if (updated === content) {
-                console.log('release_date field not found as null or already set, skipping update');
-                return;
-              }
-
-              // Commit the update
-              await github.rest.repos.createOrUpdateFileContents({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                path: 'release-metadata.yaml',
-                message: `Set release_date to ${now}`,
-                content: Buffer.from(updated).toString('base64'),
-                sha: sha,
-                branch: snapshotBranch
-              });
-
-              console.log(`Updated release-metadata.yaml with release_date: ${now}`);
-            } catch (error) {
-              // Non-fatal: release date is a convenience field
-              console.log(`::warning::Could not update release_date: ${error.message}`);
-            }
+      # release_date is set during /publish-release (finalize_metadata), not at draft creation
 
       - name: Checkout tooling for bot comment
         if: steps.create-draft.outputs.success == 'true' && needs.derive-state.outputs.release_issue_number != ''

@@ -167,6 +167,26 @@ apis:
         assert "repository:" in call_args.kwargs["content"]
         assert "release_date:" in call_args.kwargs["content"]
 
+    def test_finalize_metadata_uses_iso8601_with_time(self, publisher, mock_github_client):
+        """release_date uses ISO 8601 format with time, not date-only (IMP-040)."""
+        mock_github_client.get_file_content.return_value = """
+repository:
+  release_tag: r4.1
+  release_date: null
+"""
+        mock_github_client.update_file.return_value = {
+            "commit": {"sha": "new-commit-sha"}
+        }
+
+        publisher.finalize_metadata("release-snapshot/r4.1-abc123", "r4.1")
+
+        call_args = mock_github_client.update_file.call_args
+        content = call_args.kwargs["content"]
+        # Should contain time component (T and Z), not just date
+        import re
+        assert re.search(r"release_date: '\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z'", content), \
+            f"Expected ISO 8601 with time in: {content}"
+
 
 class TestPublishRelease:
     """Tests for publish_release method."""

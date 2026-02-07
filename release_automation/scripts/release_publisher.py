@@ -98,8 +98,8 @@ class ReleasePublisher:
             logger.error(f"Failed to parse release-metadata.yaml: {e}")
             return None
 
-        # Set release_date in UTC
-        release_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        # Set release_date in UTC (ISO 8601 with time)
+        release_date = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         if "repository" not in metadata:
             metadata["repository"] = {}
         metadata["repository"]["release_date"] = release_date

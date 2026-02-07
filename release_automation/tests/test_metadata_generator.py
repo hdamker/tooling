@@ -279,6 +279,46 @@ class TestMetadataGenerator:
 
         assert result["repository"]["src_commit_sha"] is None
 
+    def test_generate_derives_repository_name_from_repo_param(self, generator):
+        """repository_name derived from repo parameter, not release plan (IMP-039)."""
+        release_plan = {
+            "repository": {
+                "target_release_tag": "r1.0",
+                "target_release_type": "pre-release-alpha",
+            },
+            "apis": [],
+        }
+
+        result = generator.generate(
+            release_plan=release_plan,
+            api_versions={},
+            src_commit_sha=None,
+            api_titles={},
+            repo="hdamker/TestRepo-QoD",
+        )
+
+        assert result["repository"]["repository_name"] == "TestRepo-QoD"
+
+    def test_generate_falls_back_to_plan_without_repo_param(self, generator):
+        """Falls back to release plan repository_name when repo not provided."""
+        release_plan = {
+            "repository": {
+                "repository_name": "QualityOnDemand",
+                "target_release_tag": "r1.0",
+                "target_release_type": "pre-release-alpha",
+            },
+            "apis": [],
+        }
+
+        result = generator.generate(
+            release_plan=release_plan,
+            api_versions={},
+            src_commit_sha=None,
+            api_titles={},
+        )
+
+        assert result["repository"]["repository_name"] == "QualityOnDemand"
+
 
 class TestReleaseTypeValidation:
     """Tests for release type validation (DEC-009: long-form values only)."""

@@ -216,7 +216,7 @@ class SnapshotCreator:
                 api_versions=api_versions,
                 commonalities_release=commonalities_release,
                 icm_release=icm_release,
-                repo_name=self.gh.repo,
+                repo_name=self.gh.repo.split("/")[-1],
                 release_plan=release_plan,
             )
 
@@ -234,7 +234,8 @@ class SnapshotCreator:
             # Step 9: Generate and write release-metadata.yaml
             api_titles = self._extract_api_titles(release_plan, temp_dir)
             metadata = self.metadata_gen.generate(
-                release_plan, api_versions, base_sha, api_titles
+                release_plan, api_versions, base_sha, api_titles,
+                repo=self.gh.repo,
             )
             metadata_path = os.path.join(temp_dir, "release-metadata.yaml")
             with open(metadata_path, "w") as f:

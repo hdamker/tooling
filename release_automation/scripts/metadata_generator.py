@@ -103,6 +103,7 @@ class MetadataGenerator:
         api_versions: Dict[str, str],
         src_commit_sha: Optional[str],
         api_titles: Dict[str, str],
+        repo: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate release metadata from release plan and calculated versions.
@@ -112,14 +113,15 @@ class MetadataGenerator:
             api_versions: Dict mapping api_name to calculated version string
             src_commit_sha: SHA of the source commit (snapshot was created from)
             api_titles: Dict mapping api_name to human-readable title
+            repo: Full repository path (e.g., "owner/name") — name is extracted
 
         Returns:
             Dict suitable for YAML serialization as release-metadata.yaml
         """
         repo_section = release_plan.get("repository", {})
 
-        # Extract repository name from plan
-        repository_name = self._extract_repo_name(release_plan)
+        # Derive repository name from repo path, fall back to release plan
+        repository_name = repo.split("/")[-1] if repo else self._extract_repo_name(release_plan)
 
         # Get release tag and type
         release_tag = repo_section.get("target_release_tag", "")
