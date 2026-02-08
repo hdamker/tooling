@@ -1,10 +1,16 @@
 **📋 Release issue created — State: `planned`**
-{{#trigger_workflow_dispatch}}Created via workflow dispatch.{{/trigger_workflow_dispatch}}
-{{#trigger_issue_close}}Created to replace closed [#{{closed_issue_number}}]({{closed_issue_url}}).{{/trigger_issue_close}}
-{{#trigger_release_plan_change}}Created after [`release-plan.yaml`]({{release_plan_url}}) update (PR [#{{trigger_pr_number}}]({{trigger_pr_url}})).{{/trigger_release_plan_change}}
+{{#trigger_workflow_dispatch}}
+Created via workflow dispatch.
+{{/trigger_workflow_dispatch}}
+{{#trigger_issue_close}}
+Created to replace closed [#{{closed_issue_number}}]({{closed_issue_url}}).
+{{/trigger_issue_close}}
+{{#trigger_release_plan_change}}
+Created after [`release-plan.yaml`]({{release_plan_url}}) update (PR [#{{trigger_pr_number}}]({{trigger_pr_url}})).
+{{/trigger_release_plan_change}}
 [`release-plan.yaml`]({{release_plan_url}})
 
-<details><summary>Release {{release_tag}}{{#short_type}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}}){{/short_type}}</summary>
+<details><summary><b>Configuration:</b> Release {{release_tag}}{{#short_type}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}}){{/short_type}}</summary>
 
 | API | Version |
 |-----|---------|
@@ -16,5 +22,4 @@
 {{/commonalities_release}}
 </details>
 
-**Valid actions:**
-- `/create-snapshot` — begin the release process
+**Valid actions:**<br>• `/create-snapshot` — begin the release process

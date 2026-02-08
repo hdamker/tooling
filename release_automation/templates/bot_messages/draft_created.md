@@ -2,7 +2,7 @@
 Triggered by merge of [Release PR #{{release_pr_number}}]({{release_pr_url}}).
 **Draft release:** [`{{release_tag}}`]({{draft_release_url}})
 
-<details><summary>Release {{release_tag}}{{#short_type}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}}){{/short_type}}</summary>
+<details><summary><b>Configuration:</b> Release {{release_tag}}{{#short_type}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}}){{/short_type}}</summary>
 
 | API | Version |
 |-----|---------|
@@ -14,6 +14,4 @@ Triggered by merge of [Release PR #{{release_pr_number}}]({{release_pr_url}}).
 {{/commonalities_release}}
 </details>
 
-**Valid actions:**
-- `/publish-release --confirm {{release_tag}}` — publish the release
-- `/delete-draft <reason>` — delete the draft and return to `planned`
+**Valid actions:**<br>• `/publish-release --confirm {{release_tag}}` — publish the release<br>• `/delete-draft <reason>` — delete the draft and return to `planned`

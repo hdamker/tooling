@@ -86,6 +86,25 @@ class TestRender:
         assert "- two" in result
         assert "- three" in result
 
+    def test_render_collapses_excess_blank_lines(self, temp_template_dir):
+        """Collapses 3+ consecutive newlines to at most one blank line."""
+        (temp_template_dir / "blanks.md").write_text(
+            "Header\n{{#a}}line a\n{{/a}}\n{{#b}}line b\n{{/b}}\n{{#c}}line c\n{{/c}}\nFooter"
+        )
+        responder = BotResponder(template_dir=temp_template_dir)
+        # Only 'a' is true → 'b' and 'c' sections produce empty lines
+        result = responder.render("blanks", {"a": True, "b": False, "c": False})
+        assert "Header\nline a" in result
+        assert "\n\n\n" not in result
+        assert "Footer" in result
+
+    def test_render_strips_leading_trailing_whitespace(self, temp_template_dir):
+        """Strips leading/trailing whitespace from rendered output."""
+        (temp_template_dir / "padded.md").write_text("\n\nContent\n\n")
+        responder = BotResponder(template_dir=temp_template_dir)
+        result = responder.render("padded", {})
+        assert result == "Content"
+
     def test_render_missing_template(self, temp_template_dir):
         """Raises TemplateNotFoundError for missing template."""
         responder = BotResponder(template_dir=temp_template_dir)

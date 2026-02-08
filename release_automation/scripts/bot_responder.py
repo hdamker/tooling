@@ -5,6 +5,7 @@ This module provides template-based message rendering for bot comments
 posted during the release automation workflow.
 """
 
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -81,7 +82,11 @@ class BotResponder:
             )
 
         template_content = template_path.read_text()
-        return self.renderer.render(template_content, context)
+        content = self.renderer.render(template_content, context)
+        # Collapse 3+ consecutive newlines to max one blank line.
+        # Handles Mustache conditional artifacts (false sections leave empty lines).
+        content = re.sub(r'\n{3,}', '\n\n', content)
+        return content.strip()
 
     def render_with_marker(
         self,

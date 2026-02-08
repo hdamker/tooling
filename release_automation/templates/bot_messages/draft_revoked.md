@@ -2,7 +2,7 @@
 {{#has_reason}}**Reason:** {{reason}}{{/has_reason}}
 **Preserved:** [`{{release_review_branch}}`]({{release_review_branch_url}}) · **Deleted:** draft release, snapshot branch
 
-<details><summary>Release {{release_tag}}{{#short_type}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}}){{/short_type}}</summary>
+<details><summary><b>Configuration:</b> Release {{release_tag}}{{#short_type}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}}){{/short_type}}</summary>
 
 | API | Version |
 |-----|---------|
@@ -14,5 +14,4 @@
 {{/commonalities_release}}
 </details>
 
-**Valid actions:**
-- `/create-snapshot` — new snapshot from updated `main`
+**Valid actions:**<br>• `/create-snapshot` — new snapshot from updated `main`

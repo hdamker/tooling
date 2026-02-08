@@ -2,7 +2,7 @@
 Release published. This issue will be closed automatically.
 **Release:** [`{{release_tag}}`]({{release_url}}) · Post-release sync PR: [#{{sync_pr_number}}]({{sync_pr_url}}) (requires codeowner merge)
 
-<details><summary>Release {{release_tag}}{{#short_type}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}}){{/short_type}}</summary>
+<details><summary><b>Configuration:</b> Release {{release_tag}}{{#short_type}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}}){{/short_type}}</summary>
 
 | API | Version |
 |-----|---------|
