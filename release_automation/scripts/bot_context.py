@@ -8,6 +8,7 @@ See technical-architecture.md Section 2.9 for the authoritative schema.
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
+from . import config
 
 
 @dataclass
@@ -101,9 +102,9 @@ class BotContext:
         self.is_missing_file = self.error_type == "missing_file"
         self.is_malformed_yaml = self.error_type == "malformed_yaml"
         self.is_missing_field = self.error_type == "missing_field"
-        self.state_snapshot_active = self.state == "snapshot-active"
-        self.state_draft_ready = self.state == "draft-ready"
-        self.state_published = self.state == "published"
+        self.state_snapshot_active = self.state == config.STATE_SNAPSHOT_ACTIVE
+        self.state_draft_ready = self.state == config.STATE_DRAFT_READY
+        self.state_published = self.state == config.STATE_PUBLISHED
         self.trigger_workflow_dispatch = self.trigger_type == "workflow_dispatch"
         self.trigger_issue_close = self.trigger_type == "issue_close"
         self.trigger_release_plan_change = self.trigger_type == "release_plan_change"

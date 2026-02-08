@@ -16,20 +16,20 @@ on:
     inputs:
       # Passed from caller for workflow_dispatch
       command:
-        description: 'Command to execute (for workflow_dispatch)'
+        description: "Command to execute (for workflow_dispatch)"
         type: string
         required: false
-        default: ''
+        default: ""
       reason:
-        description: 'Reason for discard/delete commands'
+        description: "Reason for discard/delete commands"
         type: string
         required: false
-        default: ''
+        default: ""
       trigger_pr:
-        description: 'PR number that triggered this workflow'
+        description: "PR number that triggered this workflow"
         type: string
         required: false
-        default: ''
+        default: ""
 
 permissions:
   contents: write
@@ -230,11 +230,14 @@ jobs:
       source: ${{ steps.state.outputs.source }}
       config_error: ${{ steps.state.outputs.config_error }}
       config_error_type: ${{ steps.state.outputs.config_error_type }}
+      release_plan_url: ${{ steps.state.outputs.release_plan_url }}
+      src_commit_sha_short: ${{ steps.state.outputs.src_commit_sha_short }}
+      meta_release: ${{ steps.state.outputs.meta_release }}
     steps:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          repository: hdamker/tooling # For testing; production will use camaraproject/tooling
           ref: release-automation-mvp
           path: _tooling
           sparse-checkout: |
@@ -287,7 +290,7 @@ jobs:
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
           issue_number: ${{ needs.check-trigger.outputs.issue_number }}
-          release_tag: 'unknown'
+          release_tag: "unknown"
           run_id: ${{ github.run_id }}
           template: config_error
           context: |
@@ -328,10 +331,53 @@ jobs:
           exit 1
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 3: Assemble Golden Context
+  # ─────────────────────────────────────────────────────────────────────────────
+  assemble-context:
+    needs: [check-trigger, derive-state]
+    if: |
+      needs.check-trigger.outputs.should_continue == 'true' &&
+      needs.derive-state.outputs.config_error == ''
+    runs-on: ubuntu-latest
+    outputs:
+      base_context: ${{ steps.assemble.outputs.base_context }}
+    steps:
+      - name: Checkout tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          repository: hdamker/tooling
+          ref: release-automation-mvp
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+
+      - name: Assemble Context
+        id: assemble
+        run: |
+          python3 _tooling/release_automation/scripts/workflow_context.py
+        env:
+          CTX_COMMAND: ${{ needs.check-trigger.outputs.command }}
+          CTX_COMMAND_ARGS: ${{ needs.check-trigger.outputs.command_args }}
+          CTX_USER: ${{ needs.check-trigger.outputs.user }}
+          CTX_TRIGGER_TYPE: ${{ needs.check-trigger.outputs.trigger_type }}
+          CTX_RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
+          CTX_STATE: ${{ needs.derive-state.outputs.state }}
+          CTX_RELEASE_TYPE: ${{ needs.derive-state.outputs.release_type }}
+          CTX_META_RELEASE: ${{ needs.derive-state.outputs.meta_release }}
+          CTX_SNAPSHOT_ID: ${{ needs.derive-state.outputs.snapshot_id }}
+          CTX_SNAPSHOT_BRANCH: ${{ needs.derive-state.outputs.snapshot_branch }}
+          CTX_RELEASE_REVIEW_BRANCH: ${{ needs.derive-state.outputs.release_review_branch }}
+          CTX_RELEASE_PR_NUMBER: ${{ needs.derive-state.outputs.release_pr_number }}
+          CTX_SRC_COMMIT_SHA: ${{ needs.derive-state.outputs.src_commit_sha }}
+          CTX_APIS_JSON: ${{ needs.derive-state.outputs.apis_json }}
+          GITHUB_TOKEN: ${{ github.token }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # Phase 3: Post interim comment (for slash commands only)
   # ─────────────────────────────────────────────────────────────────────────────
   post-interim:
-    needs: [check-trigger, derive-state]
+    needs: [check-trigger, derive-state, assemble-context]
     if: |
       needs.check-trigger.outputs.should_continue == 'true' &&
       needs.check-trigger.outputs.trigger_type == 'slash_command' &&
@@ -343,7 +389,7 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          repository: hdamker/tooling # For testing; production will use camaraproject/tooling
           ref: release-automation-mvp
           path: _tooling
           sparse-checkout: |
@@ -359,12 +405,8 @@ jobs:
           release_tag: ${{ needs.derive-state.outputs.release_tag }}
           run_id: ${{ github.run_id }}
           template: interim_processing
-          context: |
-            {
-              "command": "${{ needs.check-trigger.outputs.command }}",
-              "user": "${{ needs.check-trigger.outputs.user }}",
-              "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            }
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
+          context: "{}"
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 4: Validate command (for slash commands only, skip on config error)
@@ -529,7 +571,14 @@ jobs:
   # Phase 5a: Handle rejected command
   # ─────────────────────────────────────────────────────────────────────────────
   post-rejection:
-    needs: [check-trigger, derive-state, post-interim, validate-command]
+    needs:
+      [
+        check-trigger,
+        derive-state,
+        post-interim,
+        validate-command,
+        assemble-context,
+      ]
     if: |
       needs.check-trigger.outputs.trigger_type == 'slash_command' &&
       needs.validate-command.outputs.allowed == 'false'
@@ -538,7 +587,7 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          repository: hdamker/tooling # For testing; production will use camaraproject/tooling
           ref: release-automation-mvp
           path: _tooling
           sparse-checkout: |
@@ -553,14 +602,10 @@ jobs:
           release_tag: ${{ needs.derive-state.outputs.release_tag }}
           run_id: ${{ github.run_id }}
           template: command_rejected
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
           context: |
             {
-              "command": "${{ needs.check-trigger.outputs.command }}",
-              "user": "${{ needs.check-trigger.outputs.user }}",
-              "state": "${{ needs.derive-state.outputs.state }}",
-              "release_tag": "${{ needs.derive-state.outputs.release_tag }}",
-              "error_message": "${{ needs.validate-command.outputs.error_message }}",
-              "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              "error_message": "${{ needs.validate-command.outputs.error_message }}"
             }
           comment_id: ${{ needs.post-interim.outputs.comment_id }}
 
@@ -586,7 +631,7 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          repository: hdamker/tooling # For testing; production will use camaraproject/tooling
           ref: release-automation-mvp
           path: _tooling
           sparse-checkout: |
@@ -844,7 +889,7 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          repository: hdamker/tooling # For testing; production will use camaraproject/tooling
           ref: release-automation-mvp
           path: _tooling
           sparse-checkout: |
@@ -909,7 +954,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
         run: pip install pyyaml pystache requests
@@ -1043,7 +1088,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
         run: pip install pyyaml pystache
@@ -1309,7 +1354,7 @@ jobs:
   # Phase 5g: Handle PR merge (draft release creation)
   # ─────────────────────────────────────────────────────────────────────────────
   handle-pr-merge:
-    needs: [check-trigger, derive-state]
+    needs: [check-trigger, derive-state, assemble-context]
     if: needs.check-trigger.outputs.trigger_type == 'pr_merge'
     runs-on: ubuntu-latest
     outputs:
@@ -1465,7 +1510,7 @@ jobs:
         if: steps.create-draft.outputs.success == 'true' && needs.derive-state.outputs.release_issue_number != ''
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          repository: hdamker/tooling # For testing; production will use camaraproject/tooling
           ref: release-automation-mvp
           path: _tooling
           sparse-checkout: |
@@ -1481,18 +1526,10 @@ jobs:
           release_tag: ${{ needs.derive-state.outputs.release_tag }}
           run_id: ${{ github.run_id }}
           template: draft_created
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
           context: |
             {
-              "release_tag": "${{ needs.derive-state.outputs.release_tag }}",
-              "state": "draft-ready",
-              "draft_release_url": "${{ steps.create-draft.outputs.draft_release_url }}",
-              "snapshot_id": "${{ needs.derive-state.outputs.snapshot_id }}",
-              "release_type": "${{ needs.derive-state.outputs.release_type }}",
-              "release_pr_number": "${{ needs.derive-state.outputs.release_pr_number }}",
-              "release_pr_url": "${{ github.server_url }}/${{ github.repository }}/pull/${{ needs.derive-state.outputs.release_pr_number }}",
-              "apis_json": ${{ needs.derive-state.outputs.apis_json || '[]' }},
-              "commonalities_release": "${{ needs.derive-state.outputs.commonalities_release }}",
-              "identity_consent_management_release": "${{ needs.derive-state.outputs.identity_consent_management_release }}"
+              "draft_release_url": "${{ steps.create-draft.outputs.draft_release_url }}"
             }
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -1510,7 +1547,7 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          repository: hdamker/tooling # For testing; production will use camaraproject/tooling
           ref: release-automation-mvp
           path: _tooling
           sparse-checkout: |
@@ -1579,7 +1616,16 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   update-issue:
     name: "sync-issue"
-    needs: [check-trigger, derive-state, create-snapshot, discard-snapshot, delete-draft, handle-pr-merge, handle-issue-event]
+    needs:
+      [
+        check-trigger,
+        derive-state,
+        create-snapshot,
+        discard-snapshot,
+        delete-draft,
+        handle-pr-merge,
+        handle-issue-event,
+      ]
     if: |
       always() &&
       needs.derive-state.outputs.config_error == '' &&
@@ -1601,7 +1647,7 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          repository: hdamker/tooling # For testing; production will use camaraproject/tooling
           ref: release-automation-mvp
           path: _tooling
           sparse-checkout: |
@@ -1671,7 +1717,20 @@ jobs:
   # Phase 7: Post final result comment
   # ─────────────────────────────────────────────────────────────────────────────
   post-result:
-    needs: [check-trigger, post-interim, derive-state, validate-command, create-snapshot, discard-snapshot, delete-draft, publish-release, create-sync-pr, publish-confirmation]
+    needs:
+      [
+        check-trigger,
+        post-interim,
+        derive-state,
+        validate-command,
+        create-snapshot,
+        discard-snapshot,
+        delete-draft,
+        publish-release,
+        create-sync-pr,
+        publish-confirmation,
+        assemble-context,
+      ]
     if: |
       always() &&
       needs.check-trigger.outputs.trigger_type == 'slash_command' &&
@@ -1683,7 +1742,7 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: hdamker/tooling  # For testing; production will use camaraproject/tooling
+          repository: hdamker/tooling # For testing; production will use camaraproject/tooling
           ref: release-automation-mvp
           path: _tooling
           sparse-checkout: |
@@ -1751,35 +1810,11 @@ jobs:
       - name: Build Result Context
         id: context
         run: |
-          # Build base context from derive-state and check-trigger outputs
+          # Build delta context
           CONTEXT=$(jq -n \
-            --arg command "${{ needs.check-trigger.outputs.command }}" \
-            --arg user "${{ needs.check-trigger.outputs.user }}" \
             --arg reason "${{ steps.reason.outputs.reason }}" \
-            --arg release_tag "${{ needs.derive-state.outputs.release_tag }}" \
-            --arg state "${{ needs.derive-state.outputs.state }}" \
-            --arg snapshot_id "${{ needs.derive-state.outputs.snapshot_id }}" \
-            --arg snapshot_branch "${{ needs.derive-state.outputs.snapshot_branch }}" \
-            --arg release_review_branch "${{ needs.derive-state.outputs.release_review_branch }}" \
-            --arg release_type "${{ needs.derive-state.outputs.release_type }}" \
-            --arg src_commit_sha "${{ needs.derive-state.outputs.src_commit_sha }}" \
-            --arg commonalities_release "${{ needs.derive-state.outputs.commonalities_release }}" \
-            --arg icm_release "${{ needs.derive-state.outputs.identity_consent_management_release }}" \
-            --arg workflow_run_url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             '{
-              command: $command,
-              user: $user,
-              reason: $reason,
-              release_tag: $release_tag,
-              state: $state,
-              snapshot_id: $snapshot_id,
-              snapshot_branch: $snapshot_branch,
-              release_review_branch: $release_review_branch,
-              release_type: $release_type,
-              src_commit_sha: $src_commit_sha,
-              commonalities_release: $commonalities_release,
-              identity_consent_management_release: $icm_release,
-              workflow_run_url: $workflow_run_url
+              reason: $reason
             }')
 
           # Add create-snapshot outputs if that job ran successfully
@@ -1843,13 +1878,7 @@ jobs:
               '. + {error_message: $err}')
           fi
 
-          # Add apis_json from derive-state (parsed to apis list in post-bot-comment action)
-          APIS_JSON='${{ needs.derive-state.outputs.apis_json }}'
-          if [ -n "$APIS_JSON" ] && [ "$APIS_JSON" != "" ]; then
-            CONTEXT=$(echo "$CONTEXT" | jq \
-              --arg apis "$APIS_JSON" \
-              '. + {apis_json: $apis}')
-          fi
+
 
           echo "context<<EOF" >> $GITHUB_OUTPUT
           echo "$CONTEXT" >> $GITHUB_OUTPUT
@@ -1862,6 +1891,8 @@ jobs:
           release_tag: ${{ needs.derive-state.outputs.release_tag }}
           run_id: ${{ github.run_id }}
           template: ${{ steps.template.outputs.template }}
+          # Use base_context + delta
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
           context: ${{ steps.context.outputs.context }}
           comment_id: ${{ needs.post-interim.outputs.comment_id }}
 

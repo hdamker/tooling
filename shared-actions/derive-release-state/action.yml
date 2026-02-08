@@ -12,56 +12,65 @@ description: |
 
 inputs:
   release_tag:
-    description: 'Release tag to check - DEPRECATED: leave empty to auto-derive from repository artifacts'
+    description: "Release tag to check - DEPRECATED: leave empty to auto-derive from repository artifacts"
     required: false
-    default: ''
+    default: ""
 
 outputs:
   release_tag:
-    description: 'Release tag from authoritative source (release-plan.yaml or release-metadata.yaml)'
+    description: "Release tag from authoritative source (release-plan.yaml or release-metadata.yaml)"
     value: ${{ steps.derive.outputs.release_tag }}
   state:
-    description: 'Current release state (planned|snapshot-active|draft-ready|published|not_planned)'
+    description: "Current release state (planned|snapshot-active|draft-ready|published|not_planned)"
     value: ${{ steps.derive.outputs.state }}
   snapshot_id:
     description: 'Current snapshot ID if active (e.g., "r4.1-abc1234")'
     value: ${{ steps.derive.outputs.snapshot_id }}
   snapshot_branch:
-    description: 'Current snapshot branch name if active'
+    description: "Current snapshot branch name if active"
     value: ${{ steps.derive.outputs.snapshot_branch }}
   release_review_branch:
-    description: 'Current release-review branch name if active'
+    description: "Current release-review branch name if active"
     value: ${{ steps.derive.outputs.release_review_branch }}
   release_pr_number:
-    description: 'Release PR number if exists'
+    description: "Release PR number if exists"
     value: ${{ steps.derive.outputs.release_pr_number }}
   src_commit_sha:
-    description: 'Source commit SHA the snapshot was created from'
+    description: "Source commit SHA the snapshot was created from"
     value: ${{ steps.derive.outputs.src_commit_sha }}
   release_type:
-    description: 'Release type from release-metadata.yaml (e.g., initial, patch)'
+    description: "Release type from release-metadata.yaml (e.g., initial, patch)"
     value: ${{ steps.derive.outputs.release_type }}
   apis_json:
-    description: 'JSON array of API metadata from release-metadata.yaml'
+    description: "JSON array of API metadata from release-metadata.yaml"
     value: ${{ steps.derive.outputs.apis_json }}
   commonalities_release:
-    description: 'Commonalities release dependency from release-metadata.yaml'
+    description: "Commonalities release dependency from release-metadata.yaml"
     value: ${{ steps.derive.outputs.commonalities_release }}
   identity_consent_management_release:
-    description: 'ICM release dependency from release-metadata.yaml'
+    description: "ICM release dependency from release-metadata.yaml"
     value: ${{ steps.derive.outputs.identity_consent_management_release }}
   source:
-    description: 'Source of release_tag (release-plan.yaml|release-metadata.yaml|tag)'
+    description: "Source of release_tag (release-plan.yaml|release-metadata.yaml|tag)"
     value: ${{ steps.derive.outputs.source }}
   config_error:
-    description: 'Configuration error message if state derivation failed (empty if successful)'
+    description: "Configuration error message if state derivation failed (empty if successful)"
     value: ${{ steps.derive.outputs.config_error }}
   config_error_type:
-    description: 'Type of configuration error: missing_file|malformed_yaml|missing_field (empty if successful)'
+    description: "Type of configuration error: missing_file|malformed_yaml|missing_field (empty if successful)"
     value: ${{ steps.derive.outputs.config_error_type }}
   release_issue_number:
-    description: 'Release Issue number if found (empty if no workflow-owned issue exists)'
+    description: "Release Issue number if found (empty if no workflow-owned issue exists)"
     value: ${{ steps.derive.outputs.release_issue_number }}
+  release_plan_url:
+    description: "URL to release-plan.yaml"
+    value: ${{ steps.derive.outputs.release_plan_url }}
+  src_commit_sha_short:
+    description: "Short SHA of source commit"
+    value: ${{ steps.derive.outputs.src_commit_sha_short }}
+  meta_release:
+    description: "Release metadata summary string"
+    value: ${{ steps.derive.outputs.meta_release }}
 
 runs:
   using: composite
@@ -69,7 +78,7 @@ runs:
     - name: Setup Python
       uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
       with:
-        python-version: '3.11'
+        python-version: "3.11"
 
     - name: Install dependencies
       shell: bash
@@ -80,6 +89,7 @@ runs:
       shell: python
       env:
         GITHUB_TOKEN: ${{ github.token }}
+        GITHUB_SERVER_URL: ${{ github.server_url }}
         RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
         REPO: ${{ github.repository }}
         SCRIPTS_PATH: ${{ github.action_path }}/../../release_automation/scripts
@@ -103,6 +113,7 @@ runs:
         repo = os.environ['REPO']
         token = os.environ.get('GITHUB_TOKEN')
         release_tag_input = os.environ.get('RELEASE_TAG_INPUT', '').strip()
+        server_url = os.environ.get('GITHUB_SERVER_URL', 'https://github.com')
 
         gh = GitHubClient(repo=repo, token=token)
         manager = ReleaseStateManager(github_client=gh)
@@ -130,6 +141,9 @@ runs:
                 f.write(f"config_error={error.message}\n")
                 f.write(f"config_error_type={error.error_type}\n")
                 f.write("release_issue_number=\n")
+                f.write("release_plan_url=\n")
+                f.write("src_commit_sha_short=\n")
+                f.write("meta_release=\n")
 
             # Log error (but don't fail the action - let workflow decide)
             print(f"::warning::Configuration error: {error.message}")
@@ -151,6 +165,26 @@ runs:
         if release_tag:
             snapshot = manager.get_current_snapshot(release_tag)
 
+        # Compute derived values
+        release_plan_url = f"{server_url}/{repo}/blob/main/release-plan.yaml"
+
+        src_commit_sha_short = ''
+        if snapshot and snapshot.src_commit_sha:
+            src_commit_sha_short = snapshot.src_commit_sha[:7]
+            
+        # Compute meta_release
+        meta_release = f"Release {release_tag}" if release_tag else ""
+        rtype = ""
+        if snapshot:
+             rtype = snapshot.release_type
+        elif release_info.release_type:
+             rtype = release_info.release_type
+
+        if rtype:
+             meta_release += f" ({rtype})"
+        elif state.value == "planned":
+             meta_release += " (planned)"
+
         # Write outputs to GITHUB_OUTPUT
         with open(output_file, 'a') as f:
             f.write(f"release_tag={release_tag or ''}\n")
@@ -161,6 +195,9 @@ runs:
             f.write("config_error_type=\n")
             issue_num = release_issue_number if release_issue_number else ''
             f.write(f"release_issue_number={issue_num}\n")
+            f.write(f"release_plan_url={release_plan_url}\n")
+            f.write(f"src_commit_sha_short={src_commit_sha_short}\n")
+            f.write(f"meta_release={meta_release}\n")
 
             if snapshot:
                 import json

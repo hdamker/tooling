@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from .github_client import GitHubClient
+from . import config
 
 
 # Constants for release issue identification (duplicated from issue_sync to avoid circular imports)
@@ -29,11 +30,11 @@ class ReleaseState(Enum):
                                  ↘ (discard)
         Any state can transition to NOT_PLANNED via release-plan.yaml changes
     """
-    PLANNED = "planned"                # release-plan.yaml defines intent
-    SNAPSHOT_ACTIVE = "snapshot-active"  # Snapshot branch exists
-    DRAFT_READY = "draft-ready"        # Draft release created
-    PUBLISHED = "published"            # Tag exists (final state)
-    NOT_PLANNED = "not_planned"        # target_release_type set to "none"
+    PLANNED = config.STATE_PLANNED                # release-plan.yaml defines intent
+    SNAPSHOT_ACTIVE = config.STATE_SNAPSHOT_ACTIVE  # Snapshot branch exists
+    DRAFT_READY = config.STATE_DRAFT_READY        # Draft release created
+    PUBLISHED = config.STATE_PUBLISHED            # Tag exists (final state)
+    NOT_PLANNED = config.STATE_NOT_PLANNED        # target_release_type set to "none"
 
 
 @dataclass
@@ -107,6 +108,7 @@ class ReleaseInfoResult:
     source: Optional[str] = None  # 'release-plan.yaml' | 'release-metadata.yaml' | 'tag'
     config_error: Optional[ConfigurationError] = None
     release_issue_number: Optional[int] = None  # GitHub issue number if found
+    release_type: Optional[str] = None  # Release type if available
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -124,6 +126,7 @@ class ReleaseInfoResult:
                 "config_error": None,
                 "config_error_type": None,
                 "release_issue_number": self.release_issue_number,
+                "release_type": self.release_type,
             }
         else:
             return {
@@ -134,6 +137,7 @@ class ReleaseInfoResult:
                 "config_error": self.config_error.message if self.config_error else "Unknown error",
                 "config_error_type": self.config_error.error_type if self.config_error else "unknown",
                 "release_issue_number": None,
+                "release_type": None,
             }
 
 
@@ -180,7 +184,7 @@ class ReleaseStateManager:
             return ReleaseState.PUBLISHED
 
         # Step 2: Check for snapshot branch
-        snapshot_branches = self.gh.list_branches(f"release-snapshot/{release_tag}-*")
+        snapshot_branches = self.gh.list_branches(f"{config.SNAPSHOT_BRANCH_PREFIX}{release_tag}-*")
 
         if snapshot_branches:
             # Step 3: Check for draft release
@@ -215,7 +219,7 @@ class ReleaseStateManager:
         Returns:
             SnapshotInfo if a snapshot exists, None otherwise
         """
-        branches = self.gh.list_branches(f"release-snapshot/{release_tag}-*")
+        branches = self.gh.list_branches(f"{config.SNAPSHOT_BRANCH_PREFIX}{release_tag}-*")
 
         if not branches:
             return None
@@ -227,7 +231,7 @@ class ReleaseStateManager:
 
         # Derive snapshot_id from branch name
         # release-snapshot/r4.1-abc1234 → r4.1-abc1234
-        snapshot_id = branch_name.replace("release-snapshot/", "")
+        snapshot_id = branch_name.replace(config.SNAPSHOT_BRANCH_PREFIX, "")
 
         # Read release-metadata.yaml from the snapshot branch
         metadata = self._read_release_metadata(branch_name)
@@ -261,7 +265,7 @@ class ReleaseStateManager:
             created_at = datetime.now()
 
         # Find the Release PR for this snapshot branch
-        release_review_branch = f"release-review/{snapshot_id}"
+        release_review_branch = f"{config.RELEASE_REVIEW_BRANCH_PREFIX}{snapshot_id}"
         release_pr_number = self.gh.find_pr_for_branch(release_review_branch)
 
         return SnapshotInfo(
@@ -371,11 +375,12 @@ class ReleaseStateManager:
                 state=ReleaseState.PUBLISHED,
                 snapshot_branch=None,
                 source="tag",
-                release_issue_number=self.find_release_issue(plan_release_tag)
+                release_issue_number=self.find_release_issue(plan_release_tag),
+                release_type=plan_release_type
             )
 
         # Check for any snapshot branches for the planned release
-        snapshot_branches = self.gh.list_branches(f"release-snapshot/{plan_release_tag}-*")
+        snapshot_branches = self.gh.list_branches(f"{config.SNAPSHOT_BRANCH_PREFIX}{plan_release_tag}-*")
 
         if snapshot_branches:
             # Snapshot exists - read release_tag from release-metadata.yaml
@@ -387,7 +392,7 @@ class ReleaseStateManager:
             else:
                 # Fall back to extracting from branch name
                 # release-snapshot/r4.1-abc1234 → r4.1
-                snapshot_id = snapshot_branch.replace("release-snapshot/", "")
+                snapshot_id = snapshot_branch.replace(config.SNAPSHOT_BRANCH_PREFIX, "")
                 metadata_release_tag = snapshot_id.split("-")[0] if "-" in snapshot_id else snapshot_id
 
             # Determine if draft ready
@@ -403,7 +408,8 @@ class ReleaseStateManager:
                 state=state,
                 snapshot_branch=snapshot_branch,
                 source="release-metadata.yaml",
-                release_issue_number=self.find_release_issue(effective_tag)
+                release_issue_number=self.find_release_issue(effective_tag),
+                release_type=snapshot.release_type if 'snapshot' in locals() and snapshot else None
             )
 
         # No snapshot - use release-plan.yaml state
@@ -441,13 +447,13 @@ class ReleaseStateManager:
                 - (dict, None) if successful
                 - (None, ConfigurationError) if error
         """
-        content = self.gh.get_file_content("release-plan.yaml", ref)
+        content = self.gh.get_file_content(config.RELEASE_PLAN_FILE, ref)
 
         if content is None:
             return None, ConfigurationError(
                 error_type="missing_file",
-                message=f"No release-plan.yaml found on {ref} branch",
-                file_path="release-plan.yaml"
+                message=f"No {config.RELEASE_PLAN_FILE} found on {ref} branch",
+                file_path=config.RELEASE_PLAN_FILE
             )
 
         # Try to parse YAML
@@ -456,16 +462,16 @@ class ReleaseStateManager:
         except yaml.YAMLError as e:
             return None, ConfigurationError(
                 error_type="malformed_yaml",
-                message=f"Invalid YAML syntax in release-plan.yaml: {e}",
-                file_path="release-plan.yaml"
+                message=f"Invalid YAML syntax in {config.RELEASE_PLAN_FILE}: {e}",
+                file_path=config.RELEASE_PLAN_FILE
             )
 
         # Validate plan is a dict (not null or other type)
         if not isinstance(plan, dict):
             return None, ConfigurationError(
                 error_type="malformed_yaml",
-                message="release-plan.yaml must contain a YAML mapping (not empty or scalar)",
-                file_path="release-plan.yaml"
+                message=f"{config.RELEASE_PLAN_FILE} must contain a YAML mapping (not empty or scalar)",
+                file_path=config.RELEASE_PLAN_FILE
             )
 
         # Validate required fields
@@ -473,8 +479,8 @@ class ReleaseStateManager:
         if not repository or not isinstance(repository, dict):
             return None, ConfigurationError(
                 error_type="missing_field",
-                message="Missing 'repository' section in release-plan.yaml",
-                file_path="release-plan.yaml",
+                message=f"Missing 'repository' section in {config.RELEASE_PLAN_FILE}",
+                file_path=config.RELEASE_PLAN_FILE,
                 field_path="repository"
             )
 
@@ -482,8 +488,8 @@ class ReleaseStateManager:
         if not target_release_tag:
             return None, ConfigurationError(
                 error_type="missing_field",
-                message="Missing 'target_release_tag' in release-plan.yaml repository section",
-                file_path="release-plan.yaml",
+                message=f"Missing 'target_release_tag' in {config.RELEASE_PLAN_FILE} repository section",
+                file_path=config.RELEASE_PLAN_FILE,
                 field_path="repository.target_release_tag"
             )
 
@@ -499,7 +505,7 @@ class ReleaseStateManager:
         Returns:
             Parsed YAML content as dict, or None if file doesn't exist or is invalid
         """
-        content = self.gh.get_file_content("release-plan.yaml", ref)
+        content = self.gh.get_file_content(config.RELEASE_PLAN_FILE, ref)
         if not content:
             return None
 
@@ -519,12 +525,12 @@ class ReleaseStateManager:
         Returns:
             Parsed YAML content as dict, or None if file doesn't exist or is invalid
         """
-        content = self.gh.get_file_content("release-metadata.yaml", ref)
+        content = self.gh.get_file_content(config.RELEASE_METADATA_FILE, ref)
         if not content:
             return None
 
         try:
             return yaml.safe_load(content)
         except yaml.YAMLError as e:
-            print(f"Warning: Failed to parse release-metadata.yaml from {ref}: {e}")
+            print(f"Warning: Failed to parse {config.RELEASE_METADATA_FILE} from {ref}: {e}")
             return None

@@ -6,7 +6,7 @@ description: |
 
 inputs:
   issue_number:
-    description: 'Issue number to comment on'
+    description: "Issue number to comment on"
     required: true
   release_tag:
     description: 'Release tag for marker identification (e.g., "r4.1")'
@@ -15,19 +15,23 @@ inputs:
     description: 'Template name (e.g., "snapshot_created", "command_rejected")'
     required: true
   context:
-    description: 'JSON string with template variables'
+    description: "JSON string with template variables"
     required: true
-  comment_id:
-    description: 'Existing comment ID to update (optional - will search by marker if not provided)'
+  base_context:
+    description: "JSON string with base context (e.g. from assemble-context)"
     required: false
-    default: ''
+    default: "{}"
+  comment_id:
+    description: "Existing comment ID to update (optional - will search by marker if not provided)"
+    required: false
+    default: ""
   run_id:
-    description: 'Workflow run ID for marker uniqueness (preserves comment history across runs)'
+    description: "Workflow run ID for marker uniqueness (preserves comment history across runs)"
     required: true
 
 outputs:
   comment_id:
-    description: 'ID of the created or updated comment'
+    description: "ID of the created or updated comment"
     value: ${{ steps.post.outputs.comment_id }}
 
 runs:
@@ -36,7 +40,7 @@ runs:
     - name: Setup Python
       uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
       with:
-        python-version: '3.11'
+        python-version: "3.11"
 
     - name: Install dependencies
       shell: bash
@@ -48,6 +52,7 @@ runs:
       env:
         TEMPLATE_NAME: ${{ inputs.template }}
         CONTEXT_JSON: ${{ inputs.context }}
+        BASE_CONTEXT_JSON: ${{ inputs.base_context }}
         RELEASE_TAG: ${{ inputs.release_tag }}
         RUN_ID: ${{ inputs.run_id }}
         SCRIPTS_PATH: ${{ github.action_path }}/../../release_automation/scripts
@@ -69,12 +74,27 @@ runs:
         from release_automation.scripts.context_builder import build_context
 
         # Parse context
+        base_context_json = os.environ.get('BASE_CONTEXT_JSON', '{}')
         context_json = os.environ['CONTEXT_JSON']
+
+        base_context = {}
+        if base_context_json:
+            try:
+                base_context = json.loads(base_context_json)
+                if not isinstance(base_context, dict):
+                    base_context = {}
+            except json.JSONDecodeError:
+                print("::warning::Invalid base_context JSON, ignoring")
+
         try:
-            raw_context = json.loads(context_json)
+            raw_context_delta = json.loads(context_json)
         except json.JSONDecodeError as e:
             print(f"::error::Invalid JSON context: {e}")
             sys.exit(1)
+
+        # Merge delta into base
+        raw_context = base_context.copy()
+        raw_context.update(raw_context_delta)
 
         # Convert apis_json to apis list if present
         # Handle both cases: string (from shell) or list (from jq JSON parsing)
