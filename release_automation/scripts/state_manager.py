@@ -425,7 +425,8 @@ class ReleaseStateManager:
             state=state,
             snapshot_branch=None,
             source="release-plan.yaml",
-            release_issue_number=self.find_release_issue(plan_release_tag)
+            release_issue_number=self.find_release_issue(plan_release_tag),
+            release_type=plan_release_type
         )
 
     def _read_release_plan_with_validation(

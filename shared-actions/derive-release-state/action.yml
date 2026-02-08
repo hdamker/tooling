@@ -172,18 +172,11 @@ runs:
         if snapshot and snapshot.src_commit_sha:
             src_commit_sha_short = snapshot.src_commit_sha[:7]
             
-        # Compute meta_release
-        meta_release = f"Release {release_tag}" if release_tag else ""
-        rtype = ""
-        if snapshot:
-             rtype = snapshot.release_type
-        elif release_info.release_type:
-             rtype = release_info.release_type
-
-        if rtype:
-             meta_release += f" ({rtype})"
-        elif state.value == "planned":
-             meta_release += " (planned)"
+        # Read meta_release from release-plan.yaml (raw cycle name, e.g., "Fall26")
+        meta_release = ""
+        plan = manager._read_release_plan()
+        if plan:
+            meta_release = plan.get("repository", {}).get("meta_release", "") or ""
 
         # Write outputs to GITHUB_OUTPUT
         with open(output_file, 'a') as f:
@@ -199,8 +192,8 @@ runs:
             f.write(f"src_commit_sha_short={src_commit_sha_short}\n")
             f.write(f"meta_release={meta_release}\n")
 
+            import json
             if snapshot:
-                import json
                 f.write(f"snapshot_id={snapshot.snapshot_id}\n")
                 f.write(f"snapshot_branch={snapshot.snapshot_branch}\n")
                 f.write(f"release_review_branch={snapshot.release_review_branch}\n")
@@ -212,15 +205,30 @@ runs:
                 f.write(f"commonalities_release={snapshot.commonalities_release}\n")
                 f.write(f"identity_consent_management_release={snapshot.identity_consent_management_release}\n")
             else:
+                # No snapshot — use plan data (already read above) for PLANNED state context
+                plan_apis = []
+                plan_commonalities = ""
+                plan_icm = ""
+                plan_rtype = release_info.release_type or ""
+                if plan:
+                    for api in plan.get("apis", []):
+                        plan_apis.append({
+                            "api_name": api.get("api_name", ""),
+                            "api_version": api.get("target_api_version", "")
+                        })
+                    deps = plan.get("dependencies", {})
+                    plan_commonalities = deps.get("commonalities_release", "")
+                    plan_icm = deps.get("identity_consent_management_release", "")
+
                 f.write("snapshot_id=\n")
                 f.write(f"snapshot_branch={snapshot_branch or ''}\n")
                 f.write("release_review_branch=\n")
                 f.write("src_commit_sha=\n")
                 f.write("release_pr_number=\n")
-                f.write("release_type=\n")
-                f.write("apis_json=\n")
-                f.write("commonalities_release=\n")
-                f.write("identity_consent_management_release=\n")
+                f.write(f"release_type={plan_rtype}\n")
+                f.write(f"apis_json={json.dumps(plan_apis)}\n")
+                f.write(f"commonalities_release={plan_commonalities}\n")
+                f.write(f"identity_consent_management_release={plan_icm}\n")
 
         # Log result for debugging
         print(f"Release tag: {release_tag} (from {source})")
