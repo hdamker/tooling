@@ -881,7 +881,7 @@ jobs:
   # Phase 5e: Handle publish-release confirmation (no --confirm flag)
   # ─────────────────────────────────────────────────────────────────────────────
   publish-confirmation:
-    needs: [check-trigger, derive-state, post-interim, validate-command]
+    needs: [check-trigger, derive-state, assemble-context, post-interim, validate-command]
     if: |
       needs.check-trigger.outputs.command == 'publish-release' &&
       needs.validate-command.outputs.allowed == 'true' &&
@@ -914,17 +914,13 @@ jobs:
           release_tag: ${{ needs.derive-state.outputs.release_tag }}
           run_id: ${{ github.run_id }}
           template: publish_confirmation
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
           context: |
             {
-              "release_tag": "${{ needs.derive-state.outputs.release_tag }}",
-              "apis": ${{ needs.derive-state.outputs.apis_json || '[]' }},
-              "commonalities_release": "${{ needs.derive-state.outputs.commonalities_release }}",
-              "identity_consent_management_release": "${{ needs.derive-state.outputs.identity_consent_management_release }}",
               "draft_release_url": "${{ steps.context.outputs.draft_release_url }}",
               "src_commit_sha_short": "${{ steps.context.outputs.src_commit_sha_short }}"
             }
           comment_id: ${{ needs.post-interim.outputs.comment_id }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 5f: Handle publish-release (with --confirm flag)
@@ -1538,10 +1534,12 @@ jobs:
   # Phase 5f: Handle issue close/reopen events
   # ─────────────────────────────────────────────────────────────────────────────
   handle-issue-event:
-    needs: [check-trigger, derive-state]
+    needs: [check-trigger, derive-state, assemble-context]
     if: |
-      needs.check-trigger.outputs.trigger_type == 'issue_close' ||
-      needs.check-trigger.outputs.trigger_type == 'issue_reopen'
+      always() &&
+      needs.assemble-context.result == 'success' &&
+      (needs.check-trigger.outputs.trigger_type == 'issue_close' ||
+      needs.check-trigger.outputs.trigger_type == 'issue_reopen')
     runs-on: ubuntu-latest
     outputs:
       action_taken: ${{ steps.handle.outputs.action_taken }}
@@ -1605,11 +1603,9 @@ jobs:
           release_tag: ${{ needs.derive-state.outputs.release_tag }}
           run_id: ${{ github.run_id }}
           template: issue_reopened
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
           context: |
             {
-              "release_tag": "${{ needs.derive-state.outputs.release_tag }}",
-              "state": "${{ needs.derive-state.outputs.state }}",
-              "snapshot_id": "${{ needs.derive-state.outputs.snapshot_id }}",
               "reason": "Cannot close Release Issue while release is in progress"
             }
 
@@ -1622,6 +1618,7 @@ jobs:
       [
         check-trigger,
         derive-state,
+        assemble-context,
         create-snapshot,
         discard-snapshot,
         delete-draft,
@@ -1687,9 +1684,9 @@ jobs:
           release_tag: ${{ needs.derive-state.outputs.release_tag }}
           run_id: ${{ github.run_id }}
           template: state_not_planned
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
           context: |
             {
-              "release_tag": "${{ needs.derive-state.outputs.release_tag }}",
               "state": "not-planned"
             }
 
@@ -1703,16 +1700,12 @@ jobs:
           release_tag: ${{ needs.derive-state.outputs.release_tag }}
           run_id: ${{ github.run_id }}
           template: issue_created
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
           context: |
             {
-              "release_tag": "${{ needs.derive-state.outputs.release_tag }}",
               "state": "planned",
-              "release_type": "${{ needs.derive-state.outputs.release_type }}",
               "trigger_type": "${{ needs.check-trigger.outputs.trigger_type }}",
-              "release_plan_url": "${{ github.server_url }}/${{ github.repository }}/blob/main/release-plan.yaml",
-              "apis_json": ${{ needs.derive-state.outputs.apis_json || '[]' }},
-              "commonalities_release": "${{ needs.derive-state.outputs.commonalities_release }}",
-              "identity_consent_management_release": "${{ needs.derive-state.outputs.identity_consent_management_release }}"
+              "release_plan_url": "${{ github.server_url }}/${{ github.repository }}/blob/main/release-plan.yaml"
             }
 
   # ─────────────────────────────────────────────────────────────────────────────
