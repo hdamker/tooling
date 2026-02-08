@@ -2,7 +2,7 @@
 Triggered by merge of [Release PR #{{release_pr_number}}]({{release_pr_url}}).
 **Draft release:** [`{{release_tag}}`]({{draft_release_url}})
 
-<details><summary>Release {{release_tag}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}})</summary>
+<details><summary>Release {{release_tag}}{{#short_type}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}}){{/short_type}}</summary>
 
 | API | Version |
 |-----|---------|
@@ -10,7 +10,8 @@ Triggered by merge of [Release PR #{{release_pr_number}}]({{release_pr_url}}).
 | {{api_name}} | `{{api_version}}` |
 {{/apis}}
 
-**Dependencies:** Commonalities {{commonalities_release}}{{#identity_consent_management_release}}, ICM {{identity_consent_management_release}}{{/identity_consent_management_release}}
+{{#commonalities_release}}**Dependencies:** Commonalities {{commonalities_release}}{{#identity_consent_management_release}}, ICM {{identity_consent_management_release}}{{/identity_consent_management_release}}
+{{/commonalities_release}}
 </details>
 
 **Valid actions:**

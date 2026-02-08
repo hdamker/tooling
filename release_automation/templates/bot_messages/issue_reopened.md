@@ -4,7 +4,7 @@
 {{#state_snapshot_active}}**Release PR:** [#{{release_pr_number}}]({{release_pr_url}}){{/state_snapshot_active}}
 {{#state_draft_ready}}**Draft release:** [`{{release_tag}}`]({{draft_release_url}}){{/state_draft_ready}}
 
-<details><summary>Release {{release_tag}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}})</summary>
+<details><summary>Release {{release_tag}}{{#short_type}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}}){{/short_type}}</summary>
 
 | API | Version |
 |-----|---------|
@@ -12,7 +12,8 @@
 | {{api_name}} | `{{api_version}}` |
 {{/apis}}
 
-**Dependencies:** Commonalities {{commonalities_release}}{{#identity_consent_management_release}}, ICM {{identity_consent_management_release}}{{/identity_consent_management_release}}
+{{#commonalities_release}}**Dependencies:** Commonalities {{commonalities_release}}{{#identity_consent_management_release}}, ICM {{identity_consent_management_release}}{{/identity_consent_management_release}}
+{{/commonalities_release}}
 </details>
 
 **Valid actions:**
