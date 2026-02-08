@@ -8,14 +8,14 @@ and candidate changes from merged PRs.
 
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import pystache
 
 
-HEADER_TEMPLATE = """\
-# Changelog {repo_name}
+TITLE_TEMPLATE = "# Changelog {repo_name}"
 
+PREAMBLE = """\
 **Please be aware that the project will have frequent updates to the main \
 branch. There are no compatibility guarantees associated with code in any \
 branch, including main, until it has been released. For example, changes may \
@@ -30,6 +30,12 @@ as follows:
 * for subsequent release-candidate(s), only the delta to the previous release-candidate
 * for a public release, the consolidated changes since the previous public release
 """
+
+# Backward compatibility
+HEADER_TEMPLATE = TITLE_TEMPLATE + "\n\n" + PREAMBLE
+
+TOC_START_MARKER = "<!-- TOC:START -->"
+TOC_END_MARKER = "<!-- TOC:END -->"
 
 RELEASE_TYPE_MAP = {
     "pre-release-alpha": "pre-release",
@@ -177,6 +183,9 @@ class ChangelogGenerator:
             header = self._generate_header(repo_name)
             filepath.write_text(header + "\n" + content + "\n")
 
+        # Regenerate TOC after content changes
+        self._update_toc(filepath)
+
         return relative_path
 
     def _find_header_end(self, content: str) -> int:
@@ -222,13 +231,127 @@ class ChangelogGenerator:
     def _generate_header(self, repo_name: str) -> str:
         """Generate the file header for new CHANGELOG files.
 
+        Includes empty TOC markers between title and preamble.
+        The TOC content is populated by _update_toc() after sections
+        are written.
+
         Args:
             repo_name: Repository name (e.g., "QualityOnDemand")
 
         Returns:
-            Header text including title and recording rules.
+            Header text including title, TOC markers, and recording rules.
         """
-        return HEADER_TEMPLATE.format(repo_name=repo_name)
+        title = TITLE_TEMPLATE.format(repo_name=repo_name)
+        return f"{title}\n\n{TOC_START_MARKER}\n{TOC_END_MARKER}\n\n{PREAMBLE}"
+
+    @staticmethod
+    def _heading_to_anchor(heading_text: str) -> str:
+        """Convert heading text to a GitHub-compatible anchor ID.
+
+        GitHub anchor rules: lowercase, remove dots/special chars
+        (except hyphens), replace spaces with hyphens.
+
+        Examples:
+            "r3.2"         -> "r32"
+            "r10.1"        -> "r101"
+            "v0.10.0-rc2"  -> "v0100-rc2"
+        """
+        text = heading_text.lower()
+        text = text.replace(".", "")
+        text = text.replace(" ", "-")
+        text = re.sub(r"[^a-z0-9\-]", "", text)
+        return text
+
+    @staticmethod
+    def _extract_toc_entries(content: str) -> List[Dict[str, Any]]:
+        """Extract TOC entries from file content by scanning level-1 headings.
+
+        Finds all ``# rX.Y`` headings and determines if the release is a
+        public release (bold in TOC) by checking the "This {type} contains"
+        line in the few lines following the heading.
+
+        Returns:
+            List of dicts ordered by appearance (newest first):
+            ``[{"heading": "r4.2", "is_public": True}, ...]``
+        """
+        lines = content.split("\n")
+        entries: List[Dict[str, Any]] = []
+        for i, line in enumerate(lines):
+            match = re.match(r"^# (r\d+\.\d+)\s*$", line)
+            if not match:
+                continue
+            heading = match.group(1)
+            is_public = False
+            for j in range(i + 1, min(i + 6, len(lines))):
+                if re.search(
+                    r"This (public release|maintenance release) contains",
+                    lines[j],
+                ):
+                    is_public = True
+                    break
+            entries.append({"heading": heading, "is_public": is_public})
+        return entries
+
+    @staticmethod
+    def _format_toc(entries: List[Dict[str, Any]]) -> str:
+        """Format TOC entries into markdown.
+
+        Public/maintenance releases are bold, pre-releases are plain.
+
+        Returns:
+            TOC section string including ``## Table of Contents`` heading,
+            or empty string if no entries.
+        """
+        if not entries:
+            return ""
+        lines = ["## Table of Contents"]
+        for entry in entries:
+            heading = entry["heading"]
+            anchor = ChangelogGenerator._heading_to_anchor(heading)
+            link = f"[{heading}](#{anchor})"
+            if entry["is_public"]:
+                lines.append(f"- **{link}**")
+            else:
+                lines.append(f"- {link}")
+        return "\n".join(lines) + "\n"
+
+    def _update_toc(self, filepath: Path) -> None:
+        """Regenerate the TOC in-place for the given CHANGELOG file.
+
+        If TOC markers exist, replaces content between them.
+        If no markers found (legacy file), inserts TOC after the title line.
+        """
+        content = filepath.read_text()
+        entries = self._extract_toc_entries(content)
+        toc_text = self._format_toc(entries)
+
+        start_idx = content.find(TOC_START_MARKER)
+        end_idx = content.find(TOC_END_MARKER)
+
+        if start_idx != -1 and end_idx != -1:
+            # Replace between markers
+            end_of_end_marker = end_idx + len(TOC_END_MARKER)
+            if end_of_end_marker < len(content) and content[end_of_end_marker] == "\n":
+                end_of_end_marker += 1
+            new_content = (
+                content[:start_idx]
+                + TOC_START_MARKER + "\n"
+                + toc_text
+                + TOC_END_MARKER + "\n"
+                + content[end_of_end_marker:]
+            )
+        else:
+            # Fallback: insert after title line
+            first_newline = content.index("\n")
+            new_content = (
+                content[:first_newline + 1]
+                + "\n" + TOC_START_MARKER + "\n"
+                + toc_text
+                + TOC_END_MARKER + "\n"
+                + content[first_newline + 1:]
+            )
+
+        filepath.write_text(new_content)
 
     @staticmethod
     def format_api_section(

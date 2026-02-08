@@ -11,6 +11,8 @@ from pathlib import Path
 from release_automation.scripts.changelog_generator import (
     ChangelogGenerator,
     RELEASE_TYPE_MAP,
+    TOC_START_MARKER,
+    TOC_END_MARKER,
 )
 
 
@@ -265,3 +267,143 @@ class TestFileWriting:
         header = generator._generate_header("QualityOnDemand")
         assert "# Changelog QualityOnDemand" in header
         assert "best results, use the latest published release" in header
+
+
+# --- Table of Contents ---
+
+
+class TestTocGeneration:
+    """Tests for Table of Contents generation."""
+
+    # --- Anchor conversion ---
+
+    def test_anchor_simple_release_tag(self):
+        assert ChangelogGenerator._heading_to_anchor("r3.2") == "r32"
+
+    def test_anchor_double_digit_cycle(self):
+        assert ChangelogGenerator._heading_to_anchor("r10.1") == "r101"
+
+    def test_anchor_preserves_hyphens(self):
+        assert ChangelogGenerator._heading_to_anchor("v0.10.0-rc2") == "v0100-rc2"
+
+    # --- Entry extraction ---
+
+    def test_extract_entries_finds_all_headings(self):
+        content = (
+            "# Changelog Repo\n\n"
+            "Preamble text\n\n"
+            "# r4.2\n\n## Release Notes\n\nThis pre-release contains\n\n"
+            "# r4.1\n\n## Release Notes\n\nThis pre-release contains\n"
+        )
+        entries = ChangelogGenerator._extract_toc_entries(content)
+        assert len(entries) == 2
+        assert entries[0]["heading"] == "r4.2"
+        assert entries[1]["heading"] == "r4.1"
+
+    def test_extract_entries_detects_public_release(self):
+        content = (
+            "# r4.2\n\n## Release Notes\n\n"
+            "This public release contains the definition\n"
+        )
+        entries = ChangelogGenerator._extract_toc_entries(content)
+        assert entries[0]["is_public"] is True
+
+    def test_extract_entries_detects_maintenance_release(self):
+        content = (
+            "# r4.2\n\n## Release Notes\n\n"
+            "This maintenance release contains the definition\n"
+        )
+        entries = ChangelogGenerator._extract_toc_entries(content)
+        assert entries[0]["is_public"] is True
+
+    def test_extract_entries_pre_release_not_public(self):
+        content = (
+            "# r4.1\n\n## Release Notes\n\n"
+            "This pre-release contains the definition\n"
+        )
+        entries = ChangelogGenerator._extract_toc_entries(content)
+        assert entries[0]["is_public"] is False
+
+    # --- TOC formatting ---
+
+    def test_format_toc_empty_entries(self):
+        assert ChangelogGenerator._format_toc([]) == ""
+
+    def test_format_toc_public_entry_is_bold(self):
+        entries = [{"heading": "r4.2", "is_public": True}]
+        result = ChangelogGenerator._format_toc(entries)
+        assert "## Table of Contents" in result
+        assert "- **[r4.2](#r42)**" in result
+
+    def test_format_toc_mixed_entries_order(self):
+        entries = [
+            {"heading": "r4.2", "is_public": True},
+            {"heading": "r4.1", "is_public": False},
+        ]
+        result = ChangelogGenerator._format_toc(entries)
+        assert "- **[r4.2](#r42)**" in result
+        assert "- [r4.1](#r41)" in result
+        assert result.index("r4.2") < result.index("r4.1")
+
+    # --- File integration ---
+
+    def test_new_file_contains_toc(self, generator, tmp_path):
+        content = "# r4.1\n\n## Release Notes\n\nThis pre-release contains the definition\n"
+        generator.write_changelog(str(tmp_path), content, "r4.1", "TestRepo")
+        filepath = tmp_path / "CHANGELOG" / "CHANGELOG-r4.md"
+        file_content = filepath.read_text()
+        assert TOC_START_MARKER in file_content
+        assert TOC_END_MARKER in file_content
+        assert "## Table of Contents" in file_content
+        assert "- [r4.1](#r41)" in file_content
+
+    def test_prepend_updates_toc(self, generator, tmp_path):
+        # Write first release (pre-release)
+        content1 = "# r4.1\n\n## Release Notes\n\nThis pre-release contains the definition\n"
+        generator.write_changelog(str(tmp_path), content1, "r4.1", "TestRepo")
+
+        # Write second release (public)
+        content2 = "# r4.2\n\n## Release Notes\n\nThis public release contains the definition\n"
+        generator.write_changelog(str(tmp_path), content2, "r4.2", "TestRepo")
+
+        filepath = tmp_path / "CHANGELOG" / "CHANGELOG-r4.md"
+        file_content = filepath.read_text()
+        # Both entries should be in TOC
+        assert "- **[r4.2](#r42)**" in file_content  # public = bold
+        assert "- [r4.1](#r41)" in file_content       # pre-release = plain
+        # r4.2 should be listed before r4.1 in TOC
+        toc_start = file_content.index(TOC_START_MARKER)
+        toc_end = file_content.index(TOC_END_MARKER)
+        toc_section = file_content[toc_start:toc_end]
+        assert toc_section.index("r4.2") < toc_section.index("r4.1")
+
+    def test_fallback_for_file_without_markers(self, generator, tmp_path):
+        """Legacy files created before TOC feature get markers inserted."""
+        changelog_dir = tmp_path / "CHANGELOG"
+        changelog_dir.mkdir()
+        existing_file = changelog_dir / "CHANGELOG-r4.md"
+        # Write a legacy file without TOC markers
+        legacy_content = (
+            "# Changelog TestRepo\n\n"
+            "**Please be aware...**\n\n"
+            "# r4.1\n\n## Release Notes\n\nThis pre-release contains the definition\n"
+        )
+        existing_file.write_text(legacy_content)
+
+        # Add new release section
+        new_content = "# r4.2\n\n## Release Notes\n\nThis public release contains the definition\n"
+        generator.write_changelog(str(tmp_path), new_content, "r4.2", "TestRepo")
+
+        file_content = existing_file.read_text()
+        assert TOC_START_MARKER in file_content
+        assert TOC_END_MARKER in file_content
+        assert "## Table of Contents" in file_content
+        assert "- **[r4.2](#r42)**" in file_content
+        assert "- [r4.1](#r41)" in file_content
+
+    def test_header_contains_toc_markers(self, generator):
+        """New headers include empty TOC markers between title and preamble."""
+        header = generator._generate_header("TestRepo")
+        assert TOC_START_MARKER in header
+        assert TOC_END_MARKER in header
+        assert header.index(TOC_START_MARKER) < header.index("Please be aware")
