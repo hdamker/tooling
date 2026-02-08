@@ -61,6 +61,10 @@ def main():
         "release_pr_url": f"{os.environ.get('GITHUB_SERVER_URL', '')}/{os.environ.get('GITHUB_REPOSITORY', '')}/pull/{os.environ.get('CTX_RELEASE_PR_NUMBER', '')}" if os.environ.get("CTX_RELEASE_PR_NUMBER") else "",
         "src_commit_sha": os.environ.get("CTX_SRC_COMMIT_SHA", ""), # Not in BotContext directly? Check.
         
+        # Dependencies
+        "commonalities_release": os.environ.get("CTX_COMMONALITIES_RELEASE", ""),
+        "identity_consent_management_release": os.environ.get("CTX_IDENTITY_CONSENT_MANAGEMENT_RELEASE", ""),
+
         # Lists
         "apis": parse_json_list(os.environ.get("CTX_APIS_JSON", "[]")),
         

@@ -9,7 +9,7 @@
 | API | Version |
 |-----|---------|
 {{#apis}}
-| {{api_name}} | `{{target_api_version}}` |
+| {{api_name}} | `{{api_version}}` |
 {{/apis}}
 
 {{#commonalities_release}}**Dependencies:** Commonalities {{commonalities_release}}{{#identity_consent_management_release}}, ICM {{identity_consent_management_release}}{{/identity_consent_management_release}}

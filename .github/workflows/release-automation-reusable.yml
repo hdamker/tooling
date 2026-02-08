@@ -371,6 +371,8 @@ jobs:
           CTX_RELEASE_PR_NUMBER: ${{ needs.derive-state.outputs.release_pr_number }}
           CTX_SRC_COMMIT_SHA: ${{ needs.derive-state.outputs.src_commit_sha }}
           CTX_APIS_JSON: ${{ needs.derive-state.outputs.apis_json }}
+          CTX_COMMONALITIES_RELEASE: ${{ needs.derive-state.outputs.commonalities_release }}
+          CTX_IDENTITY_CONSENT_MANAGEMENT_RELEASE: ${{ needs.derive-state.outputs.identity_consent_management_release }}
           GITHUB_TOKEN: ${{ github.token }}
 
   # ─────────────────────────────────────────────────────────────────────────────
