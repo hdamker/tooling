@@ -1527,7 +1527,9 @@ jobs:
           base_context: ${{ needs.assemble-context.outputs.base_context }}
           context: |
             {
-              "draft_release_url": "${{ steps.create-draft.outputs.draft_release_url }}"
+              "draft_release_url": "${{ steps.create-draft.outputs.draft_release_url }}",
+              "release_pr_number": "${{ github.event.pull_request.number }}",
+              "release_pr_url": "${{ github.event.pull_request.html_url }}"
             }
 
   # ─────────────────────────────────────────────────────────────────────────────
