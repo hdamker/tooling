@@ -1,10 +1,19 @@
-### 📋 Release issue created
+**📋 Release issue created — State: `planned`**
+{{#trigger_workflow_dispatch}}Created via workflow dispatch.{{/trigger_workflow_dispatch}}
+{{#trigger_issue_close}}Created to replace closed [#{{closed_issue_number}}]({{closed_issue_url}}).{{/trigger_issue_close}}
+{{#trigger_release_plan_change}}Created after [`release-plan.yaml`]({{release_plan_url}}) update (PR [#{{trigger_pr_number}}]({{trigger_pr_url}})).{{/trigger_release_plan_change}}
+[`release-plan.yaml`]({{release_plan_url}})
 
-<!-- release-automation:workflow-owned -->
+<details><summary>Release {{release_tag}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}})</summary>
 
-This Release Issue was created automatically due to changes in `release-plan.yaml`{{#trigger_pr_number}} (PR #{{trigger_pr_number}}){{/trigger_pr_number}}.
+| API | Version |
+|-----|---------|
+{{#apis}}
+| {{api_name}} | `{{target_api_version}}` |
+{{/apis}}
 
-**Release:** `{{release_tag}}` (`{{release_type}}`){{#meta_release}} — {{meta_release}}{{/meta_release}}
-**State:** `planned`
+**Dependencies:** Commonalities {{commonalities_release}}{{#identity_consent_management_release}}, ICM {{identity_consent_management_release}}{{/identity_consent_management_release}}
+</details>
 
-**Next:** Comment `/create-snapshot` when ready to begin the release process.
+**Valid actions:**
+- `/create-snapshot` — begin the release process

@@ -441,8 +441,9 @@ class TestPublicationTemplates:
         context = build_context(
             release_tag="r4.1",
             state="published",
+            release_type="public-release",
             release_url="https://github.com/org/repo/releases/tag/r4.1",
-            reference_tag_url="https://github.com/org/repo/tree/src/r4.1",
+            sync_pr_number="99",
             sync_pr_url="https://github.com/org/repo/pull/99",
             apis=[
                 {"api_name": "quality-on-demand", "api_version": "1.0.0"},
@@ -453,9 +454,8 @@ class TestPublicationTemplates:
         assert "Release published" in result
         assert "published" in result
         assert "r4.1" in result
-        assert "src/r4.1" in result
         assert "pull/99" in result
-        assert "Codeowner approval" in result
+        assert "codeowner merge" in result
         assert "closed automatically" in result
 
     def test_release_published_template_without_sync_pr(self, bot_responder):
@@ -465,13 +465,14 @@ class TestPublicationTemplates:
         context = build_context(
             release_tag="r4.1",
             state="published",
+            release_type="public-release",
             release_url="https://github.com/org/repo/releases/tag/r4.1",
-            reference_tag_url="https://github.com/org/repo/tree/src/r4.1",
             apis=[],
         )
         result = bot_responder.render("release_published", context)
         assert "Release published" in result
-        assert "Codeowner approval" not in result  # sync_pr_url section not shown
+        # sync_pr_number is empty but always rendered in new template
+        assert "codeowner merge" in result
 
     def test_publish_failed_template(self, bot_responder):
         """publish_failed template renders with error message."""
@@ -486,7 +487,6 @@ class TestPublicationTemplates:
         result = bot_responder.render("publish_failed", context)
         assert "Publication failed" in result
         assert "draft-ready" in result
-        assert "unchanged" in result
         assert "GitHub API returned 500" in result
         assert "/publish-release --confirm r4.1" in result
         assert "workflow logs" in result
@@ -497,14 +497,14 @@ class TestPublicationTemplates:
         from release_automation.scripts.context_builder import build_context
 
         context = build_context(
-            command="/publish-release",
+            command="publish-release",
             state="draft-ready",
             workflow_run_url="https://github.com/org/repo/actions/runs/12345",
         )
         result = bot_responder.render("internal_error", context)
         assert "Internal error" in result
-        assert "/publish-release" in result
-        assert "draft-ready" in result
+        assert "publish-release" in result
         assert "workflow bug" in result
-        assert "View logs" in result
+        assert "View logs" not in result  # New template uses "View workflow logs"
+        assert "workflow logs" in result
         assert "actions/runs/12345" in result

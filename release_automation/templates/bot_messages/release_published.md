@@ -1,25 +1,14 @@
-### 🚀 Release published: `{{release_tag}}`
+**🚀 Release published — State: `published`**
+Release published. This issue will be closed automatically.
+**Release:** [`{{release_tag}}`]({{release_url}}) · Post-release sync PR: [#{{sync_pr_number}}]({{sync_pr_url}}) (requires codeowner merge)
 
-**State:** `published`
-**Release:** {{release_url}}
-**Reference tag:** [`src/{{release_tag}}`]({{reference_tag_url}})
-
-<details>
-<summary>Release summary</summary>
+<details><summary>Release {{release_tag}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}})</summary>
 
 | API | Version |
 |-----|---------|
 {{#apis}}
-| {{api_name}} | {{api_version}} |
+| {{api_name}} | `{{api_version}}` |
 {{/apis}}
 
-{{#commonalities_release}}**Dependencies:** {{commonalities_release}}{{#identity_consent_management_release}}, {{identity_consent_management_release}}{{/identity_consent_management_release}}{{/commonalities_release}}
+**Dependencies:** Commonalities {{commonalities_release}}{{#identity_consent_management_release}}, ICM {{identity_consent_management_release}}{{/identity_consent_management_release}}
 </details>
-
-{{#sync_pr_url}}
-**Post-release sync:** {{sync_pr_url}} (requires Codeowner approval and merge)
-{{/sync_pr_url}}
-
-**Valid actions:** None (release is published).
-
-_This Release Issue will be closed automatically._

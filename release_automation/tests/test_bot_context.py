@@ -18,10 +18,16 @@ class TestBotContext:
         assert ctx.command_args == ""
         assert ctx.user == ""
         assert ctx.trigger_pr_number == ""
+        assert ctx.trigger_type == ""
+        assert ctx.trigger_pr_url == ""
+        assert ctx.closed_issue_number == ""
+        assert ctx.closed_issue_url == ""
+        assert ctx.release_plan_url == ""
         assert ctx.release_tag == ""
         assert ctx.state == ""
         assert ctx.release_type == ""
         assert ctx.meta_release == ""
+        assert ctx.short_type == ""
         assert ctx.snapshot_id == ""
         assert ctx.snapshot_branch == ""
         assert ctx.release_review_branch == ""
@@ -55,6 +61,11 @@ class TestBotContext:
         assert ctx.state_snapshot_active is False
         assert ctx.state_draft_ready is False
         assert ctx.state_published is False
+        assert ctx.trigger_workflow_dispatch is False
+        assert ctx.trigger_issue_close is False
+        assert ctx.trigger_release_plan_change is False
+        assert ctx.has_meta_release is False
+        assert ctx.has_reason is False
 
     def test_derive_flags_missing_file(self):
         """error_type 'missing_file' sets is_missing_file flag."""
@@ -144,7 +155,9 @@ class TestBotContext:
 
         expected_keys = {
             "command", "command_args", "user", "trigger_pr_number",
-            "release_tag", "state", "release_type", "meta_release",
+            "trigger_type", "trigger_pr_url",
+            "closed_issue_number", "closed_issue_url", "release_plan_url",
+            "release_tag", "state", "release_type", "meta_release", "short_type",
             "snapshot_id", "snapshot_branch", "snapshot_branch_url",
             "release_review_branch", "release_review_branch_url",
             "src_commit_sha", "release_pr_number", "release_pr_url",
@@ -153,6 +166,9 @@ class TestBotContext:
             "error_message", "error_type",
             "is_missing_file", "is_malformed_yaml", "is_missing_field",
             "state_snapshot_active", "state_draft_ready", "state_published",
+            "trigger_workflow_dispatch", "trigger_issue_close",
+            "trigger_release_plan_change",
+            "has_meta_release", "has_reason",
             "workflow_run_url", "draft_release_url", "reason",
             # Publication fields
             "release_url", "reference_tag", "reference_tag_url",
@@ -217,7 +233,9 @@ class TestBuildContext:
 
         expected_keys = {
             "command", "command_args", "user", "trigger_pr_number",
-            "release_tag", "state", "release_type", "meta_release",
+            "trigger_type", "trigger_pr_url",
+            "closed_issue_number", "closed_issue_url", "release_plan_url",
+            "release_tag", "state", "release_type", "meta_release", "short_type",
             "snapshot_id", "snapshot_branch", "snapshot_branch_url",
             "release_review_branch", "release_review_branch_url",
             "src_commit_sha", "release_pr_number", "release_pr_url",
@@ -226,6 +244,9 @@ class TestBuildContext:
             "error_message", "error_type",
             "is_missing_file", "is_malformed_yaml", "is_missing_field",
             "state_snapshot_active", "state_draft_ready", "state_published",
+            "trigger_workflow_dispatch", "trigger_issue_close",
+            "trigger_release_plan_change",
+            "has_meta_release", "has_reason",
             "workflow_run_url", "draft_release_url", "reason",
             # Publication fields
             "release_url", "reference_tag", "reference_tag_url",
@@ -316,3 +337,121 @@ class TestBuildContext:
         assert result["is_missing_file"] is True
         assert result["state_draft_ready"] is False
         assert result["is_malformed_yaml"] is False
+
+
+class TestWP49Fields:
+    """Tests for WP49 bot message fields (IMP-046)."""
+
+    def test_trigger_type_workflow_dispatch(self):
+        """trigger_type 'workflow_dispatch' sets correct flag."""
+        ctx = BotContext(trigger_type="workflow_dispatch")
+        ctx.derive_flags()
+        assert ctx.trigger_workflow_dispatch is True
+        assert ctx.trigger_issue_close is False
+        assert ctx.trigger_release_plan_change is False
+
+    def test_trigger_type_issue_close(self):
+        """trigger_type 'issue_close' sets correct flag."""
+        ctx = BotContext(trigger_type="issue_close")
+        ctx.derive_flags()
+        assert ctx.trigger_workflow_dispatch is False
+        assert ctx.trigger_issue_close is True
+        assert ctx.trigger_release_plan_change is False
+
+    def test_trigger_type_release_plan_change(self):
+        """trigger_type 'release_plan_change' sets correct flag."""
+        ctx = BotContext(trigger_type="release_plan_change")
+        ctx.derive_flags()
+        assert ctx.trigger_workflow_dispatch is False
+        assert ctx.trigger_issue_close is False
+        assert ctx.trigger_release_plan_change is True
+
+    def test_has_meta_release_true(self):
+        """has_meta_release is True when meta_release is non-empty."""
+        ctx = BotContext(meta_release="Fall 2026")
+        ctx.derive_flags()
+        assert ctx.has_meta_release is True
+
+    def test_has_meta_release_false(self):
+        """has_meta_release is False when meta_release is empty."""
+        ctx = BotContext(meta_release="")
+        ctx.derive_flags()
+        assert ctx.has_meta_release is False
+
+    def test_has_reason_true(self):
+        """has_reason is True when reason is non-empty."""
+        ctx = BotContext(reason="Found API error")
+        ctx.derive_flags()
+        assert ctx.has_reason is True
+
+    def test_has_reason_false(self):
+        """has_reason is False when reason is empty."""
+        ctx = BotContext(reason="")
+        ctx.derive_flags()
+        assert ctx.has_reason is False
+
+    def test_short_type_alpha(self):
+        """short_type derived from pre-release-alpha."""
+        ctx = BotContext(release_type="pre-release-alpha")
+        ctx.derive_flags()
+        assert ctx.short_type == "alpha"
+
+    def test_short_type_rc(self):
+        """short_type derived from pre-release-rc."""
+        ctx = BotContext(release_type="pre-release-rc")
+        ctx.derive_flags()
+        assert ctx.short_type == "rc"
+
+    def test_short_type_public(self):
+        """short_type derived from public-release."""
+        ctx = BotContext(release_type="public-release")
+        ctx.derive_flags()
+        assert ctx.short_type == "public"
+
+    def test_short_type_maintenance(self):
+        """short_type derived from maintenance-release."""
+        ctx = BotContext(release_type="maintenance-release")
+        ctx.derive_flags()
+        assert ctx.short_type == "maintenance"
+
+    def test_short_type_passthrough_unknown(self):
+        """Unknown release_type passes through as short_type."""
+        ctx = BotContext(release_type="custom-type")
+        ctx.derive_flags()
+        assert ctx.short_type == "custom-type"
+
+    def test_short_type_not_overwritten_if_set(self):
+        """Explicit short_type is not overwritten by derive_flags."""
+        ctx = BotContext(release_type="pre-release-alpha", short_type="custom")
+        ctx.derive_flags()
+        assert ctx.short_type == "custom"
+
+    def test_build_context_derives_short_type(self):
+        """build_context derives short_type from release_type."""
+        result = build_context(release_type="pre-release-rc")
+        assert result["short_type"] == "rc"
+
+    def test_build_context_trigger_flags(self):
+        """build_context derives trigger flags."""
+        result = build_context(trigger_type="workflow_dispatch")
+        assert result["trigger_workflow_dispatch"] is True
+        assert result["trigger_issue_close"] is False
+
+    def test_build_context_has_meta_release(self):
+        """build_context derives has_meta_release."""
+        result = build_context(meta_release="Spring 2026")
+        assert result["has_meta_release"] is True
+
+        result = build_context(meta_release="")
+        assert result["has_meta_release"] is False
+
+    def test_issue_creation_fields_in_context(self):
+        """Issue creation fields are passed through build_context."""
+        result = build_context(
+            closed_issue_number="42",
+            closed_issue_url="https://github.com/org/repo/issues/42",
+            release_plan_url="https://github.com/org/repo/blob/main/release-plan.yaml",
+        )
+        assert result["closed_issue_number"] == "42"
+        assert result["closed_issue_url"] == "https://github.com/org/repo/issues/42"
+        assert result["release_plan_url"] == "https://github.com/org/repo/blob/main/release-plan.yaml"

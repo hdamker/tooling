@@ -1,20 +1,18 @@
-### 📦 Draft release created: `{{release_tag}}`
+**📦 Draft release created — State: `draft-ready`**
+Triggered by merge of [Release PR #{{release_pr_number}}]({{release_pr_url}}).
+**Draft release:** [`{{release_tag}}`]({{draft_release_url}})
 
-**State:** `draft-ready`{{#draft_release_url}} | **Draft:** {{draft_release_url}}{{/draft_release_url}}{{#src_commit_sha}} | **Base commit:** `{{src_commit_sha}}`{{/src_commit_sha}}
+<details><summary>Release {{release_tag}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}})</summary>
 
-<details>
-<summary>Release configuration</summary>
-
-**APIs:**
 | API | Version |
 |-----|---------|
 {{#apis}}
 | {{api_name}} | `{{api_version}}` |
 {{/apis}}
 
-{{#commonalities_release}}**Dependencies:** Commonalities {{commonalities_release}}{{#identity_consent_management_release}}, ICM {{identity_consent_management_release}}{{/identity_consent_management_release}}{{/commonalities_release}}
+**Dependencies:** Commonalities {{commonalities_release}}{{#identity_consent_management_release}}, ICM {{identity_consent_management_release}}{{/identity_consent_management_release}}
 </details>
 
 **Valid actions:**
-- `/publish-release --confirm {{release_tag}}` to publish the release
-- `/delete-draft <reason>` to delete the draft and return to `planned`
+- `/publish-release --confirm {{release_tag}}` — publish the release
+- `/delete-draft <reason>` — delete the draft and return to `planned`

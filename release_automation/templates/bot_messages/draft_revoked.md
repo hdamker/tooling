@@ -1,10 +1,6 @@
-### 🗑️ Draft release deleted: `{{release_tag}}`
-
-**State:** `draft-ready` → `planned`{{#reason}} | **Reason:** {{reason}}{{/reason}}
-
-**Cleanup:**
-- Draft release and snapshot branch deleted
-- Review branch `{{release_review_branch}}` preserved for reference
+**🗑️ Draft deleted — State: `planned`**
+{{#has_reason}}**Reason:** {{reason}}{{/has_reason}}
+**Preserved:** [`{{release_review_branch}}`]({{release_review_branch_url}}) · **Deleted:** draft release, snapshot branch
 
 **Valid actions:**
-- `/create-snapshot` to create a new snapshot from updated `main`
+- `/create-snapshot` — new snapshot from updated `main`

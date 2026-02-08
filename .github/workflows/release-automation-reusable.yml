@@ -1488,6 +1488,8 @@ jobs:
               "draft_release_url": "${{ steps.create-draft.outputs.draft_release_url }}",
               "snapshot_id": "${{ needs.derive-state.outputs.snapshot_id }}",
               "release_type": "${{ needs.derive-state.outputs.release_type }}",
+              "release_pr_number": "${{ needs.derive-state.outputs.release_pr_number }}",
+              "release_pr_url": "${{ github.server_url }}/${{ github.repository }}/pull/${{ needs.derive-state.outputs.release_pr_number }}",
               "apis_json": ${{ needs.derive-state.outputs.apis_json || '[]' }},
               "commonalities_release": "${{ needs.derive-state.outputs.commonalities_release }}",
               "identity_consent_management_release": "${{ needs.derive-state.outputs.identity_consent_management_release }}"
@@ -1641,6 +1643,28 @@ jobs:
             {
               "release_tag": "${{ needs.derive-state.outputs.release_tag }}",
               "state": "not-planned"
+            }
+
+      - name: Post Issue Created Notification
+        if: |
+          steps.sync.outputs.issue_action == 'created' &&
+          steps.sync.outputs.issue_number != ''
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ steps.sync.outputs.issue_number }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
+          template: issue_created
+          context: |
+            {
+              "release_tag": "${{ needs.derive-state.outputs.release_tag }}",
+              "state": "planned",
+              "release_type": "${{ needs.derive-state.outputs.release_type }}",
+              "trigger_type": "${{ needs.check-trigger.outputs.trigger_type }}",
+              "release_plan_url": "${{ github.server_url }}/${{ github.repository }}/blob/main/release-plan.yaml",
+              "apis_json": ${{ needs.derive-state.outputs.apis_json || '[]' }},
+              "commonalities_release": "${{ needs.derive-state.outputs.commonalities_release }}",
+              "identity_consent_management_release": "${{ needs.derive-state.outputs.identity_consent_management_release }}"
             }
 
   # ─────────────────────────────────────────────────────────────────────────────

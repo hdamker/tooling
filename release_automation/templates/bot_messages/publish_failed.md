@@ -1,17 +1,12 @@
-### ❌ Publication failed: `/publish-release`
-
-**State:** `draft-ready` (unchanged)
+**❌ Publication failed — State: `draft-ready`**
+{{#workflow_run_url}}[View workflow logs]({{workflow_run_url}}){{/workflow_run_url}}
 
 {{#error_message}}
 ```
 {{error_message}}
 ```
 {{/error_message}}
-{{^error_message}}
-Unexpected error — check the workflow logs for details.
-{{/error_message}}
 
 **Valid actions:**
-- Check [workflow logs]({{workflow_run_url}}) for details
 - Retry: `/publish-release --confirm {{release_tag}}`
-- `/delete-draft <reason>` — delete draft if corrupted and start over
+- `/delete-draft <reason>` — delete draft and start over

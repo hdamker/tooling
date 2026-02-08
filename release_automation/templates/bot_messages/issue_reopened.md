@@ -1,17 +1,28 @@
-### 🔄 Issue reopened automatically
+**🔄 Issue reopened — State: `{{state}}`**
+{{#state_snapshot_active}}This issue is required while a snapshot is active — release commands are managed through this issue.{{/state_snapshot_active}}
+{{#state_draft_ready}}This issue is required while a draft release exists — release commands are managed through this issue.{{/state_draft_ready}}
+{{#state_snapshot_active}}**Release PR:** [#{{release_pr_number}}]({{release_pr_url}}){{/state_snapshot_active}}
+{{#state_draft_ready}}**Draft release:** [`{{release_tag}}`]({{draft_release_url}}){{/state_draft_ready}}
 
-This issue was reopened because active release artifacts exist. The issue cannot be closed while a {{#state_snapshot_active}}snapshot{{/state_snapshot_active}}{{#state_draft_ready}}draft release{{/state_draft_ready}} is active.
+<details><summary>Release {{release_tag}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}})</summary>
 
-**Current state:** `{{state}}`
+| API | Version |
+|-----|---------|
+{{#apis}}
+| {{api_name}} | `{{api_version}}` |
+{{/apis}}
+
+**Dependencies:** Commonalities {{commonalities_release}}{{#identity_consent_management_release}}, ICM {{identity_consent_management_release}}{{/identity_consent_management_release}}
+</details>
 
 **Valid actions:**
 {{#state_snapshot_active}}
-- Merge the Release PR to create a draft release
-- `/discard-snapshot <reason>` to discard and return to `planned`
+- Merge [Release PR]({{release_pr_url}}) to create draft release
+- `/discard-snapshot <reason>` — discard and return to `planned`
 {{/state_snapshot_active}}
 {{#state_draft_ready}}
-- Publish the draft release in GitHub Releases
-- `/delete-draft <reason>` to delete and return to `planned`
+- `/publish-release --confirm {{release_tag}}` — publish the release
+- `/delete-draft <reason>` — delete draft and return to `planned`
 {{/state_draft_ready}}
 
-The issue will close automatically when the release is published.
+The issue closes automatically when the release is published.

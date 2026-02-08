@@ -1,8 +1,4 @@
-### ⏳ Processing: `/{{command}}`
+**⏳ Processing: `/{{command}}`**
+**Requested by:** @{{user}} · [View workflow run]({{workflow_run_url}})
 
-**Requested by:** @{{user}}{{#state}} | **Current state:** `{{state}}`{{/state}}
-
-Processing your request... ([workflow run]({{workflow_run_url}}))
-
----
-*This comment will be updated with results. If it stays visible for more than ~10 minutes, check the workflow run above.*
+This comment will be updated with the result. If this stays visible unusually long, open the workflow run above.

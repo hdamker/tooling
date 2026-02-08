@@ -1,6 +1,5 @@
-### ❌ Snapshot creation failed (state unchanged: `planned`)
-
-**Release:** `{{release_tag}}`
+**❌ Snapshot failed — State: `planned`**
+{{#workflow_run_url}}[View workflow logs]({{workflow_run_url}}){{/workflow_run_url}}
 
 {{#error_message}}
 ```
@@ -8,8 +7,6 @@
 ```
 {{/error_message}}
 
-{{#workflow_run_url}}[View workflow logs]({{workflow_run_url}}){{/workflow_run_url}}
-
 **Valid actions:**
-- Fix the issue on `main` branch
-- Run `/create-snapshot` to try again
+- Fix issues on `main`
+- `/create-snapshot` — retry after fixes are merged

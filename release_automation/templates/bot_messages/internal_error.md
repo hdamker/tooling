@@ -1,10 +1,6 @@
-### ⚠️ Internal error: `/{{command}}`
+**⚠️ Internal error: `/{{command}}`**
+Command validated but no handler executed. This is a workflow bug.
 
-The command was validated but no handler executed. This is a workflow bug.
+[View workflow logs]({{workflow_run_url}})
 
-**Debug info:**
-- Command: `/{{command}}`
-- State: `{{state}}`
-- Workflow run: [View logs]({{workflow_run_url}})
-
-Please report this issue to the release management team.
+Please report to Release Management maintainers.
