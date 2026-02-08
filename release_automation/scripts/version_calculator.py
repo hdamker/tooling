@@ -253,8 +253,14 @@ class VersionCalculator:
         """
         Parse extension number from a version string.
 
-        Returns the extension number if the version matches the target
-        version and status, otherwise None.
+        Returns the extension number if the version produces the same URL
+        version as the target (i.e., would collide), otherwise None.
+
+        URL versioning rules (CAMARA API Design Guide 7.2):
+        - Stable (major >= 1): URL uses major only (vX), so all x.*.* share
+          the same extension namespace
+        - Initial (major == 0): URL uses major.minor (v0.Y), so only 0.y.*
+          share the same extension namespace
 
         Args:
             version: Version string to parse (e.g., "3.2.0-rc.2")
@@ -270,7 +276,15 @@ class VersionCalculator:
 
         base_version, status, extension = match.groups()
 
-        if base_version == target_version and status == target_status:
+        if status != target_status:
+            return None
+
+        # Two versions collide if they produce the same URL version prefix.
+        # Reuse calculate_url_version with dummy extension to compare.
+        existing_url = calculate_url_version(f"{base_version}-{status}.1")
+        target_url = calculate_url_version(f"{target_version}-{status}.1")
+
+        if existing_url == target_url:
             return int(extension)
 
         return None

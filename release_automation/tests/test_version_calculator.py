@@ -169,10 +169,11 @@ apis:
         # Alpha version doesn't count for RC
         assert result == "3.2.0-rc.1"
 
-    def test_different_base_version_not_counted(
+    def test_same_major_different_minor_counted_for_stable(
         self, calculator, mock_github_client
     ):
-        """Versions with different base version are not counted."""
+        """For stable APIs (major >= 1), different minor versions share
+        the same URL namespace (vX) so extensions must be unique across them."""
         mock_github_client.get_releases.return_value = [
             Release(tag_name="r3.0", name="", draft=False, prerelease=True, html_url="")
         ]
@@ -188,8 +189,153 @@ apis:
             target_status="rc"
         )
 
-        # 3.1.0 doesn't count for 3.2.0
-        assert result == "3.2.0-rc.1"
+        # 3.1.0-rc.5 → v3rc5, 3.2.0-rc → v3rc — same major, must avoid collision
+        assert result == "3.2.0-rc.6"
+
+    def test_cross_minor_alpha_stable(
+        self, calculator, mock_github_client
+    ):
+        """Cross-minor alpha: 1.2.0-alpha.1 exists, targeting 1.3.0-alpha."""
+        mock_github_client.get_releases.return_value = [
+            Release(tag_name="r4.1", name="", draft=False, prerelease=True, html_url="")
+        ]
+        mock_github_client.get_file_content.return_value = """
+apis:
+  - api_name: qos-profiles
+    api_version: 1.2.0-alpha.1
+"""
+
+        result = calculator.calculate_version(
+            api_name="qos-profiles",
+            target_version="1.3.0",
+            target_status="alpha"
+        )
+
+        # Both map to v1alpha — must get .2
+        assert result == "1.3.0-alpha.2"
+
+    def test_cross_minor_rc_stable(
+        self, calculator, mock_github_client
+    ):
+        """Cross-minor rc: 1.2.0-rc.1 exists, targeting 1.4.0-rc."""
+        mock_github_client.get_releases.return_value = [
+            Release(tag_name="r4.2", name="", draft=False, prerelease=True, html_url="")
+        ]
+        mock_github_client.get_file_content.return_value = """
+apis:
+  - api_name: qos-profiles
+    api_version: 1.2.0-rc.1
+"""
+
+        result = calculator.calculate_version(
+            api_name="qos-profiles",
+            target_version="1.4.0",
+            target_status="rc"
+        )
+
+        # Both map to v1rc — must get .2
+        assert result == "1.4.0-rc.2"
+
+    def test_multiple_across_minors_stable(
+        self, calculator, mock_github_client
+    ):
+        """Multiple extensions across different minor versions accumulate."""
+        mock_github_client.get_releases.return_value = [
+            Release(tag_name="r4.1", name="", draft=False, prerelease=True, html_url=""),
+            Release(tag_name="r6.1", name="", draft=False, prerelease=True, html_url="")
+        ]
+
+        def get_content(path, ref):
+            if ref == "r4.1":
+                return """
+apis:
+  - api_name: qos-profiles
+    api_version: 1.2.0-alpha.1
+"""
+            elif ref == "r6.1":
+                return """
+apis:
+  - api_name: qos-profiles
+    api_version: 1.3.0-alpha.2
+"""
+            return None
+
+        mock_github_client.get_file_content.side_effect = get_content
+
+        result = calculator.calculate_version(
+            api_name="qos-profiles",
+            target_version="1.4.0",
+            target_status="alpha"
+        )
+
+        # Extensions .1 and .2 used across v1alpha namespace → next is .3
+        assert result == "1.4.0-alpha.3"
+
+    def test_different_minor_initial_not_counted(
+        self, calculator, mock_github_client
+    ):
+        """For initial APIs (major == 0), different minors are separate URL namespaces."""
+        mock_github_client.get_releases.return_value = [
+            Release(tag_name="r4.1", name="", draft=False, prerelease=True, html_url="")
+        ]
+        mock_github_client.get_file_content.return_value = """
+apis:
+  - api_name: qos-provisioning
+    api_version: 0.4.0-alpha.1
+"""
+
+        result = calculator.calculate_version(
+            api_name="qos-provisioning",
+            target_version="0.5.0",
+            target_status="alpha"
+        )
+
+        # v0.4alpha vs v0.5alpha — different URL namespaces, no collision
+        assert result == "0.5.0-alpha.1"
+
+    def test_cross_patch_initial_counted(
+        self, calculator, mock_github_client
+    ):
+        """For initial APIs (major == 0), same minor different patch shares namespace."""
+        mock_github_client.get_releases.return_value = [
+            Release(tag_name="r4.1", name="", draft=False, prerelease=True, html_url="")
+        ]
+        mock_github_client.get_file_content.return_value = """
+apis:
+  - api_name: qos-provisioning
+    api_version: 0.4.0-alpha.1
+"""
+
+        result = calculator.calculate_version(
+            api_name="qos-provisioning",
+            target_version="0.4.1",
+            target_status="alpha"
+        )
+
+        # Both map to v0.4alpha — must get .2
+        assert result == "0.4.1-alpha.2"
+
+    def test_different_major_not_counted(
+        self, calculator, mock_github_client
+    ):
+        """Different major versions are always separate URL namespaces."""
+        mock_github_client.get_releases.return_value = [
+            Release(tag_name="r4.1", name="", draft=False, prerelease=True, html_url="")
+        ]
+        mock_github_client.get_file_content.return_value = """
+apis:
+  - api_name: quality-on-demand
+    api_version: 1.2.0-alpha.1
+"""
+
+        result = calculator.calculate_version(
+            api_name="quality-on-demand",
+            target_version="2.0.0",
+            target_status="alpha"
+        )
+
+        # v1alpha vs v2alpha — different major, no collision
+        assert result == "2.0.0-alpha.1"
 
 
 class TestFindExistingExtensions:
@@ -341,11 +487,50 @@ class TestParseExtension:
         )
         assert result == 5
 
-    def test_returns_none_for_mismatched_version(self, calculator):
-        """Returns None when base version doesn't match."""
+    def test_matches_same_major_different_minor_stable(self, calculator):
+        """For stable APIs, same major but different minor matches (same URL namespace)."""
         result = calculator._parse_extension(
             version="3.1.0-rc.5",
             target_version="3.2.0",
+            target_status="rc"
+        )
+        # Both → v3rc — same URL namespace
+        assert result == 5
+
+    def test_matches_same_major_different_patch_stable(self, calculator):
+        """For stable APIs, same major but different patch matches."""
+        result = calculator._parse_extension(
+            version="1.2.0-rc.2",
+            target_version="1.2.1",
+            target_status="rc"
+        )
+        # Both → v1rc — same URL namespace
+        assert result == 2
+
+    def test_returns_none_for_different_major(self, calculator):
+        """Different major versions are separate URL namespaces."""
+        result = calculator._parse_extension(
+            version="1.2.0-alpha.1",
+            target_version="2.0.0",
+            target_status="alpha"
+        )
+        assert result is None
+
+    def test_matches_same_minor_different_patch_initial(self, calculator):
+        """For initial APIs (major 0), same minor but different patch matches."""
+        result = calculator._parse_extension(
+            version="0.4.0-alpha.2",
+            target_version="0.4.1",
+            target_status="alpha"
+        )
+        # Both → v0.4alpha — same URL namespace
+        assert result == 2
+
+    def test_returns_none_for_different_minor_initial(self, calculator):
+        """For initial APIs (major 0), different minors are separate URL namespaces."""
+        result = calculator._parse_extension(
+            version="0.4.0-rc.1",
+            target_version="0.5.0",
             target_status="rc"
         )
         assert result is None
