@@ -1,6 +1,6 @@
 **📋 Release issue created — State: `planned`**
 {{#trigger_workflow_dispatch}}
-Created via workflow dispatch.
+Created via workflow dispatch from [`release-plan.yaml`]({{release_plan_url}}).
 {{/trigger_workflow_dispatch}}
 {{#trigger_issue_close}}
 Created to replace closed [#{{closed_issue_number}}]({{closed_issue_url}}).
@@ -8,7 +8,6 @@ Created to replace closed [#{{closed_issue_number}}]({{closed_issue_url}}).
 {{#trigger_release_plan_change}}
 Created after [`release-plan.yaml`]({{release_plan_url}}) update (PR [#{{trigger_pr_number}}]({{trigger_pr_url}})).
 {{/trigger_release_plan_change}}
-[`release-plan.yaml`]({{release_plan_url}})
 
 <details><summary><b>Configuration:</b> Release {{release_tag}}{{#short_type}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}}){{/short_type}}</summary>
 
