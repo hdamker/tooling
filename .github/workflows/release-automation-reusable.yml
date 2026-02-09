@@ -674,6 +674,7 @@ jobs:
     outputs:
       success: ${{ steps.discard.outputs.success }}
       error_message: ${{ steps.discard.outputs.error_message }}
+      renamed_review_branch: ${{ steps.cleanup.outputs.renamed_review_branch }}
     steps:
       - name: Discard Snapshot
         id: discard
@@ -722,6 +723,7 @@ jobs:
 
       # Step 3: Rename review branch to free name for next create-snapshot
       - name: Cleanup review branch
+        id: cleanup
         if: steps.discard.outputs.success == 'true'
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         with:
@@ -729,7 +731,7 @@ jobs:
             const reviewBranch = '${{ needs.derive-state.outputs.release_review_branch }}';
             if (!reviewBranch) return;
 
-            const newName = `${reviewBranch}-discarded`;
+            const newName = `${reviewBranch}-preserved`;
             try {
               const ref = await github.rest.git.getRef({
                 owner: context.repo.owner,
@@ -737,7 +739,7 @@ jobs:
                 ref: `heads/${reviewBranch}`
               });
 
-              // Delete old -discarded branch if it exists (repeated cycles)
+              // Delete old -preserved branch if it exists (repeated cycles)
               try {
                 await github.rest.git.deleteRef({
                   owner: context.repo.owner, repo: context.repo.repo,
@@ -755,6 +757,7 @@ jobs:
                 ref: `heads/${reviewBranch}`
               });
               console.log(`Renamed: ${reviewBranch} → ${newName}`);
+              core.setOutput('renamed_review_branch', newName);
             } catch (e) {
               console.log(`Could not rename review branch: ${e.message}`);
             }
@@ -771,6 +774,7 @@ jobs:
     outputs:
       success: ${{ steps.delete.outputs.success }}
       error_message: ${{ steps.delete.outputs.error_message }}
+      renamed_review_branch: ${{ steps.cleanup.outputs.renamed_review_branch }}
     steps:
       - name: Delete Draft Release
         id: delete
@@ -840,6 +844,7 @@ jobs:
 
       # Step 4: Rename review branch to free name for next create-snapshot
       - name: Cleanup review branch
+        id: cleanup
         if: steps.delete.outputs.success == 'true'
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         with:
@@ -847,7 +852,7 @@ jobs:
             const reviewBranch = '${{ needs.derive-state.outputs.release_review_branch }}';
             if (!reviewBranch) return;
 
-            const newName = `${reviewBranch}-discarded`;
+            const newName = `${reviewBranch}-preserved`;
             try {
               const ref = await github.rest.git.getRef({
                 owner: context.repo.owner,
@@ -855,7 +860,7 @@ jobs:
                 ref: `heads/${reviewBranch}`
               });
 
-              // Delete old -discarded branch if it exists (repeated cycles)
+              // Delete old -preserved branch if it exists (repeated cycles)
               try {
                 await github.rest.git.deleteRef({
                   owner: context.repo.owner, repo: context.repo.repo,
@@ -873,6 +878,7 @@ jobs:
                 ref: `heads/${reviewBranch}`
               });
               console.log(`Renamed: ${reviewBranch} → ${newName}`);
+              core.setOutput('renamed_review_branch', newName);
             } catch (e) {
               console.log(`Could not rename review branch: ${e.message}`);
             }
@@ -1815,6 +1821,29 @@ jobs:
             '{
               reason: $reason
             }')
+
+          # Override release_review_branch with renamed name for discard/delete
+          if [ "${{ needs.discard-snapshot.outputs.success }}" == "true" ]; then
+            RRB="${{ needs.discard-snapshot.outputs.renamed_review_branch }}"
+            if [ -n "$RRB" ]; then
+              RRB_URL="${{ github.server_url }}/${{ github.repository }}/tree/${RRB}"
+              CONTEXT=$(echo "$CONTEXT" | jq \
+                --arg rrb "$RRB" \
+                --arg rrb_url "$RRB_URL" \
+                '. + {release_review_branch: $rrb, release_review_branch_url: $rrb_url}')
+            fi
+          fi
+
+          if [ "${{ needs.delete-draft.outputs.success }}" == "true" ]; then
+            RRB="${{ needs.delete-draft.outputs.renamed_review_branch }}"
+            if [ -n "$RRB" ]; then
+              RRB_URL="${{ github.server_url }}/${{ github.repository }}/tree/${RRB}"
+              CONTEXT=$(echo "$CONTEXT" | jq \
+                --arg rrb "$RRB" \
+                --arg rrb_url "$RRB_URL" \
+                '. + {release_review_branch: $rrb, release_review_branch_url: $rrb_url}')
+            fi
+          fi
 
           # Add create-snapshot outputs if that job ran successfully
           if [ "${{ needs.create-snapshot.outputs.success }}" == "true" ]; then
