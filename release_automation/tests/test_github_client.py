@@ -81,18 +81,53 @@ class TestGitHubClient(unittest.TestCase):
 
     @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
     def test_create_issue(self, mock_run_gh):
-        # First call creates issue and returns URL
-        # Second call gets issue details
-        
-        mock_run_gh.side_effect = [
-            "https://github.com/owner/repo/issues/123\n", # create output
-            json.dumps({"number": 123, "title": "Title", "html_url": "url", "state": "open"}) # get_issue output
-        ]
-        
+        # create_issue returns a local dict from the URL output (no fetch-back)
+        mock_run_gh.return_value = "https://github.com/owner/repo/issues/123\n"
+
         issue = self.client.create_issue("Title", "Body", ["label"])
-        
+
         self.assertEqual(issue["number"], 123)
         self.assertEqual(issue["title"], "Title")
+        self.assertEqual(issue["body"], "Body")
+        self.assertEqual(issue["labels"], [{"name": "label"}])
+        self.assertEqual(issue["html_url"], "https://github.com/owner/repo/issues/123")
+        # Only one _run_gh call (create), no fetch-back
+        self.assertEqual(mock_run_gh.call_count, 1)
+
+    @patch("release_automation.scripts.github_client.time.sleep")
+    def test_retry_on_not_found_succeeds_first_try(self, mock_sleep):
+        fn = MagicMock(return_value="result")
+        result = self.client.retry_on_not_found(fn)
+        self.assertEqual(result, "result")
+        fn.assert_called_once()
+        mock_sleep.assert_not_called()
+
+    @patch("release_automation.scripts.github_client.time.sleep")
+    def test_retry_on_not_found_retries_on_404(self, mock_sleep):
+        fn = MagicMock(side_effect=[
+            GitHubClientError("gh: Not Found (HTTP 404)"),
+            "success"
+        ])
+        result = self.client.retry_on_not_found(fn, max_retries=3, delay=1.0)
+        self.assertEqual(result, "success")
+        self.assertEqual(fn.call_count, 2)
+        mock_sleep.assert_called_once_with(1.0)  # delay * (attempt+1) = 1.0 * 1
+
+    @patch("release_automation.scripts.github_client.time.sleep")
+    def test_retry_on_not_found_gives_up_after_max_retries(self, mock_sleep):
+        fn = MagicMock(side_effect=GitHubClientError("HTTP 404"))
+        with self.assertRaises(GitHubClientError):
+            self.client.retry_on_not_found(fn, max_retries=3, delay=0.5)
+        self.assertEqual(fn.call_count, 3)
+        self.assertEqual(mock_sleep.call_count, 2)  # retries 1 and 2, not after final
+
+    @patch("release_automation.scripts.github_client.time.sleep")
+    def test_retry_on_not_found_raises_non_404_immediately(self, mock_sleep):
+        fn = MagicMock(side_effect=GitHubClientError("HTTP 500 Server Error"))
+        with self.assertRaises(GitHubClientError):
+            self.client.retry_on_not_found(fn, max_retries=3)
+        fn.assert_called_once()
+        mock_sleep.assert_not_called()
 
 if __name__ == '__main__':
     unittest.main()

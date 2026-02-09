@@ -162,6 +162,9 @@ class TestSyncReleaseIssue:
         issue_manager = MagicMock()
         bot_responder = MagicMock()
 
+        # Make retry_on_not_found call the function directly (no actual retry in tests)
+        gh.retry_on_not_found.side_effect = lambda fn, **kwargs: fn()
+
         manager = IssueSyncManager(gh, state_manager, issue_manager, bot_responder)
         return manager, gh, state_manager, issue_manager, bot_responder
 
@@ -313,7 +316,7 @@ class TestCreateReleaseIssue:
         gh.create_issue.return_value = {"number": 1}
         issue_manager.generate_title.return_value = "Release r4.1"
         # Body without marker - should be added
-        issue_manager.generate_issue_body_template.return_value = "## Release\nContent"
+        issue_manager.generate_issue_body_template.return_value = "### Release Highlights\nContent"
 
         manager = IssueSyncManager(gh, MagicMock(), issue_manager, MagicMock())
 

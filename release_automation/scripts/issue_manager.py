@@ -309,13 +309,14 @@ class IssueManager:
 
         return "\n".join(lines)
 
-    def generate_actions_section(self, state: str, release_pr_url: str = "") -> str:
+    def generate_actions_section(self, state: str, release_pr_url: str = "", release_tag: str = "") -> str:
         """
         Generate content for the ACTIONS section showing valid actions.
 
         Args:
             state: Current release state
             release_pr_url: Release PR URL (for snapshot-active state)
+            release_tag: Release tag (for draft-ready publish command)
 
         Returns:
             Formatted actions section content
@@ -333,8 +334,9 @@ class IssueManager:
             )
 
         elif state_lower == "draft-ready":
+            tag_text = f" {release_tag}" if release_tag else ""
             return (
-                "**Valid actions:**<br>→ **`/publish-release --confirm` — publish the release**"
+                f"**Valid actions:**<br>→ **`/publish-release --confirm{tag_text}` — publish the release**"
                 "<br>→ `/delete-draft <reason>` — delete draft and return to `planned`"
             )
 
@@ -420,21 +422,17 @@ class IssueManager:
         """
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        meta_line = f" — {meta_release}" if meta_release else ""
-
-        return f"""## Release: {release_tag} ({release_type}){meta_line}
-
-<!-- release-automation:workflow-owned -->
+        return f"""<!-- release-automation:workflow-owned -->
 <!-- release-automation:release-tag:{release_tag} -->
 
-## Release Highlights
+### Release Highlights
 
 _Add release highlights here before creating snapshot._
 
 ---
 <!-- AUTOMATION MANAGED SECTION - DO NOT EDIT BELOW THIS LINE -->
 
-## Release Status
+### Release Status
 <!-- BEGIN:STATE -->
 **State:** `planned` | **Last Updated:** {timestamp}
 <!-- END:STATE -->

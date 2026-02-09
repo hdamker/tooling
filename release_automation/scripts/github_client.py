@@ -8,6 +8,7 @@ for authentication and API access.
 
 import json
 import subprocess
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from fnmatch import fnmatch
@@ -437,6 +438,37 @@ class GitHubClient:
             return None
 
     # -------------------------------------------------------------------------
+    # Retry helper for eventual consistency
+    # -------------------------------------------------------------------------
+
+    def retry_on_not_found(self, fn, max_retries: int = 3, delay: float = 1.0):
+        """
+        Retry a callable that may fail with HTTP 404 due to GitHub API
+        eventual consistency (e.g., operations on a freshly created issue).
+
+        Args:
+            fn: Zero-argument callable to execute
+            max_retries: Maximum number of attempts (default 3)
+            delay: Base delay in seconds between retries (multiplied by attempt number)
+
+        Returns:
+            The return value of fn()
+
+        Raises:
+            GitHubClientError: If all retries fail or error is not a 404
+        """
+        for attempt in range(max_retries):
+            try:
+                return fn()
+            except GitHubClientError as e:
+                error_msg = str(e).lower()
+                is_not_found = "404" in error_msg or "not found" in error_msg
+                if is_not_found and attempt < max_retries - 1:
+                    time.sleep(delay * (attempt + 1))
+                    continue
+                raise
+
+    # -------------------------------------------------------------------------
     # Issue Operations (added for issue_sync.py)
     # -------------------------------------------------------------------------
 
@@ -563,8 +595,16 @@ class GitHubClient:
         except (ValueError, IndexError):
             raise GitHubClientError(f"Failed to parse issue number from: {issue_url}")
 
-        # Fetch full issue details
-        return self.get_issue(issue_number)
+        # Return minimal issue details from the create response
+        # Note: We avoid fetching via get_issue() immediately after creation
+        # because GitHub API may return 404 due to eventual consistency.
+        return {
+            "number": issue_number,
+            "title": title,
+            "body": body,
+            "labels": [{"name": l} for l in (labels or [])],
+            "html_url": issue_url
+        }
 
     def update_issue(
         self,

@@ -422,9 +422,10 @@ class TestIssueManagerGenerateIssueBodyTemplate:
             meta_release="Fall26"
         )
 
-        assert "## Release: r4.1 (pre-release-rc) — Fall26" in body
+        # No redundant heading — title carries release info
+        assert "## Release:" not in body
 
-        # Check sections exist
+        # Check sections exist with reduced heading levels
         assert "<!-- BEGIN:STATE -->" in body
         assert "<!-- END:STATE -->" in body
         assert "<!-- BEGIN:CONFIG -->" in body
@@ -445,8 +446,11 @@ class TestIssueManagerGenerateIssueBodyTemplate:
             release_type="pre-release-alpha"
         )
 
-        assert "## Release: r4.1 (pre-release-alpha)" in body
-        assert "—" not in body.split("\n")[0]  # No em-dash in header without meta
+        # No redundant heading
+        assert "## Release:" not in body
+        # Heading levels should be ###
+        assert "### Release Highlights" in body
+        assert "### Release Status" in body
 
 
 class TestIssueManagerEdgeCases:

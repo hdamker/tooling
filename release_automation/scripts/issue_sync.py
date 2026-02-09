@@ -147,10 +147,13 @@ class IssueSyncManager:
             if state == ReleaseState.PLANNED:
                 # Create new Release Issue
                 new_issue = self.create_release_issue(release_plan, trigger_pr)
-                # Populate sections with initial content
-                self._update_release_issue(new_issue, state, release_plan)
-                # Refetch issue after update
-                updated_issue = self.gh.get_issue(new_issue["number"])
+                # Populate sections with initial content and refetch.
+                # Wrapped in retry_on_not_found because GitHub API may
+                # return 404 for a freshly created issue (eventual consistency).
+                def _post_create():
+                    self._update_release_issue(new_issue, state, release_plan)
+                    return self.gh.get_issue(new_issue["number"])
+                updated_issue = self.gh.retry_on_not_found(_post_create)
                 return SyncResult(action="created", issue=updated_issue)
             else:
                 return SyncResult(action="none", reason="no_planned_release")
@@ -402,7 +405,8 @@ class IssueSyncManager:
         # Update ACTIONS section with valid commands
         new_actions_content = self.issue_manager.generate_actions_section(
             state=state.value,
-            release_pr_url=release_pr_url
+            release_pr_url=release_pr_url,
+            release_tag=release_tag
         )
         updated_body = self.issue_manager.update_section(
             updated_body, "ACTIONS", new_actions_content
