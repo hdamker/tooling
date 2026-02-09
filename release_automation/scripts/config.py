@@ -21,3 +21,11 @@ RELEASE_REVIEW_BRANCH_PREFIX = "release-review/"
 
 # Labels
 LABEL_RELEASE_MGMT_BOT = "Release-Mgmt-Bot"
+
+# Release type display names (short form for titles, messages)
+SHORT_TYPE_MAP = {
+    "pre-release-alpha": "alpha",
+    "pre-release-rc": "rc",
+    "public-release": "public",
+    "maintenance-release": "maintenance",
+}

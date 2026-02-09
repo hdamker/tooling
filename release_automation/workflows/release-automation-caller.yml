@@ -9,6 +9,7 @@
 # - Slash commands: /create-snapshot, /discard-snapshot, /delete-draft, /publish-release
 # - Issue events: close (with auto-reopen), reopen
 # - PR merge: on release-snapshot branches (creates draft release)
+# - Push to main: when release-plan.yaml changes (auto sync-issue)
 # - Manual: workflow_dispatch triggers sync-issue (reads from release-plan.yaml)
 
 name: Release Automation
@@ -27,6 +28,11 @@ on:
     types: [closed]
     branches:
       - 'release-snapshot/**'
+
+  # Push to main with release-plan.yaml changes (auto sync-issue)
+  push:
+    branches: [main]
+    paths: ['release-plan.yaml']
 
   # Manual trigger for sync-issue only
   # Use this for: initial setup, recovery after manual repo changes, or forced sync
@@ -56,6 +62,7 @@ jobs:
     # - issues event but not a release issue
     # - pull_request but not merged or not to a snapshot branch
     if: |
+      (github.event_name == 'push') ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' &&
        contains(github.event.issue.labels.*.name, 'release-issue') &&

@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from . import config
 from .changelog_generator import ChangelogGenerator
 from .git_operations import GitOperations, GitOperationsError, PullRequestInfo
 from .github_client import GitHubClient
@@ -450,7 +451,13 @@ class SnapshotCreator:
         Returns:
             PullRequestInfo with PR number and URL
         """
-        title = f"Release {release_tag} (snapshot: {snapshot_id})"
+        # Build PR title: "Release Review: RepoName rX.Y (short_type meta_release)"
+        repo_name = self.gh.repo.split("/")[-1]
+        release_type = release_plan.get("repository", {}).get("target_release_type", "")
+        meta_release = release_plan.get("repository", {}).get("meta_release", "")
+        short_type = config.SHORT_TYPE_MAP.get(release_type, release_type)
+        type_suffix = f" ({short_type} {meta_release})" if meta_release else f" ({short_type})" if short_type else ""
+        title = f"Release Review: {repo_name} {release_tag}{type_suffix}"
 
         # Build PR body from template
         apis = [

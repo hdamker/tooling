@@ -15,6 +15,7 @@ from release_automation.scripts.context_builder import build_context
 
 KNOWN_TEMPLATES = [
     "command_rejected",
+    "config_drift_warning",
     "config_error",
     "draft_created",
     "draft_revoked",
@@ -106,7 +107,7 @@ class TestTemplateContextContract:
             )
 
     def test_all_known_templates_exist(self, responder):
-        """All 11 known templates are present in the template directory."""
+        """All 12 known templates are present in the template directory."""
         templates = responder.list_templates()
 
         for name in KNOWN_TEMPLATES:
@@ -115,10 +116,10 @@ class TestTemplateContextContract:
             )
 
     def test_list_templates_returns_expected_count(self, responder):
-        """list_templates() returns at least 11 templates."""
+        """list_templates() returns at least 12 templates."""
         templates = responder.list_templates()
-        assert len(templates) >= 11, (
-            f"Expected at least 11 templates, got {len(templates)}: {templates}"
+        assert len(templates) >= 12, (
+            f"Expected at least 12 templates, got {len(templates)}: {templates}"
         )
 
     def test_build_context_no_none_values(self):
@@ -177,3 +178,47 @@ class TestTemplateContextContract:
             result = responder.render("issue_reopened", context)
             assert isinstance(result, str)
             assert len(result) > 0
+
+    def test_config_drift_warning_renders_for_snapshot_active(self, responder):
+        """config_drift_warning renders for snapshot-active state."""
+        context = build_context(
+            release_tag="r4.1",
+            state="snapshot-active",
+            trigger_type="release_plan_change",
+            trigger_pr_number="55",
+            trigger_pr_url="https://github.com/org/repo/pull/55",
+            release_pr_url="https://github.com/org/repo/pull/123",
+            release_plan_url="https://github.com/org/repo/blob/main/release-plan.yaml",
+            apis=[
+                {
+                    "api_name": "QualityOnDemand",
+                    "api_version": "1.0.0-rc.1",
+                },
+            ],
+        )
+        result = responder.render("config_drift_warning", context)
+        assert "Configuration drift" in result
+        assert "#55" in result
+        assert "/discard-snapshot" in result
+        assert "Snapshot Configuration" in result
+
+    def test_config_drift_warning_renders_for_draft_ready(self, responder):
+        """config_drift_warning renders for draft-ready state."""
+        context = build_context(
+            release_tag="r4.1",
+            state="draft-ready",
+            trigger_type="release_plan_change",
+            trigger_pr_number="55",
+            trigger_pr_url="https://github.com/org/repo/pull/55",
+            release_plan_url="https://github.com/org/repo/blob/main/release-plan.yaml",
+            apis=[
+                {
+                    "api_name": "QualityOnDemand",
+                    "api_version": "1.0.0-rc.1",
+                },
+            ],
+        )
+        result = responder.render("config_drift_warning", context)
+        assert "Configuration drift" in result
+        assert "/delete-draft" in result
+        assert "/publish-release" in result

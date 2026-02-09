@@ -61,6 +61,10 @@ def main():
         "release_pr_url": f"{os.environ.get('GITHUB_SERVER_URL', '')}/{os.environ.get('GITHUB_REPOSITORY', '')}/pull/{os.environ.get('CTX_RELEASE_PR_NUMBER', '')}" if os.environ.get("CTX_RELEASE_PR_NUMBER") else "",
         "src_commit_sha": os.environ.get("CTX_SRC_COMMIT_SHA", ""), # Not in BotContext directly? Check.
         
+        # Trigger PR (for push events — PR that triggered the release-plan.yaml change)
+        "trigger_pr_number": os.environ.get("CTX_TRIGGER_PR_NUMBER", ""),
+        "trigger_pr_url": os.environ.get("CTX_TRIGGER_PR_URL", ""),
+
         # Dependencies
         "commonalities_release": os.environ.get("CTX_COMMONALITIES_RELEASE", ""),
         "identity_consent_management_release": os.environ.get("CTX_IDENTITY_CONSENT_MANAGEMENT_RELEASE", ""),

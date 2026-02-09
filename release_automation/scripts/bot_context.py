@@ -90,13 +90,6 @@ class BotContext:
     src_commit_sha_short: str = ""  # First 7 chars of src_commit_sha
     confirm_tag: str = ""  # Tag from --confirm argument
 
-    SHORT_TYPE_MAP = {
-        "pre-release-alpha": "alpha",
-        "pre-release-rc": "rc",
-        "public-release": "public",
-        "maintenance-release": "maintenance",
-    }
-
     def derive_flags(self) -> None:
         """Compute boolean flags and derived fields from string fields."""
         self.is_missing_file = self.error_type == "missing_file"
@@ -111,7 +104,7 @@ class BotContext:
         self.has_meta_release = bool(self.meta_release)
         self.has_reason = bool(self.reason)
         if not self.short_type:
-            self.short_type = self.SHORT_TYPE_MAP.get(
+            self.short_type = config.SHORT_TYPE_MAP.get(
                 self.release_type, self.release_type
             )
 

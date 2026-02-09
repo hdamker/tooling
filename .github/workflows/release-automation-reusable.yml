@@ -50,6 +50,8 @@ jobs:
       user: ${{ steps.detect.outputs.user }}
       should_continue: ${{ steps.detect.outputs.should_continue }}
       confirm_tag: ${{ steps.detect.outputs.confirm_tag }}
+      trigger_pr_number: ${{ steps.detect.outputs.trigger_pr_number }}
+      trigger_pr_url: ${{ steps.detect.outputs.trigger_pr_url }}
       # Note: release_tag is NOT output here - it comes from derive-state job
       # which reads from authoritative sources (release-plan.yaml or release-metadata.yaml)
     steps:
@@ -187,6 +189,40 @@ jobs:
 
               // For workflow_dispatch, release_tag will be populated by derive-state
               shouldContinue = 'true';
+            }
+
+            // ─────────────────────────────────────────────────────────────────
+            // Event: push (release-plan.yaml change on main)
+            // ─────────────────────────────────────────────────────────────────
+            else if (eventName === 'push') {
+              triggerType = 'release_plan_change';
+              command = 'sync-issue';
+              user = context.actor;
+              shouldContinue = 'true';
+
+              // Look up the merged PR via commit SHA
+              const headSha = context.payload.head_commit?.id || context.sha;
+              try {
+                const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  commit_sha: headSha,
+                });
+                const mergedPr = prs.find(pr => pr.merged_at);
+                if (mergedPr) {
+                  core.setOutput('trigger_pr_number', mergedPr.number.toString());
+                  core.setOutput('trigger_pr_url', mergedPr.html_url);
+                  console.log(`Found merged PR: #${mergedPr.number}`);
+                }
+              } catch (e) {
+                console.log(`Warning: Could not look up PR: ${e.message}`);
+              }
+            }
+
+            // Set defaults for trigger_pr outputs (push handler sets them above if found)
+            if (eventName !== 'push') {
+              core.setOutput('trigger_pr_number', '');
+              core.setOutput('trigger_pr_url', '');
             }
 
             // Output results
@@ -373,6 +409,8 @@ jobs:
           CTX_APIS_JSON: ${{ needs.derive-state.outputs.apis_json }}
           CTX_COMMONALITIES_RELEASE: ${{ needs.derive-state.outputs.commonalities_release }}
           CTX_IDENTITY_CONSENT_MANAGEMENT_RELEASE: ${{ needs.derive-state.outputs.identity_consent_management_release }}
+          CTX_TRIGGER_PR_NUMBER: ${{ needs.check-trigger.outputs.trigger_pr_number }}
+          CTX_TRIGGER_PR_URL: ${{ needs.check-trigger.outputs.trigger_pr_url }}
           GITHUB_TOKEN: ${{ github.token }}
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -1713,9 +1751,31 @@ jobs:
             {
               "state": "planned",
               "trigger_type": "${{ needs.check-trigger.outputs.trigger_type }}",
+              "trigger_pr_number": "${{ needs.check-trigger.outputs.trigger_pr_number }}",
+              "trigger_pr_url": "${{ needs.check-trigger.outputs.trigger_pr_url }}",
               "release_plan_url": "${{ github.server_url }}/${{ github.repository }}/blob/main/release-plan.yaml",
               "closed_issue_number": "${{ github.event.issue.number }}",
               "closed_issue_url": "${{ github.event.issue.html_url }}"
+            }
+
+      - name: Post Config Drift Warning
+        if: |
+          needs.check-trigger.outputs.trigger_type == 'release_plan_change' &&
+          (needs.derive-state.outputs.state == 'snapshot-active' ||
+           needs.derive-state.outputs.state == 'draft-ready')
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ needs.derive-state.outputs.release_issue_number }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
+          template: config_drift_warning
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
+          context: |
+            {
+              "trigger_type": "release_plan_change",
+              "trigger_pr_number": "${{ needs.check-trigger.outputs.trigger_pr_number }}",
+              "trigger_pr_url": "${{ needs.check-trigger.outputs.trigger_pr_url }}",
+              "release_plan_url": "${{ github.server_url }}/${{ github.repository }}/blob/main/release-plan.yaml"
             }
 
   # ─────────────────────────────────────────────────────────────────────────────
