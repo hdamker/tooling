@@ -26,10 +26,10 @@ def mock_github_client():
     client.get_file_content.return_value = None
     client.update_file.return_value = {"commit": {"sha": "abc123"}}
     client.update_release.return_value = {"html_url": "https://github.com/test/releases/1"}
-    # WP39: Reference tag methods
+    # Reference tag methods
     client.tag_exists.return_value = False
     client.create_tag.return_value = {"ref": "refs/tags/src/r4.1"}
-    # WP41: Branch cleanup methods
+    # Branch cleanup methods
     client.delete_branch.return_value = True
     client.rename_branch.return_value = True
     return client
@@ -168,7 +168,7 @@ apis:
         assert "release_date:" in call_args.kwargs["content"]
 
     def test_finalize_metadata_uses_iso8601_with_time(self, publisher, mock_github_client):
-        """release_date uses ISO 8601 format with time, not date-only (IMP-040)."""
+        """release_date uses ISO 8601 format with time, not date-only."""
         mock_github_client.get_file_content.return_value = """
 repository:
   release_tag: r4.1

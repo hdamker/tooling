@@ -318,7 +318,7 @@ repository:
 class TestGetCurrentReleaseInfoErrors:
     """Tests for get_current_release_info() configuration error handling.
 
-    BLK-003: Configuration errors should return error results, not NOT_PLANNED state.
+    Configuration errors should return error results, not NOT_PLANNED state.
     """
 
     def test_returns_error_when_file_missing(self, state_manager, mock_github_client):

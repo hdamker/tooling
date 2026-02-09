@@ -34,6 +34,16 @@ on:
   # Future: will accept branch input (main by default, maintenance branches as option)
   workflow_dispatch:
 
+# Serialize release automation runs per repository.
+# Prevents race conditions from concurrent slash commands, issue events, PR merges,
+# and workflow_dispatch triggers. With cancel-in-progress: false, queued runs wait
+# for the current run to complete before starting.
+# Note: GitHub allows at most 1 running + 1 pending per concurrency group.
+# A third arrival replaces the pending run (acceptable — codeowners act carefully).
+concurrency:
+  group: release-automation-${{ github.repository }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
   issues: write

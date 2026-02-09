@@ -115,7 +115,7 @@ class TestRender:
     def test_render_real_template(self, bot_responder):
         """Renders an actual bot message template."""
         from release_automation.scripts.context_builder import build_context
-        # WP33: Use build_context for proper defaults
+        # Use build_context for proper defaults
         context = build_context(
             command="/create-snapshot",
             user="testuser",
@@ -218,7 +218,7 @@ class TestExtractMarkerTag:
 
 
 class TestRealTemplates:
-    """Integration tests for real bot message templates (WP33 format)."""
+    """Integration tests for real bot message templates."""
 
     def test_snapshot_created_template(self, bot_responder):
         """snapshot_created template renders correctly."""
@@ -237,7 +237,7 @@ class TestRealTemplates:
             ],
         )
         result = bot_responder.render("snapshot_created", context)
-        # WP33: Template shows snapshot_id and apis, not meta_release
+        # Template shows snapshot_id and apis, not meta_release
         assert "r4.1-abc1234" in result
         assert "quality-on-demand" in result
         assert "1.0.0" in result
@@ -246,7 +246,7 @@ class TestRealTemplates:
     def test_command_rejected_template(self, bot_responder):
         """command_rejected template renders correctly."""
         from release_automation.scripts.context_builder import build_context
-        # WP33: Use build_context for state flags
+        # Use build_context for state flags
         context = build_context(
             command="/create-snapshot",
             user="developer",
@@ -258,7 +258,7 @@ class TestRealTemplates:
         result = bot_responder.render("command_rejected", context)
         assert "/create-snapshot" in result
         assert "snapshot already exists" in result
-        # WP33: user is not shown in compact format
+        # User is not shown in compact format
         assert "snapshot-active" in result
 
     def test_snapshot_failed_template(self, bot_responder):
@@ -271,7 +271,7 @@ class TestRealTemplates:
             workflow_run_url="https://github.com/org/repo/actions/runs/123",
         )
         result = bot_responder.render("snapshot_failed", context)
-        # WP33: header uses lowercase "failed"
+        # Header uses lowercase "failed"
         assert "failed" in result
         assert "API version mismatch" in result
 
@@ -285,7 +285,7 @@ class TestRealTemplates:
             workflow_run_url="https://github.com/org/repo/actions/runs/456",
         )
         result = bot_responder.render("snapshot_failed", context)
-        # WP33: header uses lowercase "failed"
+        # Header uses lowercase "failed"
         assert "failed" in result
         assert "Unexpected error" in result
         assert "'str' object has no attribute 'get'" in result
@@ -367,7 +367,7 @@ class TestContextIntegration:
         assert context["state_snapshot_active"] is True
         assert context["state_draft_ready"] is False
         result = bot_responder.render("issue_reopened", context)
-        # WP33: Template shows state, not release_tag
+        # Template shows state, not release_tag
         assert "snapshot-active" in result
         assert "reopened" in result
 
@@ -421,13 +421,13 @@ class TestContextIntegration:
         context = build_context(**raw)
         result = bot_responder.render("command_rejected", context)
         assert "not allowed" in result
-        # WP33: Template shows state and command, not user
+        # Template shows state and command, not user
         assert "snapshot-active" in result
         assert "create-snapshot" in result
 
 
 class TestPublicationTemplates:
-    """Tests for publication-related bot message templates (WP43)."""
+    """Tests for publication-related bot message templates."""
 
     def test_publish_confirmation_template(self, bot_responder):
         """publish_confirmation template renders with draft details."""

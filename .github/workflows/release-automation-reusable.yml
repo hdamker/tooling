@@ -177,11 +177,11 @@ jobs:
             }
 
             // ─────────────────────────────────────────────────────────────────
-            // Event: workflow_dispatch (IMP-022: sync-issue only)
+            // Event: workflow_dispatch (sync-issue only)
             // ─────────────────────────────────────────────────────────────────
             else if (eventName === 'workflow_dispatch') {
               triggerType = 'workflow_dispatch';
-              command = 'sync-issue';  // IMP-022: hardcode to sync-issue only
+              command = 'sync-issue';  // hardcode to sync-issue only
               commandArgs = '';  // No args needed for sync-issue
               user = context.actor;
 
@@ -487,7 +487,7 @@ jobs:
               return;
             }
 
-            // For /publish-release, additionally check CODEOWNERS membership (IMP-029)
+            // For /publish-release, additionally check CODEOWNERS membership
             // Break glass: maintain and admin users bypass CODEOWNERS check
             if (command === 'publish-release' && userPermission === 'write') {
               console.log('Checking CODEOWNERS membership for publish-release (write-level user)...');
@@ -1006,8 +1006,8 @@ jobs:
 
           gh = GitHubClient(f'{owner}/{repo}', token)
           publisher = ReleasePublisher(gh)
-          # Note: issue close moved to post-result job (IMP-030)
-          # Note: sync PR creation moved to create-sync-pr job (IMP-026)
+          # Note: issue close moved to post-result job (after success message)
+          # Note: sync PR creation moved to create-sync-pr job
 
           warnings = []
           release_url = ''
@@ -1045,7 +1045,7 @@ jobs:
                   warnings.append(f'Branch cleanup issue: {op}')
               print(f'  {op}: {status}')
 
-          # Note: Issue close is done in post-result job AFTER success message (IMP-030)
+          # Note: Issue close is done in post-result job AFTER success message
 
           # Set outputs
           set_output('success', 'true')
@@ -1060,7 +1060,7 @@ jobs:
           PYTHON_SCRIPT
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 5f.2: Create post-release sync PR (IMP-026)
+  # Phase 5f.2: Create post-release sync PR
   # ─────────────────────────────────────────────────────────────────────────────
   create-sync-pr:
     name: "Create Post-Release Sync PR"
@@ -1794,7 +1794,7 @@ jobs:
               fi
               ;;
             *)
-              # No handler matched - this is a workflow bug (IMP-024)
+              # No handler matched - this is a workflow bug
               echo "template=internal_error" >> $GITHUB_OUTPUT
               ;;
           esac
@@ -1924,7 +1924,7 @@ jobs:
           context: ${{ steps.context.outputs.context }}
           comment_id: ${{ needs.post-interim.outputs.comment_id }}
 
-      # IMP-030: Close issue AFTER success message is posted (not in publish-release job)
+      # Close issue AFTER success message is posted (not in publish-release job)
       - name: Close Release Issue
         if: |
           needs.publish-release.outputs.success == 'true' &&

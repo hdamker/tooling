@@ -581,7 +581,7 @@ class TestSyncReleaseIssueWithLabels:
 
 
 class TestCloseReleaseIssue:
-    """Tests for close_release_issue method (WP42)."""
+    """Tests for close_release_issue method."""
 
     def test_close_release_issue_success(self):
         """Test successful issue closure flow."""

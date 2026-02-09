@@ -340,7 +340,7 @@ class TestBuildContext:
 
 
 class TestWP49Fields:
-    """Tests for WP49 bot message fields (IMP-046)."""
+    """Tests for bot message context fields."""
 
     def test_trigger_type_workflow_dispatch(self):
         """trigger_type 'workflow_dispatch' sets correct flag."""

@@ -280,7 +280,7 @@ class TestMetadataGenerator:
         assert result["repository"]["src_commit_sha"] is None
 
     def test_generate_derives_repository_name_from_repo_param(self, generator):
-        """repository_name derived from repo parameter, not release plan (IMP-039)."""
+        """repository_name derived from repo parameter, not release plan."""
         release_plan = {
             "repository": {
                 "target_release_tag": "r1.0",

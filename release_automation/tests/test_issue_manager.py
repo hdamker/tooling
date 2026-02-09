@@ -358,13 +358,12 @@ class TestIssueManagerGenerateStateSection:
 
         content = manager.generate_state_section("snapshot_active")
 
-        # WP33: Updated format uses backticks and lowercased state
         assert "**State:** `snapshot-active`" in content
         assert "**Last Updated:** 2026-01-30T10:00:00Z" in content
 
 
 class TestIssueManagerGenerateConfigSection:
-    """Tests for generate_config_section method (WP33 format)."""
+    """Tests for generate_config_section method."""
 
     def test_generate_config_with_apis(self):
         """Test generating config section with APIs."""
@@ -389,7 +388,6 @@ class TestIssueManagerGenerateConfigSection:
 
         content = manager.generate_config_section(release_plan, api_versions)
 
-        # WP33: Config section shows APIs table
         assert "| API | Target | Calculated |" in content
         assert "| location-verification | 3.2.0 | `3.2.0-rc.1` |" in content
         assert "| location-retrieval | 0.5.0 | `0.5.0-rc.1` |" in content
@@ -408,12 +406,11 @@ class TestIssueManagerGenerateConfigSection:
 
         content = manager.generate_config_section(release_plan, {})
 
-        # WP33: Shows placeholder when no APIs or dependencies
         assert "_No APIs or dependencies configured_" in content
 
 
 class TestIssueManagerGenerateIssueBodyTemplate:
-    """Tests for generate_issue_body_template method (WP33 format)."""
+    """Tests for generate_issue_body_template method."""
 
     def test_generate_complete_template(self):
         """Test generating a complete issue body template."""
@@ -425,23 +422,18 @@ class TestIssueManagerGenerateIssueBodyTemplate:
             meta_release="Fall26"
         )
 
-        # WP33: Header format changed
         assert "## Release: r4.1 (pre-release-rc) — Fall26" in body
 
         # Check sections exist
         assert "<!-- BEGIN:STATE -->" in body
         assert "<!-- END:STATE -->" in body
-        # WP33: HISTORY section removed (deferred to backlog)
         assert "<!-- BEGIN:CONFIG -->" in body
         assert "<!-- END:CONFIG -->" in body
-        # WP33: ACTIONS section added
         assert "<!-- BEGIN:ACTIONS -->" in body
         assert "<!-- END:ACTIONS -->" in body
 
-        # WP33: State format changed
         assert "**State:** `planned`" in body
 
-        # WP33: Actions shown for planned state
         assert "`/create-snapshot`" in body
 
     def test_generate_template_without_meta_release(self):
@@ -453,7 +445,6 @@ class TestIssueManagerGenerateIssueBodyTemplate:
             release_type="pre-release-alpha"
         )
 
-        # WP33: Header without meta-release
         assert "## Release: r4.1 (pre-release-alpha)" in body
         assert "—" not in body.split("\n")[0]  # No em-dash in header without meta
 
@@ -508,7 +499,7 @@ Content with <!-- inner comment -->
 
 
 class TestIssueManagerPublishedSections:
-    """Tests for published state section generators (WP42)."""
+    """Tests for published state section generators."""
 
     def test_generate_published_state_section_basic(self):
         """Test generating published state section."""

@@ -71,7 +71,7 @@ class ReadmeUpdater:
             readme_path: Path to README.md file
             release_state: One of: no_release, prerelease_only,
                           public_release, public_with_prerelease
-            data: Template data dict (see Data Contract in WP31 spec)
+            data: Template data dict with release info fields
 
         Returns:
             True if file was modified, False if content unchanged

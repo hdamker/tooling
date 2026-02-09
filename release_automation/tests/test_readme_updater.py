@@ -154,7 +154,7 @@ class TestTemplateRendering:
         assert "releases/latest" in result
 
     def test_render_public_release_without_meta_release(self, updater, public_release_data):
-        """Public release template omits parentheses when meta_release is empty (IMP-013)."""
+        """Public release template omits parentheses when meta_release is empty."""
         public_release_data["meta_release"] = ""
         result = updater._render_template("public_release", public_release_data)
         assert "r3.2" in result

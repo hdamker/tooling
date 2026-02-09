@@ -768,7 +768,7 @@ class TestTransformationIntegration:
         call_args = mock_transformer.apply_all.call_args
         context = call_args[0][1]
         assert context.release_tag == "r4.1"
-        # repo_name should be name only, not full path (IMP-038)
+        # repo_name should be name only, not full path
         assert context.repo_name == "TestRepo-QoD"
         # These are derived from release_plan['dependencies']
         assert context.commonalities_release == "r3.4"
@@ -876,7 +876,7 @@ class TestCustomBaseCommit:
         assert result.src_commit_sha is not None
 
 
-# --- Tests for Release Documentation (WP31/WP32 Integration) ---
+# --- Tests for Release Documentation (README + CHANGELOG Integration) ---
 
 
 class TestReleaseDocumentation:
