@@ -22,4 +22,4 @@ Created after [`release-plan.yaml`]({{release_plan_url}}) update (PR [#{{trigger
 {{/commonalities_release}}
 </details>
 
-**Valid actions:**<br>→ **`/create-snapshot` — begin the release process**
+**Valid actions (post a comment):**<br>→ **`/create-snapshot` — begin the release process**
