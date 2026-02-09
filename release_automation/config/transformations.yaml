@@ -148,7 +148,7 @@ transformations:
     description: Replace Commonalities main/ with {commonalities_release}/ on raw.githubusercontent.com
     type: regex
     file_pattern: "documentation/**/*.md"
-    pattern: "(raw\\.githubusercontent\\.com/camaraproject/Commonalities/)main/"
+    pattern: "(raw.githubusercontent.com/camaraproject/Commonalities/)main/"
     replacement: "\\1{commonalities_release}/"
 
   # T6f: ICM raw.githubusercontent.com links
@@ -156,7 +156,7 @@ transformations:
     description: Replace ICM main/ with {icm_release}/ on raw.githubusercontent.com
     type: regex
     file_pattern: "documentation/**/*.md"
-    pattern: "(raw\\.githubusercontent\\.com/camaraproject/IdentityAndConsentManagement/)main/"
+    pattern: "(raw.githubusercontent.com/camaraproject/IdentityAndConsentManagement/)main/"
     replacement: "\\1{icm_release}/"
 
   # T6g: Own repo raw.githubusercontent.com links (documentation)
@@ -164,7 +164,7 @@ transformations:
     description: Replace own repo main/ with {release_tag}/ on raw.githubusercontent.com (docs)
     type: regex
     file_pattern: "documentation/**/*.md"
-    pattern: "(raw\\.githubusercontent\\.com/camaraproject/{repo_name}/)main/"
+    pattern: "(raw.githubusercontent.com/camaraproject/{repo_name}/)main/"
     replacement: "\\1{release_tag}/"
 
   # T6h: Own repo raw.githubusercontent.com links (API definitions)
@@ -172,7 +172,7 @@ transformations:
     description: Replace own repo main/ with {release_tag}/ on raw.githubusercontent.com (API defs)
     type: regex
     file_pattern: "code/API_definitions/*.yaml"
-    pattern: "(raw\\.githubusercontent\\.com/camaraproject/{repo_name}/)main/"
+    pattern: "(raw.githubusercontent.com/camaraproject/{repo_name}/)main/"
     replacement: "\\1{release_tag}/"
 
   # T7: CHANGELOG API version sections (stub - future implementation)
