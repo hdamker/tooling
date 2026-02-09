@@ -24,6 +24,6 @@ This issue is required while a draft release exists — release commands are man
 {{/commonalities_release}}
 </details>
 
-**Valid actions:**{{#state_snapshot_active}}<br>• Merge [Release PR]({{release_pr_url}}) to create draft release<br>• `/discard-snapshot <reason>` — discard and return to `planned`{{/state_snapshot_active}}{{#state_draft_ready}}<br>• `/publish-release --confirm {{release_tag}}` — publish the release<br>• `/delete-draft <reason>` — delete draft and return to `planned`{{/state_draft_ready}}
+**Valid actions:**{{#state_snapshot_active}}<br>→ **Merge [Release PR]({{release_pr_url}}) to create draft release**<br>→ `/discard-snapshot <reason>` — discard and return to `planned`{{/state_snapshot_active}}{{#state_draft_ready}}<br>→ **`/publish-release --confirm {{release_tag}}` — publish the release**<br>→ `/delete-draft <reason>` — delete draft and return to `planned`{{/state_draft_ready}}
 
 The issue closes automatically when the release is published.

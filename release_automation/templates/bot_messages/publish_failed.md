@@ -7,4 +7,4 @@
 ```
 {{/error_message}}
 
-**Valid actions:**<br>• Retry: `/publish-release --confirm {{release_tag}}`<br>• `/delete-draft <reason>` — delete draft and start over
+**Valid actions:**<br>→ **Retry: `/publish-release --confirm {{release_tag}}`**<br>→ `/delete-draft <reason>` — delete draft and start over

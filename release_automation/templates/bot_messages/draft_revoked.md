@@ -14,4 +14,4 @@
 {{/commonalities_release}}
 </details>
 
-**Valid actions:**<br>• `/create-snapshot` — new snapshot from updated `main`
+**Valid actions:**<br>→ **`/create-snapshot` — new snapshot from updated `main`**

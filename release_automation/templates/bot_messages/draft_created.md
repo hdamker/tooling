@@ -14,4 +14,4 @@ Triggered by merge of [Release PR #{{release_pr_number}}]({{release_pr_url}}).
 {{/commonalities_release}}
 </details>
 
-**Valid actions:**<br>• `/publish-release --confirm {{release_tag}}` — publish the release<br>• `/delete-draft <reason>` — delete the draft and return to `planned`
+**Valid actions:**<br>→ **`/publish-release --confirm {{release_tag}}` — publish the release**<br>→ `/delete-draft <reason>` — delete the draft and return to `planned`

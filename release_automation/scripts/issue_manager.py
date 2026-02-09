@@ -323,25 +323,25 @@ class IssueManager:
         state_lower = state.lower().replace("_", "-")
 
         if state_lower == "planned":
-            return "**Valid actions:** `/create-snapshot` to begin the release process"
+            return "**Valid actions:**<br>→ **`/create-snapshot` — begin the release process**"
 
         elif state_lower == "snapshot-active":
             pr_text = f"[Release PR]({release_pr_url})" if release_pr_url else "Release PR"
             return (
-                f"**Valid actions:** Merge {pr_text} to create draft release | "
-                "`/discard-snapshot <reason>` to discard"
+                f"**Valid actions:**<br>→ **Merge {pr_text} to create draft release**"
+                "<br>→ `/discard-snapshot <reason>` — discard and return to `planned`"
             )
 
         elif state_lower == "draft-ready":
             return (
-                "**Valid actions:** Publish the draft release in GitHub Releases | "
-                "`/delete-draft <reason>` to delete"
+                "**Valid actions:**<br>→ **`/publish-release --confirm` — publish the release**"
+                "<br>→ `/delete-draft <reason>` — delete draft and return to `planned`"
             )
 
         elif state_lower == "not-planned":
             return (
-                "**Valid actions:** Update `release-plan.yaml` with a planned release type to resume | "
-                "Close this issue — a new one will be created when a release is planned"
+                "**Valid actions:**<br>→ **Update `release-plan.yaml` with a planned release type to resume**"
+                "<br>→ Close this issue — a new one will be created when a release is planned"
             )
 
         return ""
@@ -444,7 +444,7 @@ _Configuration from release-plan.yaml will be shown here._
 <!-- END:CONFIG -->
 
 <!-- BEGIN:ACTIONS -->
-**Valid actions:** `/create-snapshot` to begin the release process
+**Valid actions:**<br>→ **`/create-snapshot` — begin the release process**
 <!-- END:ACTIONS -->
 """
 

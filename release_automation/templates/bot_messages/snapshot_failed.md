@@ -7,4 +7,4 @@
 ```
 {{/error_message}}
 
-**Valid actions:**<br>• Fix issues on `main`<br>• `/create-snapshot` — retry after fixes are merged
+**Valid actions:**<br>→ Fix issues on `main`<br>→ **`/create-snapshot` — retry after fixes are merged**

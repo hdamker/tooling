@@ -14,4 +14,4 @@ Publication requires explicit confirmation. Copy/paste: `/publish-release --conf
 {{/commonalities_release}}
 </details>
 
-**Valid actions:**<br>• `/publish-release --confirm {{release_tag}}` — publish the release<br>• `/delete-draft <reason>` — delete draft and return to `planned`
+**Valid actions:**<br>→ **`/publish-release --confirm {{release_tag}}` — publish the release**<br>→ `/delete-draft <reason>` — delete draft and return to `planned`
