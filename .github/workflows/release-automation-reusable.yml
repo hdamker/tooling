@@ -1707,7 +1707,9 @@ jobs:
             {
               "state": "planned",
               "trigger_type": "${{ needs.check-trigger.outputs.trigger_type }}",
-              "release_plan_url": "${{ github.server_url }}/${{ github.repository }}/blob/main/release-plan.yaml"
+              "release_plan_url": "${{ github.server_url }}/${{ github.repository }}/blob/main/release-plan.yaml",
+              "closed_issue_number": "${{ github.event.issue.number }}",
+              "closed_issue_url": "${{ github.event.issue.html_url }}"
             }
 
   # ─────────────────────────────────────────────────────────────────────────────
