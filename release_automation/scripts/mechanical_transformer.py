@@ -393,14 +393,15 @@ class MechanicalTransformer:
         # Extract API name from file path for context
         api_name = self._extract_api_name_from_path(file_path)
 
-        # Resolve replacement template
+        # Resolve pattern and replacement templates
+        pattern = self._resolve_template(rule.pattern, context, api_name)
         replacement = self._resolve_template(rule.replacement, context, api_name)
 
         with open(file_path, "r") as f:
             content = f.read()
 
         # Apply regex replacement
-        new_content, count = re.subn(rule.pattern, replacement, content)
+        new_content, count = re.subn(pattern, replacement, content)
 
         if count > 0:
             with open(file_path, "w") as f:
