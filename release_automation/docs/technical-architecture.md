@@ -586,13 +586,11 @@ The reusable workflow (`release-automation-reusable.yml`) orchestrates all relea
 flowchart TD
     CT[check-trigger] --> DS[derive-state]
     DS --> AC[assemble-context]
+    DS -->|slash command| VC[validate-command]
     DS -->|config error| HCE[handle-config-error]
 
-    AC -->|slash command| PA[post-ack<br><i>~5s acknowledgment</i>]
-    PA --> VC[validate-command]
-    VC -->|rejected| REJ[post-rejection<br><i>edits ack comment</i>]
-    VC -->|allowed| PI[post-interim<br><i>edits ack comment</i>]
-    PI --> CMD
+    VC -->|rejected| REJ[post-rejection]
+    VC -->|allowed| CMD
 
     subgraph CMD [Command Handlers]
         direction LR
@@ -609,8 +607,8 @@ flowchart TD
     HPM --> UI
     HIE --> UI
 
-    UI --> PR2[post-result<br><i>edits ack/interim → final</i>]
-    PUB -.->|publish only| CSP[create-sync-pr]
+    CMD --> PR2[post-result<br><i>slash commands only</i>]
+    PUB -->|publish only| CSP[create-sync-pr]
     CSP --> PR2
 ```
 
