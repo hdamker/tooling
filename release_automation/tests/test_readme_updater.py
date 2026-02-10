@@ -143,14 +143,14 @@ class TestTemplateRendering:
         result = updater._render_template("prerelease_only", prerelease_data)
         assert "r4.1-rc.1" in result
         assert "release candidate" in result
-        assert "PREVIEW" in result
+        assert "latest pre-release" in result
 
     def test_render_public_release_template(self, updater, public_release_data):
         """Public release template renders with release variables."""
         result = updater._render_template("public_release", public_release_data)
         assert "r3.2" in result
         assert "(Spring25)" in result
-        assert "NEW" in result
+        assert "latest public release" in result
         assert "releases/latest" in result
 
     def test_render_public_release_without_meta_release(self, updater, public_release_data):
