@@ -244,6 +244,49 @@ jobs:
             core.setOutput('confirm_tag', confirmTag);
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 1b: Post early acknowledgment (for slash commands only)
+  # Posts a lightweight "Validating..." comment before derive-state runs.
+  # This comment is later updated by post-interim (valid) or post-rejection (rejected).
+  # ─────────────────────────────────────────────────────────────────────────────
+  post-ack:
+    needs: [check-trigger]
+    if: |
+      needs.check-trigger.outputs.should_continue == 'true' &&
+      needs.check-trigger.outputs.trigger_type == 'slash_command'
+    runs-on: ubuntu-latest
+    outputs:
+      comment_id: ${{ steps.ack.outputs.comment_id }}
+    steps:
+      - name: Post Acknowledgment
+        id: ack
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            const command = '${{ needs.check-trigger.outputs.command }}';
+            const user = '${{ needs.check-trigger.outputs.user }}';
+            const issueNumber = parseInt('${{ needs.check-trigger.outputs.issue_number }}');
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const marker = `<!-- release-bot:ack:${context.runId} -->`;
+
+            const body = [
+              marker,
+              `**\u23F3 Validating \`/${command}\`...**`,
+              `**Requested by:** @${user} \u00B7 [View workflow run](${runUrl})`,
+              '',
+              'This comment will be updated with the result. If this stays visible unusually long, open the workflow run above.'
+            ].join('\n');
+
+            const result = await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: body
+            });
+
+            console.log(`Ack comment created: ${result.data.id}`);
+            core.setOutput('comment_id', result.data.id.toString());
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # Phase 2: Derive current state (runs first to get release_tag from artifacts)
   # ─────────────────────────────────────────────────────────────────────────────
   derive-state:
@@ -289,8 +332,10 @@ jobs:
   # Phase 2b: Handle configuration errors (if derive-state detected any)
   # ─────────────────────────────────────────────────────────────────────────────
   handle-config-error:
-    needs: [check-trigger, derive-state]
+    needs: [check-trigger, derive-state, post-ack]
     if: |
+      always() &&
+      needs.derive-state.result == 'success' &&
       needs.check-trigger.outputs.should_continue == 'true' &&
       needs.derive-state.outputs.config_error != ''
     runs-on: ubuntu-latest
@@ -337,6 +382,7 @@ jobs:
               "user": "${{ needs.check-trigger.outputs.user }}",
               "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             }
+          comment_id: ${{ needs.post-ack.outputs.comment_id }}
 
       - name: Fail workflow (for non-slash-command triggers)
         if: steps.decide.outputs.action == 'fail_workflow'
@@ -417,11 +463,12 @@ jobs:
   # Phase 3: Post interim comment (for slash commands only)
   # ─────────────────────────────────────────────────────────────────────────────
   post-interim:
-    needs: [check-trigger, derive-state, assemble-context]
+    needs: [check-trigger, derive-state, assemble-context, validate-command, post-ack]
     if: |
       needs.check-trigger.outputs.should_continue == 'true' &&
       needs.check-trigger.outputs.trigger_type == 'slash_command' &&
-      needs.derive-state.outputs.config_error == ''
+      needs.derive-state.outputs.config_error == '' &&
+      needs.validate-command.outputs.allowed == 'true'
     runs-on: ubuntu-latest
     outputs:
       comment_id: ${{ steps.post.outputs.comment_id }}
@@ -447,6 +494,7 @@ jobs:
           template: interim_processing
           base_context: ${{ needs.assemble-context.outputs.base_context }}
           context: "{}"
+          comment_id: ${{ needs.post-ack.outputs.comment_id }}
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 4: Validate command (for slash commands only, skip on config error)
@@ -615,7 +663,7 @@ jobs:
       [
         check-trigger,
         derive-state,
-        post-interim,
+        post-ack,
         validate-command,
         assemble-context,
       ]
@@ -647,7 +695,7 @@ jobs:
             {
               "error_message": "${{ needs.validate-command.outputs.error_message }}"
             }
-          comment_id: ${{ needs.post-interim.outputs.comment_id }}
+          comment_id: ${{ needs.post-ack.outputs.comment_id }}
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 5b: Execute create-snapshot command
