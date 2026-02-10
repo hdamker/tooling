@@ -1560,14 +1560,10 @@ jobs:
               let body = '';
               if (releaseNotes) {
                 body = releaseNotes;
-                body += `\n\n---\n\n`;
-                body += `_Draft created automatically from merged Release PR._\n`;
-                body += `_Review the release content, then publish when ready._\n`;
               } else {
                 body = `## Release ${releaseTag}\n\n`;
                 body += `**Release type:** ${releaseType}\n\n`;
                 body += `---\n\n`;
-                body += `_Draft created automatically from merged Release PR._\n`;
                 body += `_CHANGELOG.md content was not available — please add release notes manually._\n`;
               }
 
