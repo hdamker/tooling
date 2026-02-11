@@ -616,7 +616,7 @@ flowchart TD
 
 | Stage | Job | Timing | Content |
 |-------|-----|--------|---------|
-| 1. Ack | post-ack | ~5 seconds | Brief acknowledgment that command was received |
+| 1. Ack | check-trigger (ack step) | ~8 seconds | Brief acknowledgment that command was received |
 | 2. Interim | post-interim | After validate-command passes | Processing status with workflow run link |
 | 3. Result | post-result | After command completes | Final outcome (success/failure details) |
 
