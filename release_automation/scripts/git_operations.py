@@ -62,7 +62,7 @@ class GitOperations:
         Initialize git operations.
 
         Args:
-            repo: Repository in format "owner/name" (e.g., "hdamker/TestRepo-QoD")
+            repo: Repository in format "owner/name" (e.g., "camaraproject/QualityOnDemand")
             work_dir: Local directory path for git operations
             token: Optional GitHub token for authentication
         """
