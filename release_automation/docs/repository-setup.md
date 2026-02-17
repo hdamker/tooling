@@ -163,11 +163,11 @@ The release automation expects the standard CODEOWNERS format used across CAMARA
 
 ### CODEOWNERS and RM reviewer assignment
 
-Legacy CAMARA repositories have `/CHANGELOG.md` and `/CHANGELOG.MD` lines in CODEOWNERS that assign `@camaraproject/release-management_reviewers` as reviewers for changelog files. The onboarding campaign **removes** these lines because:
+CAMARA repositories have `/CHANGELOG.md` and `/CHANGELOG.MD` lines in CODEOWNERS that assign `@camaraproject/release-management_reviewers` as reviewers for the legacy root changelog file. These lines are **kept** during onboarding:
 
-- RM reviewer assignment for Release PRs is now enforced via the ruleset's `required_reviewers` field, which auto-requests the team and blocks merge until they approve
-- Removing the CODEOWNERS lines means post-release sync PRs on `main` do **not** require RM reviewer approval (desirable — these are automated backports of already-approved release content)
-- The `*` CODEOWNERS pattern ensures API codeowners still review all files
+- They prevent codeowners from making unreviewed changes to the legacy `CHANGELOG.md` during Phase 1 (migration period), encouraging use of the new `CHANGELOG/` directory structure instead
+- RM reviewer assignment for Release PRs on snapshot branches is additionally enforced via the ruleset's `required_reviewers` field, which auto-requests the team and blocks merge until they approve
+- The `*` CODEOWNERS pattern ensures API codeowners review all files
 
 ### How CODEOWNERS is used by the automation
 
@@ -347,7 +347,7 @@ Use this checklist to verify that a repository is correctly configured for relea
 
 - [ ] `CODEOWNERS` file exists in repository root
 - [ ] First `*` line lists at least one individual codeowner (`@username`)
-- [ ] No `/CHANGELOG.md` or `/CHANGELOG.MD` lines (removed by onboarding campaign)
+- [ ] `/CHANGELOG.md` and/or `/CHANGELOG.MD` lines present with `@camaraproject/release-management_reviewers`
 
 ### Caller Workflow
 
