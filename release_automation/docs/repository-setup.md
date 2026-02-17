@@ -57,7 +57,7 @@ No ruleset is needed for `release-review/**` branches — codeowners push review
 
 **PR review rules:**
 - Require a pull request before merging
-- Required approvals: 2 (enforces four-eyes review even if a person is in both codeowner and RM reviewer teams)
+- Required approvals: 2 (ensures two distinct people must approve, even if a person is in both codeowner and RM reviewer teams)
 - Require review from Code Owners
 - Dismiss stale reviews on new pushes
 - Required reviewers: `release-management_reviewers` team (1 approval, all files)
