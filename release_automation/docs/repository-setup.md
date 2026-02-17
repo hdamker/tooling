@@ -1,6 +1,6 @@
 # Repository Setup for Release Automation
 
-**Last Updated**: 2026-02-13
+**Last Updated**: 2026-02-17
 
 ## Overview
 
@@ -23,8 +23,8 @@ This document defines the required configuration for each API repository. It ser
 
 | Item | Purpose | Section |
 |------|---------|---------|
-| 3 repository rulesets | Branch protection for automation-managed branches | [Rulesets](#repository-rulesets) |
-| CODEOWNERS entry | RM reviewer assignment for Release PRs | [CODEOWNERS](#codeowners-requirements) |
+| Repository ruleset | Branch protection for snapshot branches | [Ruleset](#repository-ruleset) |
+| CODEOWNERS file | Codeowner assignment for `/publish-release` authorization | [CODEOWNERS](#codeowners-requirements) |
 | Caller workflow file | Entry point that connects the repo to the automation | [Caller Workflow](#caller-workflow) |
 | `release-plan.yaml` | Release configuration (target tag, type, APIs) | [Required Files](#required-files) |
 | README delimiters | Release Information section markers | [Required Files](#required-files) |
@@ -32,25 +32,39 @@ This document defines the required configuration for each API repository. It ser
 
 ---
 
-## Repository Rulesets
+## Repository Ruleset
 
-Three rulesets protect the branches that the release automation creates and manages. All three use **GitHub Actions** as a bypass actor to allow the workflow's `GITHUB_TOKEN` to operate while blocking direct human modifications.
+One ruleset protects the `release-snapshot/**` branches that the release automation creates and manages. It combines branch protection rules (restrict creation, updates, deletion, force pushes) with PR review requirements (2 approvals, code owner review, RM team approval).
 
-### 1. Snapshot Branch Protection
+The `camara-release-automation` GitHub App is the bypass actor, allowing the workflow to create, push to, and delete snapshot branches while humans are fully governed by the PR + review gates.
 
-Prevents human modification of snapshot branches. The workflow pushes mechanically generated content (transformed API files, release-metadata.yaml) to these branches — any human modification would compromise release integrity.
+No ruleset is needed for `release-review/**` branches — codeowners push review fixes directly to these branches, and the workflow handles creation and cleanup.
+
+### Snapshot Branch Protection
 
 | Property | Value |
 |----------|-------|
 | **Name** | `release-snapshot-protection` |
 | **Enforcement** | Active |
 | **Target** | Include branches matching: `release-snapshot/**` |
-| **Bypass actors** | GitHub Actions (always) |
+| **Bypass actors** | `camara-release-automation` GitHub App (always) |
 
-**Rules:**
-- Restrict pushes — only bypass actors may push
+**Branch protection rules:**
+- Restrict creations — only bypass actors may create snapshot branches
+- Restrict updates — only bypass actors may push
 - Restrict deletions — only bypass actors may delete
 - Block force pushes
+
+**PR review rules:**
+- Require a pull request before merging
+- Required approvals: 2 (enforces four-eyes review even if a person is in both codeowner and RM reviewer teams)
+- Require review from Code Owners
+- Dismiss stale reviews on new pushes
+- Required reviewers: `release-management_reviewers` team (1 approval, all files)
+
+The dual review gate ensures both API codeowners and Release Management reviewers must approve before a Release PR can be merged:
+- The `*` CODEOWNERS pattern assigns API codeowners as reviewers
+- The ruleset's `required_reviewers` field auto-requests the `release-management_reviewers` team
 
 <details>
 <summary>GitHub API payload for programmatic application</summary>
@@ -67,147 +81,68 @@ Prevents human modification of snapshot branches. The workflow pushes mechanical
     }
   },
   "rules": [
-    { "type": "non_fast_forward" },
     { "type": "deletion" },
-    {
-      "type": "push",
-      "parameters": {
-        "restrict_pushes": true
-      }
-    }
-  ],
-  "bypass_actors": [
-    {
-      "actor_id": 2,
-      "actor_type": "Integration",
-      "bypass_mode": "always"
-    }
-  ]
-}
-```
-
-Note: `actor_id: 2` refers to the GitHub Actions app. Verify the correct ID for your organization via `GET /orgs/{org}/rulesets` on an existing ruleset that uses GitHub Actions bypass.
-
-</details>
-
-### 2. Release-Review Branch Protection
-
-Prevents deletion of release-review branches while allowing codeowners to push review fixes. The release-review branch is the PR head where codeowners may address review comments directly.
-
-| Property | Value |
-|----------|-------|
-| **Name** | `release-review-protection` |
-| **Enforcement** | Active |
-| **Target** | Include branches matching: `release-review/**` |
-| **Bypass actors** | GitHub Actions (always) |
-
-**Rules:**
-- Restrict deletions — only bypass actors may delete (workflow cleans up after publication)
-- Block force pushes
-
-Note: No push restriction — codeowners may push directly to fix review comments on the Release PR.
-
-<details>
-<summary>GitHub API payload</summary>
-
-```json
-{
-  "name": "release-review-protection",
-  "target": "branch",
-  "enforcement": "active",
-  "conditions": {
-    "ref_name": {
-      "include": ["refs/heads/release-review/**"],
-      "exclude": []
-    }
-  },
-  "rules": [
     { "type": "non_fast_forward" },
-    { "type": "deletion" }
-  ],
-  "bypass_actors": [
-    {
-      "actor_id": 2,
-      "actor_type": "Integration",
-      "bypass_mode": "always"
-    }
-  ]
-}
-```
-
-</details>
-
-### 3. Release PR Approval Requirements
-
-Enforces review gates on pull requests that target snapshot branches. The Release PR (head: `release-review/*`, base: `release-snapshot/*`) is the human approval gate before draft release creation.
-
-| Property | Value |
-|----------|-------|
-| **Name** | `release-snapshot-pr-rules` |
-| **Enforcement** | Active |
-| **Target** | Include branches matching: `release-snapshot/**` |
-
-**Rules:**
-- Require pull request before merging
-- Required approvals: 1 (minimum)
-- Require review from Code Owners
-- Dismiss stale reviews on new pushes
-
-The dual review gate is enforced through CODEOWNERS file patterns:
-- The `*` pattern assigns all codeowners as reviewers
-- The `/CHANGELOG/` pattern assigns `@camaraproject/release-management_reviewers`
-
-Both groups must approve before the PR can be merged.
-
-<details>
-<summary>GitHub API payload</summary>
-
-```json
-{
-  "name": "release-snapshot-pr-rules",
-  "target": "branch",
-  "enforcement": "active",
-  "conditions": {
-    "ref_name": {
-      "include": ["refs/heads/release-snapshot/**"],
-      "exclude": []
-    }
-  },
-  "rules": [
+    { "type": "creation" },
+    { "type": "update" },
     {
       "type": "pull_request",
       "parameters": {
-        "required_approving_review_count": 1,
+        "required_approving_review_count": 2,
         "dismiss_stale_reviews_on_push": true,
+        "required_reviewers": [
+          {
+            "minimum_approvals": 1,
+            "file_patterns": ["*"],
+            "reviewer": {
+              "id": 13109132,
+              "type": "Team"
+            }
+          }
+        ],
         "require_code_owner_review": true,
         "require_last_push_approval": false,
-        "required_review_thread_resolution": false
+        "required_review_thread_resolution": false,
+        "allowed_merge_methods": ["merge", "squash", "rebase"]
       }
+    }
+  ],
+  "bypass_actors": [
+    {
+      "actor_id": 2865881,
+      "actor_type": "Integration",
+      "bypass_mode": "always"
     }
   ]
 }
 ```
 
+Notes:
+- `actor_id: 2865881` is the `camara-release-automation` GitHub App ID
+- `reviewer.id: 13109132` is the `release-management_reviewers` team ID
+- The `required_reviewers` field is a beta feature in the GitHub Rulesets API
+- The canonical ruleset is maintained in `Template_API_Repository` — the JSON above matches it
+
 </details>
 
-### Applying rulesets programmatically
+### Applying the ruleset programmatically
 
-The GitHub Rulesets API is **not idempotent** — calling `POST` twice creates duplicate rulesets. Use the following pattern for safe re-application:
+The GitHub Rulesets API is **not idempotent** — calling `POST` twice creates duplicate rulesets. The admin script in `project-administration` uses a check-then-create/update pattern:
 
 ```bash
-# 1. List existing rulesets
+# List existing rulesets
 existing=$(gh api repos/{owner}/{repo}/rulesets --jq '.[].name')
 
-# 2. For each target ruleset, check if it exists
+# Check if it exists, then create or update
 if echo "$existing" | grep -q "release-snapshot-protection"; then
-  # Update existing (get ID first)
   id=$(gh api repos/{owner}/{repo}/rulesets --jq '.[] | select(.name == "release-snapshot-protection") | .id')
   gh api -X PUT repos/{owner}/{repo}/rulesets/$id --input payload.json
 else
-  # Create new
   gh api -X POST repos/{owner}/{repo}/rulesets --input payload.json
 fi
 ```
+
+See `project-administration/scripts/apply-release-rulesets.sh` for the full script.
 
 ---
 
@@ -224,21 +159,15 @@ The release automation expects the standard CODEOWNERS format used across CAMARA
 # Admin-managed files
 /CODEOWNERS @camaraproject/admins
 /MAINTAINERS.MD @camaraproject/admins
-
-# Release Management reviewers for changelog files
-/CHANGELOG.md @camaraproject/release-management_reviewers
-/CHANGELOG.MD @camaraproject/release-management_reviewers
 ```
 
-### Required addition for release automation
+### CODEOWNERS and RM reviewer assignment
 
-Add the following line to enable RM reviewer assignment for the new per-cycle changelog directory:
+Legacy CAMARA repositories have `/CHANGELOG.md` and `/CHANGELOG.MD` lines in CODEOWNERS that assign `@camaraproject/release-management_reviewers` as reviewers for changelog files. The onboarding campaign **removes** these lines because:
 
-```
-/CHANGELOG/ @camaraproject/release-management_reviewers
-```
-
-The release automation creates per-cycle changelog files at `CHANGELOG/CHANGELOG-rX.md` (e.g., `CHANGELOG/CHANGELOG-r4.md` for release cycle 4). Without this CODEOWNERS entry, Release Management reviewers would not be auto-assigned to Release PRs that modify these files.
+- RM reviewer assignment for Release PRs is now enforced via the ruleset's `required_reviewers` field, which auto-requests the team and blocks merge until they approve
+- Removing the CODEOWNERS lines means post-release sync PRs on `main` do **not** require RM reviewer approval (desirable — these are automated backports of already-approved release content)
+- The `*` CODEOWNERS pattern ensures API codeowners still review all files
 
 ### How CODEOWNERS is used by the automation
 
@@ -257,7 +186,6 @@ The `/publish-release` command checks CODEOWNERS to authorize the publishing use
 - GitHub's CODEOWNERS uses "last matching pattern wins" for reviewer assignment. The automation's publish authorization currently takes the first `*` line. In standard CAMARA repositories there is only one `*` line, so this is equivalent. Repositories should not have multiple `*` lines.
 - Team references (e.g., `@camaraproject/team`) on the `*` line are extracted but do not match individual usernames — use individual `@username` entries on the `*` line
 - If the CODEOWNERS file does not exist (404), the check is skipped and only repository permission is verified
-- Pattern-specific rules (e.g., `/CHANGELOG/`) do not affect `/publish-release` authorization — they only affect PR review assignment
 
 ---
 
@@ -406,26 +334,20 @@ For stronger protection, the `pr_validation` workflow can be extended to block P
 
 Use this checklist to verify that a repository is correctly configured for release automation. This is the acceptance checklist for test repo setup.
 
-### Rulesets
+### Ruleset
 
 - [ ] Ruleset `release-snapshot-protection` exists and is **active**
   - Target: `release-snapshot/**`
-  - Rules: restrict pushes, restrict deletions, block force pushes
-  - Bypass: GitHub Actions
-- [ ] Ruleset `release-review-protection` exists and is **active**
-  - Target: `release-review/**`
-  - Rules: restrict deletions, block force pushes
-  - Bypass: GitHub Actions
-- [ ] Ruleset `release-snapshot-pr-rules` exists and is **active**
-  - Target: `release-snapshot/**`
-  - Rules: require PR, 1 approval, code owner review, dismiss stale reviews
+  - Branch protection: restrict creations, updates, deletions, block force pushes
+  - PR rules: 2 approvals, code owner review, dismiss stale reviews
+  - Required reviewers: `release-management_reviewers` (1 approval)
+  - Bypass: `camara-release-automation` GitHub App
 
 ### CODEOWNERS
 
 - [ ] `CODEOWNERS` file exists in repository root
 - [ ] First `*` line lists at least one individual codeowner (`@username`)
-- [ ] `/CHANGELOG/` line present with `@camaraproject/release-management_reviewers`
-- [ ] `/CHANGELOG.md` and `/CHANGELOG.MD` lines present (existing CAMARA standard)
+- [ ] No `/CHANGELOG.md` or `/CHANGELOG.MD` lines (removed by onboarding campaign)
 
 ### Caller Workflow
 
