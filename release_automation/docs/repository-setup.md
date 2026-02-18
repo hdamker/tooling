@@ -1,6 +1,6 @@
 # Repository Setup for Release Automation
 
-**Last Updated**: 2026-02-17
+**Last Updated**: 2026-02-18
 
 ## Overview
 
@@ -288,31 +288,47 @@ CHANGELOG/
 
 Each `/create-snapshot` command generates a release section in the appropriate per-cycle file. Multiple releases within the same cycle (e.g., r4.1 alpha, r4.1 RC, r4.2) accumulate in the same file with newest entries at the top.
 
-### Migration from root CHANGELOG.md
+### Onboarding: CHANGELOG.md handling
 
-Existing CAMARA repositories have a `CHANGELOG.md` at the repository root containing historical release notes. The migration to the new directory structure happens in two phases:
+The onboarding campaign detects the state of the root `CHANGELOG.md` and applies the appropriate action:
 
-**Phase 1 — Onboarding (non-breaking)**
+| Root CHANGELOG.md state | Action | CHANGELOG/README.md |
+|--------------------------|--------|---------------------|
+| **Unchanged template** (≤1 line) | Delete the placeholder | Fresh index (no historical reference) |
+| **Real content** (>1 line) | Add forward-reference note | Index with link to root CHANGELOG.md |
+| **Not present** | No action | Fresh index (no historical reference) |
 
-The onboarding campaign adds preparatory files without modifying existing content:
+**Repos with unchanged template CHANGELOG.md** (e.g., ConsentManagement, eSimRemoteManagement):
 
-1. Add a forward-reference note at the top of the existing root `CHANGELOG.md`:
-   ```markdown
-   > Starting with release automation, new release changelogs are maintained
-   > in the [CHANGELOG/](CHANGELOG/) directory with per-cycle files.
-   ```
+These repos were created from `Template_API_Repository` and never added real changelog entries. The single-line placeholder is deleted and `CHANGELOG/README.md` is created without a historical reference:
 
-2. Create `CHANGELOG/README.md` as an index:
-   ```markdown
-   # Changelog
+```markdown
+# Changelog
 
-   Release changelogs are organized by release cycle.
+Release changelogs are organized by release cycle.
+```
 
-   For historical release notes predating the automated release process,
-   see [CHANGELOG.md](../CHANGELOG.md) in the repository root.
-   ```
+**Repos with real changelog content** (most existing repos):
 
-**Phase 2 — Content migration (separate, later)**
+The existing root `CHANGELOG.md` is preserved with a forward-reference note prepended:
+
+```markdown
+> Starting with release automation, new release changelogs are maintained
+> in the [CHANGELOG/](CHANGELOG/) directory with per-cycle files.
+```
+
+`CHANGELOG/README.md` includes a link back to the historical content:
+
+```markdown
+# Changelog
+
+Release changelogs are organized by release cycle.
+
+For historical release notes predating the automated release process,
+see [CHANGELOG.md](../CHANGELOG.md) in the repository root.
+```
+
+### Phase 2 — Content migration (separate, later)
 
 A follow-up campaign moves the legacy content from root `CHANGELOG.md` into the `CHANGELOG/` directory. The root file is reduced to a pointer. Details of the content migration (single archive file vs. split into per-cycle files) are decided at that time.
 
@@ -363,8 +379,8 @@ Use this checklist to verify that a repository is correctly configured for relea
 
 ### CHANGELOG Structure
 
-- [ ] Root `CHANGELOG.md` has forward-reference note pointing to `CHANGELOG/` directory
 - [ ] `CHANGELOG/README.md` exists as index file
+- [ ] Root `CHANGELOG.md` either: has forward-reference note (repos with history), or is deleted (repos with unchanged template placeholder)
 
 ### Smoke Test
 
