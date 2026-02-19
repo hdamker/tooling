@@ -6,10 +6,11 @@
 
 API repositories that adopt the CAMARA release automation need specific repository-level configuration. The workflow manages its own labels and concurrency, but cannot self-configure branch protection, CODEOWNERS entries, or install the caller workflow.
 
-This document defines the required configuration for each API repository. It serves as:
-- **Setup guide** for repository administrators onboarding new or existing repos
-- **Verification reference** for test repo setup (WS9 testing phase)
-- **Input specification** for the onboarding campaign and admin tooling
+This document defines the required configuration for each API repository. It serves as the **specification** that the automated onboarding tooling implements — repository administrators do not need to apply or verify this configuration manually.
+
+**Automated application**: The [release automation onboarding campaign](https://github.com/camaraproject/project-administration/pull/134) in `project-administration` applies the full configuration to API repositories. It includes a campaign workflow (caller workflow, CHANGELOG structure, CODEOWNERS adjustments) and an admin script (repository ruleset). Both support dry-run/plan modes and phased rollout — test repositories first, then volunteering repos, then all.
+
+**New repositories**: After rollout, the configuration will also be applied to `Template_API_Repository` ([camaraproject/tooling#82](https://github.com/camaraproject/tooling/issues/82)), so that newly created API repositories inherit it automatically.
 
 ### What the workflow manages internally
 
