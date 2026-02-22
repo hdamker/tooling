@@ -79,7 +79,7 @@ jobs:
       - name: Validate release-plan.yaml
         if: steps.changes.outputs.release_plan_any_changed == 'true'
         id: validate
-        uses: camaraproject/tooling/shared-actions/validate-release-plan@v0
+        uses: camaraproject/tooling/shared-actions/validate-release-plan@main
         with:
           release_plan_path: release-plan.yaml
           check_files: 'true'
