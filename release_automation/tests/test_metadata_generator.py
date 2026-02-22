@@ -32,7 +32,7 @@ def sample_release_plan():
             "repository_name": "QualityOnDemand",
             "target_release_tag": "r4.2",
             "target_release_type": "pre-release-rc",
-            "release_notes": "Pre-release for CAMARA Fall26 meta-release.",
+            "release_notes": "Pre-release for CAMARA Sync26 meta-release.",
         },
         "dependencies": {
             "commonalities_release": {
@@ -193,7 +193,7 @@ class TestMetadataGenerator:
         assert result["repository"]["release_date"] is None
         assert (
             result["repository"]["release_notes"]
-            == "Pre-release for CAMARA Fall26 meta-release."
+            == "Pre-release for CAMARA Sync26 meta-release."
         )
 
         # Check dependencies

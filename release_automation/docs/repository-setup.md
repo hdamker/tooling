@@ -312,8 +312,8 @@ Minimum required fields:
 repository:
   target_release_tag: r1.1
   target_release_type: pre-release-rc  # or: pre-release-alpha, public-release, none
-  release_track: Spring26              # meta-release name
-  meta_release: Spring26
+  release_track: meta-release           # independent or meta-release
+  meta_release: Sync26
 
 apis:
   - api_name: quality-on-demand

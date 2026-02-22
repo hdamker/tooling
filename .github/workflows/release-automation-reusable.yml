@@ -244,23 +244,16 @@ jobs:
             core.setOutput('should_continue', shouldContinue);
             core.setOutput('confirm_tag', confirmTag);
 
-      - name: Generate App Token
-        id: app-token
-        if: vars.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
-        with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
       # Post early acknowledgment for slash commands (within check-trigger to avoid runner cold-start)
       # This comment is later updated by post-interim (valid) or post-rejection (rejected).
+      # Uses GITHUB_TOKEN (not App token) to avoid triggering extra workflow runs.
       - name: Post Acknowledgment
         id: ack
         if: steps.detect.outputs.trigger_type == 'slash_command'
         continue-on-error: true
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         with:
-          github-token: ${{ steps.app-token.outputs.token || github.token }}
+          github-token: ${{ github.token }}
           script: |
             const command = '${{ steps.detect.outputs.command }}';
             const user = '${{ steps.detect.outputs.user }}';
@@ -482,14 +475,8 @@ jobs:
     outputs:
       comment_id: ${{ steps.post.outputs.comment_id }}
     steps:
-      - name: Generate App Token
-        id: app-token
-        if: vars.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
-        with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
+      # No App token needed — interim updates the ack comment using GITHUB_TOKEN
+      # to avoid triggering extra workflow runs from issue_comment events.
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
@@ -505,7 +492,7 @@ jobs:
         id: post
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
-          github_token: ${{ steps.app-token.outputs.token || github.token }}
+          github_token: ${{ github.token }}
           issue_number: ${{ needs.check-trigger.outputs.issue_number }}
           release_tag: ${{ needs.derive-state.outputs.release_tag }}
           run_id: ${{ github.run_id }}
@@ -689,14 +676,8 @@ jobs:
       needs.validate-command.outputs.allowed == 'false'
     runs-on: ubuntu-latest
     steps:
-      - name: Generate App Token
-        id: app-token
-        if: vars.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
-        with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
+      # No App token needed — rejection updates the ack comment using GITHUB_TOKEN
+      # to avoid triggering extra workflow runs from issue_comment events.
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
@@ -711,7 +692,7 @@ jobs:
       - name: Post Rejection Comment
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
-          github_token: ${{ steps.app-token.outputs.token || github.token }}
+          github_token: ${{ github.token }}
           issue_number: ${{ needs.check-trigger.outputs.issue_number }}
           release_tag: ${{ needs.derive-state.outputs.release_tag }}
           run_id: ${{ github.run_id }}

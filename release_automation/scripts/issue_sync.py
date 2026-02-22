@@ -174,7 +174,7 @@ class IssueSyncManager:
         Searches for open issues with the 'release-issue' label, then
         filters to find one that:
         1. Contains the WORKFLOW_MARKER in its body
-        2. Has the release_tag in its title
+        2. Contains the release-tag marker in its body
 
         Args:
             release_tag: Release tag to search for (e.g., "r4.1")
@@ -189,14 +189,14 @@ class IssueSyncManager:
 
         for issue in issues:
             body = issue.get("body", "") or ""
-            title = issue.get("title", "") or ""
 
             # Check for workflow marker
             if WORKFLOW_MARKER not in body:
                 continue
 
-            # Check for release tag in title
-            if release_tag in title:
+            # Check for release tag marker in body (hidden HTML comment)
+            release_tag_marker = f"<!-- release-automation:release-tag:{release_tag} -->"
+            if release_tag_marker in body:
                 return issue
 
         return None

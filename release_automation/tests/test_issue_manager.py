@@ -257,10 +257,10 @@ class TestIssueManagerGenerateTitle:
         title = manager.generate_title(
             release_tag="r4.1",
             release_type="pre-release-rc",
-            meta_release="Fall26"
+            meta_release="Sync26"
         )
 
-        assert title == "Release r4.1 (RC) — Fall26"
+        assert title == "Release r4.1 (RC) — Sync26"
 
     def test_generate_alpha_title(self):
         """Test generating title for alpha release."""
@@ -320,11 +320,11 @@ class TestIssueManagerShouldUpdateTitle:
             "repository": {
                 "target_release_tag": "r4.1",
                 "target_release_type": "pre-release-rc",
-                "meta_release": "Fall26"
+                "meta_release": "Sync26"
             }
         }
 
-        current_title = "Release r4.1 (RC) — Fall26"
+        current_title = "Release r4.1 (RC) — Sync26"
 
         assert manager.should_update_title(current_title, release_plan) is False
 
@@ -336,7 +336,7 @@ class TestIssueManagerShouldUpdateTitle:
             "repository": {
                 "target_release_tag": "r4.1",
                 "target_release_type": "pre-release-rc",
-                "meta_release": "Fall26"
+                "meta_release": "Sync26"
             }
         }
 
@@ -373,7 +373,7 @@ class TestIssueManagerGenerateConfigSection:
             "repository": {
                 "target_release_tag": "r4.1",
                 "target_release_type": "pre-release-rc",
-                "meta_release": "Fall26"
+                "meta_release": "Sync26"
             },
             "apis": [
                 {"api_name": "location-verification", "target_api_version": "3.2.0"},
@@ -419,7 +419,7 @@ class TestIssueManagerGenerateIssueBodyTemplate:
         body = manager.generate_issue_body_template(
             release_tag="r4.1",
             release_type="pre-release-rc",
-            meta_release="Fall26"
+            meta_release="Sync26"
         )
 
         # No redundant heading — title carries release info

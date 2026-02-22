@@ -220,14 +220,14 @@ class IssueManager:
         Format: "Release {tag} ({type}) — {meta_release}"
 
         Examples:
-            - "Release r4.1 (RC) — Fall26"
+            - "Release r4.1 (RC) — Sync26"
             - "Release r4.1 (alpha)"
             - "Release r4.1 (public)"
 
         Args:
             release_tag: Release tag (e.g., "r4.1")
             release_type: Release type from release-plan.yaml
-            meta_release: Optional meta-release name (e.g., "Fall26")
+            meta_release: Optional meta-release name (e.g., "Sync26")
 
         Returns:
             Formatted issue title

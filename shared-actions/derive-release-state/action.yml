@@ -172,7 +172,7 @@ runs:
         if snapshot and snapshot.src_commit_sha:
             src_commit_sha_short = snapshot.src_commit_sha[:7]
             
-        # Read meta_release from release-plan.yaml (raw cycle name, e.g., "Fall26")
+        # Read meta_release from release-plan.yaml (raw cycle name, e.g., "Sync26")
         meta_release = ""
         plan = manager._read_release_plan()
         if plan:

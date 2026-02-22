@@ -713,7 +713,7 @@ Shared action wrapping `readme_updater.py`. Used by both release automation (dur
 │                    │                                                    │
 │                    ▼                                                    │
 │  10. Create Release PR: release-review → snapshot (2 commits diff)      │
-│      Title: "Release Review: RepoName r4.1 (RC, Fall26)"               │
+│      Title: "Release Review: RepoName r4.1 (RC, Sync26)"               │
 │                    │                                                    │
 │                    ▼                                                    │
 │  11. Update issue:                                                      │
