@@ -41,7 +41,7 @@ class ReleasePlanValidator:
     """Validator for CAMARA release-plan.yaml files."""
 
     # Allowed meta-release values (update as new meta-releases are added)
-    ALLOWED_META_RELEASES = ['Fall25', 'Spring26', 'Fall26']
+    ALLOWED_META_RELEASES = ['Fall25', 'Spring26', 'Fall26', 'Sync26', 'Signal27']
 
     def __init__(self, release_plan_file: Path, schema_file: Optional[Path] = None,
                  check_files: bool = False):
@@ -187,27 +187,61 @@ class ReleasePlanValidator:
         pass
 
     def check_file_existence(self, release_plan: Dict[str, Any]) -> None:
-        """Check if referenced API files exist (optional check)."""
+        """Check if referenced API definition files exist.
+
+        Two-tier severity:
+        - alpha/rc/public APIs: missing file is an ERROR (blocks PR)
+        - draft APIs: missing file with orphan files triggers a WARNING
+        """
         if not self.check_files:
             return
 
         apis = release_plan.get('apis', [])
         release_plan_dir = self.release_plan_file.parent
+        api_definitions_dir = release_plan_dir / 'code' / 'API_definitions'
+
+        # Collect all api_names declared in the release plan
+        all_api_names = {api.get('api_name') for api in apis if api.get('api_name')}
+
+        # Discover existing .yaml files in API_definitions (if directory exists)
+        existing_file_stems: set = set()
+        if api_definitions_dir.is_dir():
+            existing_file_stems = {
+                f.stem for f in api_definitions_dir.iterdir()
+                if f.suffix == '.yaml' and f.is_file()
+            }
+
+        # Orphan files: exist in directory but not listed in release-plan.yaml
+        orphan_files = existing_file_stems - all_api_names
 
         for api in apis:
             api_name = api.get('api_name')
             target_api_status = api.get('target_api_status')
 
-            # Skip file checks for draft APIs
-            if target_api_status == 'draft':
+            if not api_name:
                 continue
 
-            # Look for API definition file
-            api_file = release_plan_dir / 'code' / 'API_definitions' / f'{api_name}.yaml'
-            if not api_file.exists():
-                self.warnings.append(
-                    f"API definition file not found: {api_file} (status: {target_api_status})"
-                )
+            api_file = api_definitions_dir / f'{api_name}.yaml'
+            file_exists = api_file.exists()
+
+            if target_api_status in ('alpha', 'rc', 'public'):
+                # Non-draft APIs MUST have a definition file
+                if not file_exists:
+                    self.errors.append(
+                        f"API definition file not found for '{api_name}' "
+                        f"(status: {target_api_status}). "
+                        f"Expected: code/API_definitions/{api_name}.yaml"
+                    )
+            elif target_api_status == 'draft':
+                # Draft APIs: warn about possible naming mismatch if file is
+                # missing but orphan files exist in the directory
+                if not file_exists and orphan_files:
+                    orphan_list = ', '.join(sorted(orphan_files))
+                    self.warnings.append(
+                        f"No API definition file found for draft API '{api_name}'. "
+                        f"Unmatched files in code/API_definitions/: {orphan_list}. "
+                        f"Check for possible naming mismatch"
+                    )
 
     def validate(self) -> bool:
         """Run full validation and return success status."""
@@ -238,8 +272,10 @@ class ReleasePlanValidator:
         if schema_valid or release_plan.get('repository') and release_plan.get('apis'):
             self.check_semantic_rules(release_plan)
 
-        # Check file existence if requested
-        self.check_file_existence(release_plan)
+        # Check file existence only if the plan is internally valid
+        # (schema + semantic errors make file checks meaningless)
+        if not self.errors:
+            self.check_file_existence(release_plan)
 
         return len(self.errors) == 0
 
