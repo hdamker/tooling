@@ -162,7 +162,7 @@ class SnapshotCreator:
                 result.errors = errors
                 return result
 
-            # Step 2: Get base commit SHA
+            # Step 2: Get source commit SHA
             if config.src_commit_sha:
                 base_sha = config.src_commit_sha
             else:

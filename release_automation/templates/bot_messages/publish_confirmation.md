@@ -1,6 +1,6 @@
 **⚠️ Confirmation required — State: `draft-ready`**
 Publication requires explicit confirmation. Copy/paste: `/publish-release --confirm {{release_tag}}`. Confirm tag must match the draft release tag.
-**Draft release:** [`{{release_tag}}`]({{draft_release_url}}){{#src_commit_sha_short}} · Base: `{{src_commit_sha_short}}`{{/src_commit_sha_short}}
+**Draft release:** [`{{release_tag}}`]({{draft_release_url}}){{#src_commit_sha_short}} · Source: `{{src_commit_sha_short}}`{{/src_commit_sha_short}}
 
 <details><summary><b>Configuration:</b> Release {{release_tag}}{{#short_type}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}}){{/short_type}}</summary>
 

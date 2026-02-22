@@ -886,7 +886,7 @@ class GitHubClient:
         """Create a lightweight tag at a specific commit.
 
         Args:
-            tag_name: Name of the tag to create (e.g., "src/r4.1")
+            tag_name: Name of the tag to create (e.g., "source/r4.1")
             sha: Full commit SHA to tag
 
         Returns:

@@ -28,7 +28,7 @@ def mock_github_client():
     client.update_release.return_value = {"html_url": "https://github.com/test/releases/1"}
     # Reference tag methods
     client.tag_exists.return_value = False
-    client.create_tag.return_value = {"ref": "refs/tags/src/r4.1"}
+    client.create_tag.return_value = {"ref": "refs/tags/source/r4.1"}
     # Branch cleanup methods
     client.delete_branch.return_value = True
     client.rename_branch.return_value = True
@@ -332,15 +332,15 @@ class TestCreateReferenceTag:
     """Tests for create_reference_tag method."""
 
     def test_create_reference_tag_success(self, publisher, mock_github_client):
-        """Successfully creates src/rX.Y tag."""
+        """Successfully creates source/rX.Y tag."""
         mock_github_client.tag_exists.return_value = False
-        mock_github_client.create_tag.return_value = {"ref": "refs/tags/src/r4.1"}
+        mock_github_client.create_tag.return_value = {"ref": "refs/tags/source/r4.1"}
 
         result = publisher.create_reference_tag("r4.1", "abc123def456")
 
-        assert result == "src/r4.1"
-        mock_github_client.tag_exists.assert_called_once_with("src/r4.1")
-        mock_github_client.create_tag.assert_called_once_with("src/r4.1", "abc123def456")
+        assert result == "source/r4.1"
+        mock_github_client.tag_exists.assert_called_once_with("source/r4.1")
+        mock_github_client.create_tag.assert_called_once_with("source/r4.1", "abc123def456")
 
     def test_create_reference_tag_already_exists(self, publisher, mock_github_client):
         """Tag already exists - returns tag name without error."""
@@ -348,8 +348,8 @@ class TestCreateReferenceTag:
 
         result = publisher.create_reference_tag("r4.1", "abc123def456")
 
-        assert result == "src/r4.1"
-        mock_github_client.tag_exists.assert_called_once_with("src/r4.1")
+        assert result == "source/r4.1"
+        mock_github_client.tag_exists.assert_called_once_with("source/r4.1")
         mock_github_client.create_tag.assert_not_called()
 
     def test_create_reference_tag_race_condition(self, publisher, mock_github_client):
@@ -361,7 +361,7 @@ class TestCreateReferenceTag:
 
         result = publisher.create_reference_tag("r4.1", "abc123def456")
 
-        assert result == "src/r4.1"
+        assert result == "source/r4.1"
 
     def test_create_reference_tag_api_error(self, publisher, mock_github_client):
         """API error - returns None."""

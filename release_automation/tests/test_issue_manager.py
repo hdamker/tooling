@@ -512,12 +512,12 @@ class TestIssueManagerPublishedSections:
         content = manager.generate_published_state_section(
             release_tag="r4.1",
             release_url="https://github.com/test/releases/tag/r4.1",
-            reference_tag="src/r4.1"
+            reference_tag="source/r4.1"
         )
 
         assert "**State:** `published`" in content
         assert "**Release:** [r4.1](https://github.com/test/releases/tag/r4.1)" in content
-        assert "**Reference tag:** `src/r4.1`" in content
+        assert "**Reference tag:** `source/r4.1`" in content
         # No sync PR line when not provided
         assert "Sync PR" not in content
 
@@ -528,7 +528,7 @@ class TestIssueManagerPublishedSections:
         content = manager.generate_published_state_section(
             release_tag="r4.1",
             release_url="https://github.com/test/releases/tag/r4.1",
-            reference_tag="src/r4.1",
+            reference_tag="source/r4.1",
             sync_pr_url="https://github.com/test/pull/123"
         )
 
@@ -541,7 +541,7 @@ class TestIssueManagerPublishedSections:
         content = manager.generate_published_state_section(
             release_tag="r4.1",
             release_url="https://github.com/test/releases/tag/r4.1",
-            reference_tag="src/r4.1"
+            reference_tag="source/r4.1"
         )
 
         # Should contain a timestamp in ISO format

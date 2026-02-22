@@ -489,7 +489,7 @@ Handles publication of draft releases via the `/publish-release` command.
 3. Commit finalization to snapshot branch
 4. Update draft to published (creates tag `rX.Y`)
 5. Mark as latest release (if `public-release` type) — requires separate API call from the draft→published transition
-6. Create reference tag `src/rX.Y` on main at the source commit SHA
+6. Create reference tag `source/rX.Y` on main at the source commit SHA
 
 **GitHub API note:** `make_latest` is ignored when sent in the same PATCH as `draft=false`. Publication and latest-marking must be separate API calls.
 

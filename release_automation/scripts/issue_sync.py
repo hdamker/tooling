@@ -481,7 +481,7 @@ class IssueSyncManager:
             issue_number: Issue number to close
             release_tag: Release tag (e.g., "r4.1")
             release_url: URL to the published release
-            reference_tag: Reference tag (e.g., "src/r4.1")
+            reference_tag: Reference tag (e.g., "source/r4.1")
             sync_pr_url: Optional URL to the post-release sync PR
 
         Returns:
