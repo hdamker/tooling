@@ -192,8 +192,8 @@ class TestSyncReleaseIssue:
         assert result.issue is not None
         gh.create_issue.assert_called_once()
 
-    def test_no_action_when_issue_exists_and_up_to_date(self):
-        """Test no action when issue exists and is up to date."""
+    def test_always_updates_issue_in_planned_state(self):
+        """Test that PLANNED state always triggers update to refresh CONFIG from release-plan.yaml."""
         manager, gh, state_manager, issue_manager, _ = self._create_manager()
 
         release_plan = {
@@ -212,12 +212,15 @@ class TestSyncReleaseIssue:
                 "labels": [{"name": "release-state:planned"}]
             }
         ]
+        gh.get_issue.return_value = {"number": 1, "title": "Release r4.1 (RC)"}
         issue_manager.should_update_title.return_value = False
+        issue_manager.generate_state_section.return_value = "**State**: planned"
+        issue_manager.update_section.return_value = "updated body"
 
         result = manager.sync_release_issue(release_plan)
 
-        assert result.action == "none"
-        assert result.reason == "up_to_date"
+        assert result.action == "updated"
+        assert result.issue is not None
 
     def test_updates_issue_when_state_changes(self):
         """Test issue update when state changes."""
@@ -350,8 +353,27 @@ class TestNeedsUpdate:
         result = manager._needs_update(issue, ReleaseState.SNAPSHOT_ACTIVE, {})
         assert result is True
 
-    def test_no_update_when_state_matches(self):
-        """Test returns False when state label matches."""
+    def test_no_update_when_non_planned_state_matches(self):
+        """Test returns False when non-PLANNED state label matches and title unchanged."""
+        issue_manager = MagicMock()
+        issue_manager.should_update_title.return_value = False
+
+        manager = IssueSyncManager(MagicMock(), MagicMock(), issue_manager, MagicMock())
+
+        issue = {
+            "labels": [{"name": "release-state:snapshot-active"}]
+        }
+
+        result = manager._needs_update(issue, ReleaseState.SNAPSHOT_ACTIVE, {})
+        assert result is False
+
+    def test_always_needs_update_in_planned_state(self):
+        """Test returns True in PLANNED state even when label and title match.
+
+        PLANNED is the state where release-plan.yaml is actively edited,
+        so the issue body should always be refreshed to reflect changes
+        in APIs, dependencies, or release type.
+        """
         issue_manager = MagicMock()
         issue_manager.should_update_title.return_value = False
 
@@ -362,7 +384,7 @@ class TestNeedsUpdate:
         }
 
         result = manager._needs_update(issue, ReleaseState.PLANNED, {})
-        assert result is False
+        assert result is True
 
     def test_needs_update_when_title_changed(self):
         """Test returns True when title needs updating."""
@@ -373,10 +395,10 @@ class TestNeedsUpdate:
 
         issue = {
             "title": "Old title",
-            "labels": [{"name": "release-state:planned"}]
+            "labels": [{"name": "release-state:snapshot-active"}]
         }
 
-        result = manager._needs_update(issue, ReleaseState.PLANNED, {"repository": {}})
+        result = manager._needs_update(issue, ReleaseState.SNAPSHOT_ACTIVE, {"repository": {}})
         assert result is True
 
 
