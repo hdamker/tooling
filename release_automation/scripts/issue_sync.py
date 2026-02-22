@@ -296,6 +296,12 @@ class IssueSyncManager:
         if self.issue_manager.should_update_title(current_title, release_plan):
             return True
 
+        # In PLANNED state, always refresh the issue body. This is the state
+        # where release-plan.yaml is actively edited (APIs added/renamed,
+        # dependencies changed, release type updated). The update is idempotent.
+        if state == ReleaseState.PLANNED:
+            return True
+
         return False
 
     def _update_release_issue(
