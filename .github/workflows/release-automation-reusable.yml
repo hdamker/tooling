@@ -36,6 +36,12 @@ permissions:
   issues: write
   pull-requests: write
 
+env:
+  # Tooling repository and ref for all checkout steps.
+  # Change these when testing on a fork or switching between branches.
+  TOOLING_REPO: hdamker/tooling
+  TOOLING_REF: api-readiness-checklist
+
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 1: Detect and classify trigger
@@ -309,8 +315,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: camaraproject/tooling
-          ref: release-automation
+          repository: ${{ env.TOOLING_REPO }}
+          ref: ${{ env.TOOLING_REF }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -359,8 +365,8 @@ jobs:
         if: steps.decide.outputs.action == 'post_comment'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: camaraproject/tooling
-          ref: release-automation
+          repository: ${{ env.TOOLING_REPO }}
+          ref: ${{ env.TOOLING_REF }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -429,8 +435,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: camaraproject/tooling
-          ref: release-automation
+          repository: ${{ env.TOOLING_REPO }}
+          ref: ${{ env.TOOLING_REF }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -480,8 +486,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: camaraproject/tooling
-          ref: release-automation
+          repository: ${{ env.TOOLING_REPO }}
+          ref: ${{ env.TOOLING_REF }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -681,8 +687,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: camaraproject/tooling
-          ref: release-automation
+          repository: ${{ env.TOOLING_REPO }}
+          ref: ${{ env.TOOLING_REF }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -734,8 +740,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: camaraproject/tooling
-          ref: release-automation
+          repository: ${{ env.TOOLING_REPO }}
+          ref: ${{ env.TOOLING_REF }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -1045,8 +1051,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: camaraproject/tooling
-          ref: release-automation
+          repository: ${{ env.TOOLING_REPO }}
+          ref: ${{ env.TOOLING_REF }}
           path: _tooling
           sparse-checkout: |
             release_automation
@@ -1097,8 +1103,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: camaraproject/tooling
-          ref: release-automation
+          repository: ${{ env.TOOLING_REPO }}
+          ref: ${{ env.TOOLING_REF }}
           path: _tooling
           sparse-checkout: |
             release_automation
@@ -1239,8 +1245,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: camaraproject/tooling
-          ref: release-automation
+          repository: ${{ env.TOOLING_REPO }}
+          ref: ${{ env.TOOLING_REF }}
           path: _tooling
           sparse-checkout: |
             release_automation
@@ -1700,8 +1706,8 @@ jobs:
         if: steps.create-draft.outputs.success == 'true' && needs.derive-state.outputs.release_issue_number != ''
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: camaraproject/tooling
-          ref: release-automation
+          repository: ${{ env.TOOLING_REPO }}
+          ref: ${{ env.TOOLING_REF }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -1750,8 +1756,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: camaraproject/tooling
-          ref: release-automation
+          repository: ${{ env.TOOLING_REPO }}
+          ref: ${{ env.TOOLING_REF }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -1859,8 +1865,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: camaraproject/tooling
-          ref: release-automation
+          repository: ${{ env.TOOLING_REPO }}
+          ref: ${{ env.TOOLING_REF }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -1985,8 +1991,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: camaraproject/tooling
-          ref: release-automation
+          repository: ${{ env.TOOLING_REPO }}
+          ref: ${{ env.TOOLING_REF }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts

@@ -463,15 +463,31 @@ class SnapshotCreator:
         type_suffix = f" ({short_type} {meta_release})" if meta_release else f" ({short_type})" if short_type else ""
         title = f"Release Review: {repo_name} {release_tag}{type_suffix}"
 
-        # Build PR body from template
-        apis = [
-            {"api_name": name, "api_version": version}
-            for name, version in api_versions.items()
-        ]
+        # Build PR body from template with enriched context
+        apis = []
+        for api_plan in release_plan.get("apis", []):
+            name = api_plan.get("api_name", "unknown")
+            apis.append({
+                "api_name": name,
+                "api_version": api_versions.get(name, "—"),
+                "target_api_status": api_plan.get("target_api_status", ""),
+            })
+
+        # Dependencies from release plan
+        dependencies = release_plan.get("repository", {}).get("dependencies", {})
+        commonalities_release = dependencies.get("commonalities_release", "")
+        icm_release = dependencies.get("identity_consent_management_release", "")
+
         body = render_template("release_review_pr", {
             "release_tag": release_tag,
             "snapshot_id": snapshot_id,
             "apis": apis,
+            "short_type": short_type,
+            "is_alpha": short_type == "alpha",
+            "is_rc": short_type == "rc",
+            "is_public": short_type in ("public", "maintenance"),
+            "commonalities_release": commonalities_release,
+            "identity_consent_management_release": icm_release,
         })
 
         return git_ops.create_pr(

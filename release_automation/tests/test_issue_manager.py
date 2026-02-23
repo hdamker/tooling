@@ -366,7 +366,7 @@ class TestIssueManagerGenerateConfigSection:
     """Tests for generate_config_section method."""
 
     def test_generate_config_with_apis(self):
-        """Test generating config section with APIs."""
+        """Test generating config section with APIs and status column."""
         manager = IssueManager()
 
         release_plan = {
@@ -376,8 +376,8 @@ class TestIssueManagerGenerateConfigSection:
                 "meta_release": "Sync26"
             },
             "apis": [
-                {"api_name": "location-verification", "target_api_version": "3.2.0"},
-                {"api_name": "location-retrieval", "target_api_version": "0.5.0"}
+                {"api_name": "location-verification", "target_api_version": "3.2.0", "target_api_status": "rc"},
+                {"api_name": "location-retrieval", "target_api_version": "0.5.0", "target_api_status": "rc"}
             ]
         }
 
@@ -388,9 +388,38 @@ class TestIssueManagerGenerateConfigSection:
 
         content = manager.generate_config_section(release_plan, api_versions)
 
-        assert "| API | Target | Calculated |" in content
-        assert "| location-verification | 3.2.0 | `3.2.0-rc.1` |" in content
-        assert "| location-retrieval | 0.5.0 | `0.5.0-rc.1` |" in content
+        assert "| API | Status | Target | Calculated |" in content
+        assert "| location-verification | rc | 3.2.0 | `3.2.0-rc.1` |" in content
+        assert "| location-retrieval | rc | 0.5.0 | `0.5.0-rc.1` |" in content
+
+    def test_generate_config_with_readiness_link(self):
+        """Test that config section includes readiness link when APIs are present."""
+        manager = IssueManager()
+
+        release_plan = {
+            "apis": [
+                {"api_name": "test-api", "target_api_version": "1.0.0", "target_api_status": "public"}
+            ]
+        }
+
+        content = manager.generate_config_section(release_plan, {"test-api": "1.0.0"})
+
+        assert "**Readiness:**" in content
+        assert "api-readiness-checklist.md" in content
+
+    def test_generate_config_without_status(self):
+        """Test that missing target_api_status shows dash."""
+        manager = IssueManager()
+
+        release_plan = {
+            "apis": [
+                {"api_name": "test-api", "target_api_version": "1.0.0"}
+            ]
+        }
+
+        content = manager.generate_config_section(release_plan, {"test-api": "1.0.0"})
+
+        assert "| test-api | — | 1.0.0 |" in content
 
     def test_generate_config_without_apis(self):
         """Test generating config section without APIs shows placeholder."""
@@ -436,6 +465,15 @@ class TestIssueManagerGenerateIssueBodyTemplate:
         assert "**State:** `planned`" in body
 
         assert "`/create-snapshot`" in body
+
+        # Check preparation prerequisites section
+        assert "### Preparation Prerequisites" in body
+        assert "Release configuration matches intent" in body
+        assert "Commonalities and ICM dependency versions" in body
+        assert "CI checks are green" in body
+        assert "All intended implementation PRs are merged" in body
+        assert "SemVer is correct" in body
+        assert "api-readiness-checklist.md" in body
 
     def test_generate_template_without_meta_release(self):
         """Test generating template without meta-release."""

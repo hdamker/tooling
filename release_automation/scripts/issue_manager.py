@@ -373,17 +373,18 @@ class IssueManager:
         """
         lines = []
 
-        # Add APIs table
+        # Add APIs table with status column
         apis = release_plan.get("apis", [])
         if apis:
-            lines.append("| API | Target | Calculated |")
-            lines.append("|-----|--------|------------|")
+            lines.append("| API | Status | Target | Calculated |")
+            lines.append("|-----|--------|--------|------------|")
 
             for api in apis:
                 name = api.get("api_name", "unknown")
+                status = api.get("target_api_status", "—")
                 target = api.get("target_api_version", "—")
                 calculated = api_versions.get(name, "—")
-                lines.append(f"| {name} | {target} | `{calculated}` |")
+                lines.append(f"| {name} | {status} | {target} | `{calculated}` |")
 
         # Add dependencies
         deps = []
@@ -397,6 +398,15 @@ class IssueManager:
             lines.append(f"**Dependencies:** {', '.join(deps)}")
         elif not apis:
             lines.append("_No APIs or dependencies configured_")
+
+        # Add readiness link when APIs are present
+        if apis:
+            lines.append("")
+            lines.append(
+                "**Readiness:** [Required assets per API status]"
+                "(https://github.com/camaraproject/ReleaseManagement"
+                "/blob/main/documentation/readiness/api-readiness-checklist.md)"
+            )
 
         return "\n".join(lines)
 
@@ -422,12 +432,28 @@ class IssueManager:
         """
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+        readiness_url = (
+            "https://github.com/camaraproject/ReleaseManagement"
+            "/blob/main/documentation/readiness/api-readiness-checklist.md"
+        )
+
         return f"""<!-- release-automation:workflow-owned -->
 <!-- release-automation:release-tag:{release_tag} -->
 
 ### Release Highlights
 
 _Add release highlights here before creating snapshot._
+
+### Preparation Prerequisites
+
+Before issuing `/create-snapshot`, verify on `main`:
+
+- [ ] Release configuration matches intent (check API names, versions, statuses, release type)
+- [ ] Commonalities and ICM dependency versions are current
+- [ ] CI checks are green (Spectral linting, PR validation)
+- [ ] All intended implementation PRs are merged
+- [ ] SemVer is correct (breaking changes only in v0.x initial or new major versions)
+- [ ] API readiness assets provided for declared target release type ([checklist]({readiness_url}))
 
 ---
 <!-- AUTOMATION MANAGED SECTION - DO NOT EDIT BELOW THIS LINE -->
