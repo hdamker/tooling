@@ -35,7 +35,7 @@ This document defines the required configuration for each API repository. It ser
 
 ## Repository Ruleset
 
-One ruleset protects the `release-snapshot/**` branches that the release automation creates and manages. It combines branch protection rules (restrict creation, updates, deletion, force pushes) with PR review requirements (2 approvals, code owner review, RM team approval).
+One ruleset protects the `release-snapshot/**` branches that the release automation creates and manages. It combines branch protection rules (restrict creation, deletion, force pushes) with PR review requirements (2 approvals, code owner review, RM team approval). The `pull_request` rule prevents direct pushes and enforces review gates; a separate `update` rule is not needed and would block PR merges for non-bypass actors.
 
 The `camara-release-automation` GitHub App is the bypass actor, allowing the workflow to create, push to, and delete snapshot branches while humans are fully governed by the PR + review gates.
 
@@ -52,7 +52,6 @@ No ruleset is needed for `release-review/**` branches — codeowners push review
 
 **Branch protection rules:**
 - Restrict creations — only bypass actors may create snapshot branches
-- Restrict updates — only bypass actors may push
 - Restrict deletions — only bypass actors may delete
 - Block force pushes
 
@@ -85,7 +84,6 @@ The dual review gate ensures both API codeowners and Release Management reviewer
     { "type": "deletion" },
     { "type": "non_fast_forward" },
     { "type": "creation" },
-    { "type": "update" },
     {
       "type": "pull_request",
       "parameters": {
@@ -355,7 +353,7 @@ Use this checklist to verify that a repository is correctly configured for relea
 
 - [ ] Ruleset `release-snapshot-protection` exists and is **active**
   - Target: `release-snapshot/**`
-  - Branch protection: restrict creations, updates, deletions, block force pushes
+  - Branch protection: restrict creations, deletions, block force pushes
   - PR rules: 2 approvals, code owner review, dismiss stale reviews
   - Required reviewers: `release-management_reviewers` (1 approval)
   - Bypass: `camara-release-automation` GitHub App
