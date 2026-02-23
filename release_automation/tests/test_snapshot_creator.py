@@ -834,10 +834,10 @@ class TestTransformationIntegration:
         assert "Transformations failed" in result.errors
 
 
-# --- Tests for custom base commit SHA ---
+# --- Tests for custom source commit SHA ---
 
 class TestCustomBaseCommit:
-    """Tests for using custom base commit SHA."""
+    """Tests for using custom source commit SHA."""
 
     def test_uses_provided_src_commit_sha(
         self,

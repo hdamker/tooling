@@ -202,7 +202,7 @@ class ReleasePublisher:
         release_tag: str,
         src_commit_sha: str
     ) -> Optional[str]:
-        """Create src/rX.Y reference tag on main at the branch point.
+        """Create source/rX.Y reference tag on main at the branch point.
 
         The reference tag marks the commit on main where the release
         snapshot was created, providing a stable reference point.
@@ -212,9 +212,9 @@ class ReleasePublisher:
             src_commit_sha: SHA of the source commit on main
 
         Returns:
-            Created tag name (e.g., "src/r4.1") or None on error
+            Created tag name (e.g., "source/r4.1") or None on error
         """
-        tag_name = f"src/{release_tag}"
+        tag_name = f"source/{release_tag}"
 
         # Check if tag already exists
         if self.gh.tag_exists(tag_name):

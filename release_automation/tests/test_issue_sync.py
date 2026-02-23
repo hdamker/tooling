@@ -636,7 +636,7 @@ class TestCloseReleaseIssue:
             issue_number=42,
             release_tag="r4.1",
             release_url="https://github.com/test/releases/tag/r4.1",
-            reference_tag="src/r4.1",
+            reference_tag="source/r4.1",
             sync_pr_url="https://github.com/test/pull/123"
         )
 
@@ -646,7 +646,7 @@ class TestCloseReleaseIssue:
         issue_manager.generate_published_state_section.assert_called_once_with(
             release_tag="r4.1",
             release_url="https://github.com/test/releases/tag/r4.1",
-            reference_tag="src/r4.1",
+            reference_tag="source/r4.1",
             sync_pr_url="https://github.com/test/pull/123"
         )
 
@@ -680,7 +680,7 @@ class TestCloseReleaseIssue:
             issue_number=42,
             release_tag="r4.1",
             release_url="https://github.com/test/releases/tag/r4.1",
-            reference_tag="src/r4.1"
+            reference_tag="source/r4.1"
         )
 
         assert result is True
@@ -706,7 +706,7 @@ class TestCloseReleaseIssue:
             issue_number=42,
             release_tag="r4.1",
             release_url="https://github.com/test/releases/tag/r4.1",
-            reference_tag="src/r4.1"
+            reference_tag="source/r4.1"
         )
 
         # Should return False on error, not raise
@@ -732,7 +732,7 @@ class TestCloseReleaseIssue:
             issue_number=42,
             release_tag="r4.1",
             release_url="https://github.com/test/releases/tag/r4.1",
-            reference_tag="src/r4.1"
+            reference_tag="source/r4.1"
         )
 
         assert result is True

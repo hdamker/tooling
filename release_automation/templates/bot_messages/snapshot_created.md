@@ -1,5 +1,5 @@
 **✅ Snapshot created — State: `snapshot-active`**
-**Release PR:** [#{{release_pr_number}}]({{release_pr_url}}) · Snapshot: [`{{snapshot_id}}`]({{snapshot_branch_url}}){{#src_commit_sha}} · Base: `{{src_commit_sha}}`{{/src_commit_sha}}
+**Release PR:** [#{{release_pr_number}}]({{release_pr_url}}) · Snapshot: [`{{snapshot_id}}`]({{snapshot_branch_url}}){{#src_commit_sha}} · Source: `{{src_commit_sha}}`{{/src_commit_sha}}
 
 <details><summary><b>Configuration:</b> Release {{release_tag}}{{#short_type}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}}){{/short_type}}</summary>
 
