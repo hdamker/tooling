@@ -14,7 +14,7 @@
 </details>
 
 {{#state_snapshot_active}}
-**Valid actions (post a comment):**<br>→ `/discard-snapshot <reason>` — discard snapshot, then `/create-snapshot` to pick up the new configuration<br>→ Merge [Release PR]({{release_pr_url}}) — continue to create the release with the snapshot configuration
+**Valid actions (post a comment):**<br>→ `/discard-snapshot <reason>` — discard snapshot, then `/create-snapshot` to pick up the new configuration<br>→ Update, review, and merge [Release PR]({{release_pr_url}}) — continue to create the release with the snapshot configuration
 
 _To apply the updated `release-plan.yaml`, discard the current snapshot and create a new one. To continue with the existing snapshot configuration, merge the Release PR._
 {{/state_snapshot_active}}
