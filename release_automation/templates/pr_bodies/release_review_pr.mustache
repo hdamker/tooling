@@ -20,8 +20,8 @@ Codeowners update and review this PR. After codeowner and release management app
 **Confirm readiness:**
 - [ ] API version numbers match the intent declared in `release-plan.yaml`
 {{#is_alpha}}
-- [ ] API definitions are present and parseable
-- [ ] Basic API documentation exists (`info.description`)
+- [ ] API definitions are consistent with the declared API version
+- [ ] API documentation (`info.description`) is up to date with the API definition
 {{/is_alpha}}
 {{#is_rc}}
 - [ ] API definitions comply with declared Commonalities version
@@ -47,17 +47,7 @@ Codeowners update and review this PR. After codeowner and release management app
 
 - [ ] CHANGELOG follows the release documentation rules
 - [ ] Breaking changes are documented and version updates follow SemVer rules
-{{#is_initial_public}}
-- [ ] All mandatory readiness assets for initial public API versions are confirmed
-{{/is_initial_public}}
-{{#is_stable_public}}
-- [ ] All mandatory readiness assets for stable public API versions are confirmed
-{{/is_stable_public}}
-
-### Automation verification (introduction phase)
-
-- [ ] `release-metadata.yaml` content is correct
-- [ ] API version transformations are accurate (server URLs, references, version fields)
+- [ ] All mandatory readiness assets for the API versions are present and confirmed
 
 <details>
 <summary><b>Required assets per API status</b></summary>
@@ -76,6 +66,11 @@ Codeowners update and review this PR. After codeowner and release management app
 M = Mandatory, O = Optional — [Full documentation](https://github.com/camaraproject/ReleaseManagement/blob/main/documentation/readiness/api-readiness-checklist.md)
 
 </details>
+
+**Verify snapshot content (during automation introduction phase):**
+- [ ] `release-metadata.yaml` content is correct
+- [ ] API version transformations are accurate (server URLs, references, version fields)
+- [ ] README update looks correct (release tag, versions, latest vs pre-release)
 
 ### Valid actions
 
