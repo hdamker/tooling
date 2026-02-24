@@ -432,65 +432,19 @@ class IssueManager:
         Returns:
             Complete issue body with empty sections
         """
+        from .template_loader import render_template
+
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        readiness_url = (
-            "https://github.com/camaraproject/ReleaseManagement"
-            "/blob/main/documentation/readiness/api-readiness-checklist.md"
-        )
-
-        return f"""<!-- release-automation:workflow-owned -->
-<!-- release-automation:release-tag:{release_tag} -->
-
-### Release Highlights
-
-_Add release highlights here before creating snapshot._
-
-### Preparation Prerequisites
-
-Before issuing `/create-snapshot`, verify on `main`:
-
-- [ ] Release configuration matches intent (check API names, versions, statuses, release type)
-- [ ] Commonalities and ICM dependency versions are current
-- [ ] CI checks are green (Spectral linting, PR validation)
-- [ ] All intended implementation PRs are merged
-- [ ] SemVer is correct (breaking changes only in v0.x initial or new major versions)
-- [ ] API readiness assets provided for declared target release type
-
-<details>
-<summary><b>Required assets per API status</b></summary>
-
-| Nr | Asset | alpha | rc | initial<br>public | stable<br>public |
-|----|-------|:-----:|:--:|:-------:|:------:|
-| 1 | Release Plan | M | M | M | M |
-| 2 | API Definition(s) | M | M | M | M |
-| 3 | Commonalities compliance | O | M | M | M |
-| 4 | API Documentation | M | M | M | M |
-| 5 | User Stories | O | O | O | M |
-| 6 | Test Cases (basic) | O | M | M | M |
-| 7 | Test Cases (enhanced) | O | O | O | M |
-| 8 | API description link | O | O | M | M |
-
-M = Mandatory, O = Optional — [Full documentation]({readiness_url})
-
-</details>
-
----
-<!-- AUTOMATION MANAGED SECTION - DO NOT EDIT BELOW THIS LINE -->
-
-### Release Status
-<!-- BEGIN:STATE -->
-**State:** `planned` | **Last Updated:** {timestamp}
-<!-- END:STATE -->
-
-<!-- BEGIN:CONFIG -->
-_Configuration from release-plan.yaml will be shown here._
-<!-- END:CONFIG -->
-
-<!-- BEGIN:ACTIONS -->
-**Valid actions:**<br>→ **`/create-snapshot` — begin the release process**
-<!-- END:ACTIONS -->
-"""
+        return render_template("release_issue", {
+            "release_tag": release_tag,
+            "timestamp": timestamp,
+            "readiness_url": (
+                "https://github.com/camaraproject/ReleaseManagement"
+                "/blob/main/documentation/readiness"
+                "/api-readiness-checklist.md"
+            ),
+        }, template_dir="issue_bodies")
 
     def generate_published_state_section(
         self,
