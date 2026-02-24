@@ -9,6 +9,8 @@ import pytest
 from pathlib import Path
 
 from release_automation.scripts.changelog_generator import (
+    CANDIDATE_CHANGES_END_MARKER,
+    CANDIDATE_CHANGES_START_MARKER,
     ChangelogGenerator,
     RELEASE_TYPE_MAP,
     TOC_START_MARKER,
@@ -198,11 +200,34 @@ class TestDraftGeneration:
             repo_name="QualityOnDemand",
             candidate_changes=sample_changes_body,
         )
+        # PR entries present inside candidate changes block
         assert "Add feature X" in result
         assert "@user1" in result
         assert "Fix bug Y" in result
-        assert "Full Changelog" in result
+        # Markers wrap the candidate changes block
+        assert CANDIDATE_CHANGES_START_MARKER in result
+        assert CANDIDATE_CHANGES_END_MARKER in result
+        # Instruction text visible (not collapsed)
+        assert "must be removed before merge" in result
+        # Full Changelog link at end, outside markers
         assert "compare/r3.2...r4.1" in result
+        end_marker_pos = result.index(CANDIDATE_CHANGES_END_MARKER)
+        full_changelog_pos = result.index("compare/r3.2...r4.1")
+        assert full_changelog_pos > end_marker_pos
+
+    def test_generate_draft_with_candidate_changes_position(
+        self, generator, single_api_metadata, sample_changes_body
+    ):
+        """Candidate changes block appears BEFORE API sections."""
+        result = generator.generate_draft(
+            release_tag="r4.1",
+            metadata=single_api_metadata,
+            repo_name="QualityOnDemand",
+            candidate_changes=sample_changes_body,
+        )
+        start_marker_pos = result.index(CANDIDATE_CHANGES_START_MARKER)
+        api_section_pos = result.index("### Added")
+        assert start_marker_pos < api_section_pos
 
     def test_generate_draft_no_candidate_changes(self, generator, single_api_metadata):
         result = generator.generate_draft(
@@ -212,7 +237,12 @@ class TestDraftGeneration:
             candidate_changes=None,
         )
         assert "# r1.1" in result
-        assert "No candidate changes available" in result
+        # No markers or working area when no candidate changes
+        assert CANDIDATE_CHANGES_START_MARKER not in result
+        assert CANDIDATE_CHANGES_END_MARKER not in result
+        assert "Working area" not in result
+        # API sections still present
+        assert "### Added" in result
 
     def test_generate_draft_multiple_apis(self, generator, multi_api_metadata):
         result = generator.generate_draft(
@@ -407,3 +437,78 @@ class TestTocGeneration:
         assert TOC_START_MARKER in header
         assert TOC_END_MARKER in header
         assert header.index(TOC_START_MARKER) < header.index("Please be aware")
+
+
+# --- Candidate Changes Splitting ---
+
+
+class TestSplitCandidateChanges:
+    """Tests for _split_candidate_changes()."""
+
+    def test_extracts_full_changelog_url(self):
+        raw = (
+            "## What's Changed\n"
+            "* Add feature by @user in https://github.com/org/repo/pull/1\n"
+            "\n"
+            "**Full Changelog**: https://github.com/org/repo/compare/r3.2...r4.1\n"
+        )
+        body, url = ChangelogGenerator._split_candidate_changes(raw)
+        assert url == "https://github.com/org/repo/compare/r3.2...r4.1"
+        assert "Add feature" in body
+        assert "**Full Changelog**" not in body
+
+    def test_no_full_changelog_line(self):
+        raw = (
+            "## What's Changed\n"
+            "* Add feature by @user in https://github.com/org/repo/pull/1\n"
+        )
+        body, url = ChangelogGenerator._split_candidate_changes(raw)
+        assert url is None
+        assert "Add feature" in body
+
+    def test_empty_string(self):
+        body, url = ChangelogGenerator._split_candidate_changes("")
+        assert body == ""
+        assert url is None
+
+    def test_only_full_changelog_line(self):
+        raw = "**Full Changelog**: https://github.com/org/repo/compare/r1.1...r1.2\n"
+        body, url = ChangelogGenerator._split_candidate_changes(raw)
+        assert url == "https://github.com/org/repo/compare/r1.1...r1.2"
+        assert body == ""
+
+    def test_preserves_pr_list_formatting(self):
+        raw = (
+            "## What's Changed\n"
+            "* First PR by @a in https://github.com/org/repo/pull/10\n"
+            "* Second PR by @b in https://github.com/org/repo/pull/11\n"
+            "* Third PR by @c in https://github.com/org/repo/pull/12\n"
+            "\n"
+            "**Full Changelog**: https://github.com/org/repo/compare/r3.2...r4.1\n"
+        )
+        body, url = ChangelogGenerator._split_candidate_changes(raw)
+        assert "First PR" in body
+        assert "Second PR" in body
+        assert "Third PR" in body
+        assert "## What's Changed" in body
+
+
+# --- Candidate Changes Markers ---
+
+
+class TestCandidateChangesMarkers:
+    """Tests for marker format stability."""
+
+    def test_markers_use_html_comment_format(self):
+        assert CANDIDATE_CHANGES_START_MARKER.startswith("<!--")
+        assert CANDIDATE_CHANGES_START_MARKER.endswith("-->")
+        assert CANDIDATE_CHANGES_END_MARKER.startswith("<!--")
+        assert CANDIDATE_CHANGES_END_MARKER.endswith("-->")
+
+    def test_markers_contain_autogenerated_keyword(self):
+        assert "AUTOGENERATED:CANDIDATE_CHANGES" in CANDIDATE_CHANGES_START_MARKER
+        assert "AUTOGENERATED:CANDIDATE_CHANGES" in CANDIDATE_CHANGES_END_MARKER
+
+    def test_begin_end_convention(self):
+        assert "BEGIN:" in CANDIDATE_CHANGES_START_MARKER
+        assert "END:" in CANDIDATE_CHANGES_END_MARKER
