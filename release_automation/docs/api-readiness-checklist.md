@@ -44,8 +44,8 @@ The following matrix defines which assets are mandatory (M) or optional (O) for 
 
 - **Alpha**: The API is under active development. Only the API definition and basic documentation are required. Teams are iterating on the design and gathering feedback.
 - **Release Candidate (rc)**: The API is feature-complete and ready for implementation testing. Commonalities compliance and basic test cases become mandatory to ensure interoperability.
-- **Initial Public**: The API is ready for first implementations by external parties. An API description link is added for external visibility.
-- **Stable Public**: The API is production-grade. All assets are mandatory, including enhanced test cases and user stories, to support production deployments.
+- **Initial Public**: The API is ready for first implementations by external parties. All API versions in the release are initial (major version 0.x). An API description link is added for external visibility.
+- **Stable Public**: The API is production-grade, with at least one API version at major version 1 or higher. All assets are mandatory, including enhanced test cases and user stories, to support production deployments.
 
 ## Preparation Prerequisites
 
@@ -70,7 +70,7 @@ During the Release PR review (SNAPSHOT ACTIVE state), two types of reviewers ver
 
 Codeowners verify content accuracy:
 
-- CHANGELOG entries are complete and accurate (automation prepares entries from merged PRs; codeowners must review and complete them)
+- CHANGELOG entries are organized correctly (automation collects entries from merged PRs; codeowners must move them into the correct categories and complete them)
 - API version numbers match the intent declared in `release-plan.yaml`
 - API definitions are correct and complete for the target status
 - Test cases cover the intended API behavior
@@ -80,6 +80,7 @@ Codeowners verify content accuracy:
 
 Release management reviewers verify process compliance:
 
+- CHANGELOG follows the release documentation rules
 - `release-metadata.yaml` content is correct
 - API version transformations were applied correctly (server URLs, references, version fields)
 - Version conventions are followed (SemVer, URL format matching API maturity)

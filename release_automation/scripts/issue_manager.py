@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from . import config
+
 
 @dataclass
 class SnapshotHistoryEntry:
@@ -329,7 +331,7 @@ class IssueManager:
         elif state_lower == "snapshot-active":
             pr_text = f"[Release PR]({release_pr_url})" if release_pr_url else "Release PR"
             return (
-                f"**Valid actions:**<br>→ **Merge {pr_text} to create draft release**"
+                f"**Valid actions:**<br>→ **Update, review, and merge {pr_text} to create draft release**"
                 "<br>→ `/discard-snapshot <reason>` — discard and return to `planned`"
             )
 
@@ -373,6 +375,15 @@ class IssueManager:
         """
         lines = []
 
+        # Add release type
+        release_type = release_plan.get("repository", {}).get(
+            "target_release_type", ""
+        )
+        short_type = config.SHORT_TYPE_MAP.get(release_type, release_type)
+        if short_type:
+            lines.append(f"**Release type:** {short_type}")
+            lines.append("")
+
         # Add APIs table with status column
         apis = release_plan.get("apis", [])
         if apis:
@@ -398,15 +409,6 @@ class IssueManager:
             lines.append(f"**Dependencies:** {', '.join(deps)}")
         elif not apis:
             lines.append("_No APIs or dependencies configured_")
-
-        # Add readiness link when APIs are present
-        if apis:
-            lines.append("")
-            lines.append(
-                "**Readiness:** [Required assets per API status]"
-                "(https://github.com/camaraproject/ReleaseManagement"
-                "/blob/main/documentation/readiness/api-readiness-checklist.md)"
-            )
 
         return "\n".join(lines)
 
@@ -453,7 +455,25 @@ Before issuing `/create-snapshot`, verify on `main`:
 - [ ] CI checks are green (Spectral linting, PR validation)
 - [ ] All intended implementation PRs are merged
 - [ ] SemVer is correct (breaking changes only in v0.x initial or new major versions)
-- [ ] API readiness assets provided for declared target release type ([checklist]({readiness_url}))
+- [ ] API readiness assets provided for declared target release type
+
+<details>
+<summary><b>Required assets per API status</b></summary>
+
+| Nr | Asset | alpha | rc | initial<br>public | stable<br>public |
+|----|-------|:-----:|:--:|:-------:|:------:|
+| 1 | Release Plan | M | M | M | M |
+| 2 | API Definition(s) | M | M | M | M |
+| 3 | Commonalities compliance | O | M | M | M |
+| 4 | API Documentation | M | M | M | M |
+| 5 | User Stories | O | O | O | M |
+| 6 | Test Cases (basic) | O | M | M | M |
+| 7 | Test Cases (enhanced) | O | O | O | M |
+| 8 | API description link | O | O | M | M |
+
+M = Mandatory, O = Optional — [Full documentation]({readiness_url})
+
+</details>
 
 ---
 <!-- AUTOMATION MANAGED SECTION - DO NOT EDIT BELOW THIS LINE -->

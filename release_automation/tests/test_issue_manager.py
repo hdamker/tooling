@@ -366,7 +366,7 @@ class TestIssueManagerGenerateConfigSection:
     """Tests for generate_config_section method."""
 
     def test_generate_config_with_apis(self):
-        """Test generating config section with APIs and status column."""
+        """Test generating config section with APIs, status column, and release type."""
         manager = IssueManager()
 
         release_plan = {
@@ -388,12 +388,13 @@ class TestIssueManagerGenerateConfigSection:
 
         content = manager.generate_config_section(release_plan, api_versions)
 
+        assert "**Release type:** rc" in content
         assert "| API | Status | Target | Calculated |" in content
         assert "| location-verification | rc | 3.2.0 | `3.2.0-rc.1` |" in content
         assert "| location-retrieval | rc | 0.5.0 | `0.5.0-rc.1` |" in content
 
-    def test_generate_config_with_readiness_link(self):
-        """Test that config section includes readiness link when APIs are present."""
+    def test_generate_config_no_readiness_details(self):
+        """Test that config section does not include readiness details (moved to static body)."""
         manager = IssueManager()
 
         release_plan = {
@@ -404,8 +405,8 @@ class TestIssueManagerGenerateConfigSection:
 
         content = manager.generate_config_section(release_plan, {"test-api": "1.0.0"})
 
-        assert "**Readiness:**" in content
-        assert "api-readiness-checklist.md" in content
+        assert "<details>" not in content
+        assert "Required assets per API status" not in content
 
     def test_generate_config_without_status(self):
         """Test that missing target_api_status shows dash."""
@@ -473,7 +474,13 @@ class TestIssueManagerGenerateIssueBodyTemplate:
         assert "CI checks are green" in body
         assert "All intended implementation PRs are merged" in body
         assert "SemVer is correct" in body
+
+        # Check readiness details block in static body
+        assert "<details>" in body
+        assert "Required assets per API status" in body
+        assert "| 1 | Release Plan | M | M | M | M |" in body
         assert "api-readiness-checklist.md" in body
+        assert "</details>" in body
 
     def test_generate_template_without_meta_release(self):
         """Test generating template without meta-release."""

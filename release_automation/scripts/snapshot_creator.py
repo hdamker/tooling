@@ -6,6 +6,7 @@ version calculation, mechanical transformations, and metadata generation.
 """
 
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass, field
@@ -478,14 +479,38 @@ class SnapshotCreator:
         commonalities_release = dependencies.get("commonalities_release", "")
         icm_release = dependencies.get("identity_consent_management_release", "")
 
+        # Determine initial vs stable from calculated API versions
+        # initial: all API versions have major version 0.x
+        # stable: at least one API version has major version >= 1
+        has_stable_api = any(
+            int(m.group(1)) >= 1
+            for v in api_versions.values()
+            if (m := re.match(r"(\d+)\.", v))
+        )
+        is_public = short_type in ("public", "maintenance")
+
+        # Construct URLs for template links
+        snapshot_branch_url = (
+            f"https://github.com/{self.gh.repo}/tree/"
+            f"{self.SNAPSHOT_BRANCH_PREFIX}/{snapshot_id}"
+        )
+        release_issue_number = self.state_manager.find_release_issue(release_tag)
+        release_issue_url = (
+            f"https://github.com/{self.gh.repo}/issues/{release_issue_number}"
+            if release_issue_number else ""
+        )
+
         body = render_template("release_review_pr", {
             "release_tag": release_tag,
             "snapshot_id": snapshot_id,
+            "snapshot_branch_url": snapshot_branch_url,
+            "release_issue_url": release_issue_url,
             "apis": apis,
             "short_type": short_type,
             "is_alpha": short_type == "alpha",
             "is_rc": short_type == "rc",
-            "is_public": short_type in ("public", "maintenance"),
+            "is_initial_public": is_public and not has_stable_api,
+            "is_stable_public": is_public and has_stable_api,
             "commonalities_release": commonalities_release,
             "identity_consent_management_release": icm_release,
         })

@@ -1,20 +1,20 @@
 ## Release {{release_tag}} ({{short_type}})
 
-This pull request was created by the CAMARA release automation.
+Codeowners update and review this PR. After codeowner and release management approval, merge into the release snapshot to create a draft release.
 
 ### APIs in this release
 
-| API | Version | Status |
-|-----|---------|--------|
+| API | Version |
+|-----|---------|
 {{#apis}}
-| {{api_name}} | `{{api_version}}` | {{target_api_status}} |
+| {{api_name}} | `{{api_version}}` |
 {{/apis}}
 
 {{#commonalities_release}}**Dependencies:** Commonalities {{commonalities_release}}{{#identity_consent_management_release}}, ICM {{identity_consent_management_release}}{{/identity_consent_management_release}}{{/commonalities_release}}
 
 ### Codeowner Review
 
-- [ ] CHANGELOG entries are complete and accurate (review automation-prepared entries, add missing details)
+- [ ] Move CHANGELOG entries into the correct categories and complete them
 - [ ] API version numbers match the intent declared in `release-plan.yaml`
 {{#is_alpha}}
 - [ ] API definitions are present and parseable
@@ -25,31 +25,42 @@ This pull request was created by the CAMARA release automation.
 - [ ] API documentation is complete
 - [ ] Basic test cases are present (sunny day + main error cases)
 {{/is_rc}}
-{{#is_public}}
+{{#is_initial_public}}
 - [ ] API definitions comply with declared Commonalities version
 - [ ] API documentation is complete
 - [ ] Basic test cases are present (sunny day + main error cases)
 - [ ] Enhanced test cases cover rainy day scenarios
 - [ ] User stories are provided for each API
 - [ ] API description link is set for external visibility
-{{/is_public}}
+{{/is_initial_public}}
+{{#is_stable_public}}
+- [ ] API definitions comply with declared Commonalities version
+- [ ] API documentation is complete
+- [ ] Basic test cases are present (sunny day + main error cases)
+- [ ] Enhanced test cases cover rainy day scenarios
+- [ ] User stories are current for each API
+- [ ] API description link is current
+{{/is_stable_public}}
 
 ### Release Management Review
 
+- [ ] CHANGELOG follows the release documentation rules
 - [ ] `release-metadata.yaml` content is correct
 - [ ] API version transformations are accurate (server URLs, references, version fields)
 - [ ] Version conventions are followed (SemVer, URL format matching API maturity)
-{{#is_public}}
-- [ ] All mandatory readiness assets for public release are confirmed
-{{/is_public}}
+{{#is_initial_public}}
+- [ ] All mandatory readiness assets for initial public release are confirmed
+{{/is_initial_public}}
+{{#is_stable_public}}
+- [ ] All mandatory readiness assets for stable public release are confirmed
+{{/is_stable_public}}
 
 > [Required assets per API status](https://github.com/camaraproject/ReleaseManagement/blob/main/documentation/readiness/api-readiness-checklist.md)
 
-### Next steps
+### Valid actions
 
-1. Review the changes in this PR
-2. Update CHANGELOG entries as needed
-3. When ready, merge this PR to create a draft release
+- **Merge this PR** when both codeowner and release management approvals are given — creates a draft release
+- **`/discard-snapshot`** in the {{#release_issue_url}}[Release Issue]({{release_issue_url}}){{/release_issue_url}}{{^release_issue_url}}Release Issue{{/release_issue_url}} to discard and return to `planned`
 
 ---
-Snapshot ID: `{{snapshot_id}}`
+Snapshot: [`{{snapshot_id}}`]({{snapshot_branch_url}})
