@@ -18,8 +18,8 @@ class TestRenderTemplate:
             "short_type": "rc",
             "is_rc": True,
             "apis": [
-                {"api_name": "QualityOnDemand", "api_version": "v1.0.0"},
-                {"api_name": "DeviceLocation", "api_version": "v2.0.0"},
+                {"api_name": "QualityOnDemand", "api_version": "v1.0.0", "status_label": "rc"},
+                {"api_name": "DeviceLocation", "api_version": "v2.0.0", "status_label": "rc"},
             ],
             "commonalities_release": "r3.4",
             "identity_consent_management_release": "r3.3",
@@ -28,15 +28,21 @@ class TestRenderTemplate:
         result = render_template("release_review_pr", context)
 
         assert "## Release r4.1 (rc)" in result
-        assert "| QualityOnDemand | `v1.0.0` |" in result
-        assert "| DeviceLocation | `v2.0.0` |" in result
+        assert "| API | Version | Status |" in result
+        assert "| QualityOnDemand | `v1.0.0` | rc |" in result
+        assert "| DeviceLocation | `v2.0.0` | rc |" in result
         assert "### Codeowner Review" in result
         assert "### Release Management Review" in result
+        assert "### Automation verification (introduction phase)" in result
+        assert "**Update this PR:**" in result
+        assert "**Confirm readiness:**" in result
         assert "Move CHANGELOG entries" in result
         assert "declared Commonalities version" in result
         assert "Commonalities r3.4" in result
         assert "### Valid actions" in result
         assert "Snapshot: [`r4.1-abc1234`]" in result
+        assert "<details>" in result
+        assert "Required assets per API status" in result
 
     def test_render_release_review_pr_alpha_template(self):
         """Test rendering the release review PR template for alpha release."""
@@ -46,14 +52,14 @@ class TestRenderTemplate:
             "short_type": "alpha",
             "is_alpha": True,
             "apis": [
-                {"api_name": "NumberVerification", "api_version": "v0.3.0-alpha.1"},
+                {"api_name": "NumberVerification", "api_version": "v0.3.0-alpha.1", "status_label": "alpha"},
             ],
         }
 
         result = render_template("release_review_pr", context)
 
         assert "## Release r3.2 (alpha)" in result
-        assert "| NumberVerification | `v0.3.0-alpha.1` |" in result
+        assert "| NumberVerification | `v0.3.0-alpha.1` | alpha |" in result
         assert "API definitions are present and parseable" in result
         assert "Move CHANGELOG entries" in result
         # Alpha should NOT have rc/public-specific items
@@ -67,7 +73,7 @@ class TestRenderTemplate:
             "short_type": "public",
             "is_initial_public": True,
             "apis": [
-                {"api_name": "TestAPI", "api_version": "v0.5.0"},
+                {"api_name": "TestAPI", "api_version": "v0.5.0", "status_label": "initial public"},
             ],
             "commonalities_release": "r4.0",
         }
@@ -75,10 +81,12 @@ class TestRenderTemplate:
         result = render_template("release_review_pr", context)
 
         assert "## Release r5.0 (public)" in result
-        assert "Enhanced test cases cover rainy day scenarios" in result
-        assert "User stories are provided" in result
+        assert "| TestAPI | `v0.5.0` | initial public |" in result
         assert "API description link is set" in result
-        assert "mandatory readiness assets for initial public release" in result
+        assert "mandatory readiness assets for initial public API versions" in result
+        # Initial public should NOT have stable-public-only items
+        assert "Enhanced test cases" not in result
+        assert "User stories" not in result
 
     def test_render_release_review_pr_stable_public_template(self):
         """Test rendering the release review PR template for stable public release."""
@@ -88,7 +96,7 @@ class TestRenderTemplate:
             "short_type": "maintenance",
             "is_stable_public": True,
             "apis": [
-                {"api_name": "TestAPI", "api_version": "v1.0.0"},
+                {"api_name": "TestAPI", "api_version": "v1.0.0", "status_label": "stable public"},
             ],
             "commonalities_release": "r5.0",
         }
@@ -96,12 +104,11 @@ class TestRenderTemplate:
         result = render_template("release_review_pr", context)
 
         assert "## Release r6.1 (maintenance)" in result
+        assert "| TestAPI | `v1.0.0` | stable public |" in result
         assert "Enhanced test cases cover rainy day scenarios" in result
         assert "User stories are current" in result
         assert "API description link is current" in result
-        assert "mandatory readiness assets for stable public release" in result
-        # Should NOT have initial public items
-        assert "User stories are provided" not in result
+        assert "mandatory readiness assets for stable public API versions" in result
 
     def test_render_release_review_pr_no_apis(self):
         """Test rendering with no APIs (edge case)."""
@@ -175,13 +182,13 @@ class TestTemplateLoader:
             "snapshot_id": "r4.2-111222",
             "short_type": "rc",
             "is_rc": True,
-            "apis": [{"api_name": "TestAPI", "api_version": "v1.0.0"}],
+            "apis": [{"api_name": "TestAPI", "api_version": "v1.0.0", "status_label": "rc"}],
         }
 
         result = loader.render("release_review_pr", context)
 
         assert "## Release r4.2 (rc)" in result
-        assert "| TestAPI | `v1.0.0` |" in result
+        assert "| TestAPI | `v1.0.0` | rc |" in result
 
     def test_loader_render_sync_pr(self):
         """Test TemplateLoader.render for sync PR."""

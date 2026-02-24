@@ -4,17 +4,20 @@ Codeowners update and review this PR. After codeowner and release management app
 
 ### APIs in this release
 
-| API | Version |
-|-----|---------|
+| API | Version | Status |
+|-----|---------|--------|
 {{#apis}}
-| {{api_name}} | `{{api_version}}` |
+| {{api_name}} | `{{api_version}}` | {{status_label}} |
 {{/apis}}
 
 {{#commonalities_release}}**Dependencies:** Commonalities {{commonalities_release}}{{#identity_consent_management_release}}, ICM {{identity_consent_management_release}}{{/identity_consent_management_release}}{{/commonalities_release}}
 
 ### Codeowner Review
 
+**Update this PR:**
 - [ ] Move CHANGELOG entries into the correct categories and complete them
+
+**Confirm readiness:**
 - [ ] API version numbers match the intent declared in `release-plan.yaml`
 {{#is_alpha}}
 - [ ] API definitions are present and parseable
@@ -29,8 +32,6 @@ Codeowners update and review this PR. After codeowner and release management app
 - [ ] API definitions comply with declared Commonalities version
 - [ ] API documentation is complete
 - [ ] Basic test cases are present (sunny day + main error cases)
-- [ ] Enhanced test cases cover rainy day scenarios
-- [ ] User stories are provided for each API
 - [ ] API description link is set for external visibility
 {{/is_initial_public}}
 {{#is_stable_public}}
@@ -45,17 +46,36 @@ Codeowners update and review this PR. After codeowner and release management app
 ### Release Management Review
 
 - [ ] CHANGELOG follows the release documentation rules
-- [ ] `release-metadata.yaml` content is correct
-- [ ] API version transformations are accurate (server URLs, references, version fields)
-- [ ] Version conventions are followed (SemVer, URL format matching API maturity)
+- [ ] Breaking changes are documented and version updates follow SemVer rules
 {{#is_initial_public}}
-- [ ] All mandatory readiness assets for initial public release are confirmed
+- [ ] All mandatory readiness assets for initial public API versions are confirmed
 {{/is_initial_public}}
 {{#is_stable_public}}
-- [ ] All mandatory readiness assets for stable public release are confirmed
+- [ ] All mandatory readiness assets for stable public API versions are confirmed
 {{/is_stable_public}}
 
-> [Required assets per API status](https://github.com/camaraproject/ReleaseManagement/blob/main/documentation/readiness/api-readiness-checklist.md)
+### Automation verification (introduction phase)
+
+- [ ] `release-metadata.yaml` content is correct
+- [ ] API version transformations are accurate (server URLs, references, version fields)
+
+<details>
+<summary><b>Required assets per API status</b></summary>
+
+| Nr | Asset | alpha | rc | initial<br>public | stable<br>public |
+|----|-------|:-----:|:--:|:-------:|:------:|
+| 1 | Release Plan | M | M | M | M |
+| 2 | API Definition(s) | M | M | M | M |
+| 3 | Commonalities compliance | O | M | M | M |
+| 4 | API Documentation | M | M | M | M |
+| 5 | User Stories | O | O | O | M |
+| 6 | Test Cases (basic) | O | M | M | M |
+| 7 | Test Cases (enhanced) | O | O | O | M |
+| 8 | API description link | O | O | M | M |
+
+M = Mandatory, O = Optional — [Full documentation](https://github.com/camaraproject/ReleaseManagement/blob/main/documentation/readiness/api-readiness-checklist.md)
+
+</details>
 
 ### Valid actions
 

@@ -12,18 +12,29 @@ Before an API repository can be released, codeowners must ensure that certain as
 
 This document replaces the deprecated per-API `API-Readiness-Checklist.md` files. Readiness is now tracked through `release-plan.yaml` configuration, preparation prerequisites in the Release Issue, and the review checklist in the Release PR.
 
+## Terms
+
+| Term | Source | Values |
+|------|--------|--------|
+| Release type | `repository.target_release_type` | `pre-release-alpha`, `pre-release-rc`, `public-release`, `maintenance-release` |
+| API status | `apis[].target_api_status` | `alpha`, `rc`, `public` |
+| Initial public | Derived | API status is `public` and major version is 0 (e.g., v0.5.0) |
+| Stable public | Derived | API status is `public` and major version ≥ 1 (e.g., v1.0.0) |
+
+The Release Issue and Release PR embed the readiness matrix as a convenience copy; this document is the canonical source.
+
 ## Release Assets
 
-| Nr | Asset | Description | Location | Automated? |
-|----|-------|-------------|----------|------------|
-| 1 | Release Plan | `release-plan.yaml` updated with target release tag, release type, API versions, statuses, and dependencies | `release-plan.yaml` | Schema validated on PR |
-| 2 | API Definition(s) | One `{api-name}.yaml` per API, following applicable ICM guidelines | `code/API_definitions/` | Spectral linting on PR; file existence checked on `/create-snapshot` |
-| 3 | Commonalities compliance | API definitions follow the Commonalities version declared in `release-plan.yaml` dependencies | In API definitions | Partially (Spectral rules cover structure; design guidelines require manual review) |
-| 4 | API Documentation | API description in the YAML `info.description` field; additional documentation as needed | In YAML `info` section or `documentation/` | Partial (`info.description` presence checked) |
-| 5 | User Stories | At least one user story per API demonstrating the intended use | `documentation/API_documentation/` | No |
-| 6 | Test Cases (basic) | Sunny day scenarios and main error cases; at least one `.feature` file per API | `code/Test_definitions/` | File existence only |
-| 7 | Test Cases (enhanced) | Rainy day scenarios, edge cases, and error handling coverage | `code/Test_definitions/` | No |
-| 8 | API description link | Link to CAMARA Wiki API description page for external visibility | Wiki URL in API Readiness Checklist | No |
+| Nr | Asset | Description | Location | Automated? | How to verify |
+|----|-------|-------------|----------|------------|---------------|
+| 1 | Release Plan | `release-plan.yaml` updated with target release tag, release type, API versions, statuses, and dependencies | `release-plan.yaml` | Schema validated on PR | Check that API names, versions, statuses, and dependencies match intent |
+| 2 | API Definition(s) | One `{api-name}.yaml` per API, following applicable ICM guidelines | `code/API_definitions/` | Spectral linting on PR; file existence checked on `/create-snapshot` | One YAML file per API; Spectral passes |
+| 3 | Commonalities compliance | API definitions follow the Commonalities version declared in `release-plan.yaml` dependencies | In API definitions | Partially (Spectral rules cover structure; design guidelines require manual review) | Spectral covers structure; review design guideline adherence manually |
+| 4 | API Documentation | API description in the YAML `info.description` field; additional documentation as needed | In YAML `info` section or `documentation/` | Partial (`info.description` presence checked) | `info.description` is present and meaningful |
+| 5 | User Stories | At least one user story per API demonstrating the intended use | `documentation/API_documentation/` | No | At least one user story document per API exists |
+| 6 | Test Cases (basic) | Sunny day scenarios and main error cases; at least one `.feature` file per API | `code/Test_definitions/` | File existence only | At least one `.feature` file per API with sunny day + main error cases |
+| 7 | Test Cases (enhanced) | Rainy day scenarios, edge cases, and error handling coverage | `code/Test_definitions/` | No | Additional scenarios beyond basic: rainy day, edge cases, error handling |
+| 8 | API description link | Link to CAMARA Wiki API description page for external visibility | Wiki URL in API Readiness Checklist | No | Wiki URL is present and reachable |
 
 ## Requirements by API Status
 

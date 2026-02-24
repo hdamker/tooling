@@ -478,6 +478,7 @@ class TestIssueManagerGenerateIssueBodyTemplate:
         # Check readiness details block in static body
         assert "<details>" in body
         assert "Required assets per API status" in body
+        assert "full documentation" in body  # convenience copy label
         assert "| 1 | Release Plan | M | M | M | M |" in body
         assert "api-readiness-checklist.md" in body
         assert "</details>" in body

@@ -468,10 +468,21 @@ class SnapshotCreator:
         apis = []
         for api_plan in release_plan.get("apis", []):
             name = api_plan.get("api_name", "unknown")
+            status = api_plan.get("target_api_status", "")
+            version = api_versions.get(name, "0.0.0")
+            # Derive CAMARA status label: for public, distinguish
+            # initial (major=0) from stable (major>=1)
+            if status == "public":
+                major_match = re.match(r"(\d+)\.", version)
+                major = int(major_match.group(1)) if major_match else 0
+                status_label = "initial public" if major == 0 else "stable public"
+            else:
+                status_label = status
             apis.append({
                 "api_name": name,
                 "api_version": api_versions.get(name, "—"),
-                "target_api_status": api_plan.get("target_api_status", ""),
+                "target_api_status": status,
+                "status_label": status_label,
             })
 
         # Dependencies from release plan
