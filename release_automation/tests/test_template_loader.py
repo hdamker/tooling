@@ -85,7 +85,7 @@ class TestRenderTemplate:
 
         assert "## Release r5.0 (public)" in result
         assert "| TestAPI | `v0.5.0` | initial public |" in result
-        assert "API description is set" in result
+        assert "API Description is set" in result
         assert "mandatory release assets for the APIs are present per the API status and confirmed" in result
         # Initial public should NOT have stable-public-only items
         assert "Enhanced test cases" not in result
@@ -110,7 +110,7 @@ class TestRenderTemplate:
         assert "| TestAPI | `v1.0.0` | stable public |" in result
         assert "Enhanced test cases cover rainy day scenarios" in result
         assert "User stories are current" in result
-        assert "API description is up to date" in result
+        assert "API Description is up to date" in result
         assert "mandatory release assets for the APIs are present per the API status and confirmed" in result
 
     def test_render_release_review_pr_no_apis(self):
