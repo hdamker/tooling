@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from . import config
+
 
 @dataclass
 class SnapshotHistoryEntry:
@@ -329,7 +331,7 @@ class IssueManager:
         elif state_lower == "snapshot-active":
             pr_text = f"[Release PR]({release_pr_url})" if release_pr_url else "Release PR"
             return (
-                f"**Valid actions:**<br>→ **Merge {pr_text} to create draft release**"
+                f"**Valid actions:**<br>→ **Update, review, and merge {pr_text} to create draft release**"
                 "<br>→ `/discard-snapshot <reason>` — discard and return to `planned`"
             )
 
@@ -373,17 +375,27 @@ class IssueManager:
         """
         lines = []
 
-        # Add APIs table
+        # Add release type
+        release_type = release_plan.get("repository", {}).get(
+            "target_release_type", ""
+        )
+        short_type = config.SHORT_TYPE_MAP.get(release_type, release_type)
+        if short_type:
+            lines.append(f"**Release type:** {short_type}")
+            lines.append("")
+
+        # Add APIs table with status column
         apis = release_plan.get("apis", [])
         if apis:
-            lines.append("| API | Target | Calculated |")
-            lines.append("|-----|--------|------------|")
+            lines.append("| API | Status | Target | Calculated |")
+            lines.append("|-----|--------|--------|------------|")
 
             for api in apis:
                 name = api.get("api_name", "unknown")
+                status = api.get("target_api_status", "—")
                 target = api.get("target_api_version", "—")
                 calculated = api_versions.get(name, "—")
-                lines.append(f"| {name} | {target} | `{calculated}` |")
+                lines.append(f"| {name} | {status} | {target} | `{calculated}` |")
 
         # Add dependencies
         deps = []
@@ -420,31 +432,19 @@ class IssueManager:
         Returns:
             Complete issue body with empty sections
         """
+        from .template_loader import render_template
+
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        return f"""<!-- release-automation:workflow-owned -->
-<!-- release-automation:release-tag:{release_tag} -->
-
-### Release Highlights
-
-_Add release highlights here before creating snapshot._
-
----
-<!-- AUTOMATION MANAGED SECTION - DO NOT EDIT BELOW THIS LINE -->
-
-### Release Status
-<!-- BEGIN:STATE -->
-**State:** `planned` | **Last Updated:** {timestamp}
-<!-- END:STATE -->
-
-<!-- BEGIN:CONFIG -->
-_Configuration from release-plan.yaml will be shown here._
-<!-- END:CONFIG -->
-
-<!-- BEGIN:ACTIONS -->
-**Valid actions:**<br>→ **`/create-snapshot` — begin the release process**
-<!-- END:ACTIONS -->
-"""
+        return render_template("release_issue", {
+            "release_tag": release_tag,
+            "timestamp": timestamp,
+            "readiness_url": (
+                "https://github.com/camaraproject/ReleaseManagement"
+                "/blob/main/documentation/readiness"
+                "/api-readiness-checklist.md"
+            ),
+        }, template_dir="issue_bodies")
 
     def generate_published_state_section(
         self,
