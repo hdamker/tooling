@@ -486,7 +486,7 @@ class SnapshotCreator:
             })
 
         # Dependencies from release plan
-        dependencies = release_plan.get("repository", {}).get("dependencies", {})
+        dependencies = release_plan.get("dependencies", {})
         commonalities_release = dependencies.get("commonalities_release", "")
         icm_release = dependencies.get("identity_consent_management_release", "")
 
