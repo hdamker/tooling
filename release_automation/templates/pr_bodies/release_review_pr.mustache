@@ -41,17 +41,17 @@ Codeowners update and review this PR. After codeowner and release management app
 - [ ] Basic test cases are present (sunny day + main error cases)
 - [ ] Enhanced test cases cover rainy day scenarios
 - [ ] User stories are current for each API
-- [ ] API description link is current
+- [ ] API description is up to date for the API(s)
 {{/is_stable_public}}
 
 ### Release Management Review
 
 - [ ] CHANGELOG follows the release documentation rules
 - [ ] Breaking changes are documented and version updates follow SemVer rules
-- [ ] All mandatory readiness assets for the API versions are present and confirmed
+- [ ] All mandatory release assets for the APIs are present per the API status and confirmed
 
 <details>
-<summary><b>Required assets per API status</b></summary>
+<summary><b>Required release assets per API status</b></summary>
 
 | Nr | Asset | alpha | rc | initial<br>public | stable<br>public |
 |----|-------|:-----:|:--:|:-------:|:------:|
@@ -68,15 +68,15 @@ M = Mandatory, O = Optional — [Full documentation](https://github.com/camarapr
 
 </details>
 
-**Verify snapshot content (during automation introduction phase):**
+**Verify snapshot content (during automation introduction phase only):**
 - [ ] `release-metadata.yaml` content is correct
-- [ ] API version transformations are accurate (server URLs, references, version fields)
+- [ ] API version numbers and applicable extensions were generated correctly (server URLs, references, version fields)
 - [ ] README update looks correct (release tag, versions, latest vs pre-release)
 
 ### Valid actions
 
 - **Merge this PR** when both codeowner and release management approvals are given — creates a draft release
-- **`/discard-snapshot`** in the {{#release_issue_url}}[Release Issue]({{release_issue_url}}){{/release_issue_url}}{{^release_issue_url}}Release Issue{{/release_issue_url}} to discard and return to `planned`
+- **`/discard-snapshot`** in the {{#release_issue_url}}[Release Issue]({{release_issue_url}}){{/release_issue_url}}{{^release_issue_url}}Release Issue{{/release_issue_url}} to discard, return to `planned`, and update content on `main`
 
 ---
 Snapshot: [`{{snapshot_id}}`]({{snapshot_branch_url}})

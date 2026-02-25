@@ -5,19 +5,19 @@
 
 _Add release highlights here before creating snapshot._
 
-### Preparation Prerequisites
+### Preparing the release content
 
 Before issuing `/create-snapshot`, verify on `main`:
 
-- [ ] Release configuration matches intent (check API names, versions, statuses, release type)
+- [ ] `release-plan.yaml` content matches intent (check API names, versions, statuses, release type)
 - [ ] Commonalities and ICM dependency versions are current
 - [ ] CI checks are green (Spectral linting, PR validation)
 - [ ] All intended implementation PRs are merged
 - [ ] SemVer is correct (breaking changes only in v0.x initial or new major versions)
-- [ ] API readiness assets provided for declared target release type
+- [ ] Release assets provided for declared API status(es)
 
 <details>
-<summary><b>Required assets per API status</b> (see <a href="{{readiness_url}}">full documentation</a>)</summary>
+<summary><b>Required release assets per API status</b> (see <a href="{{readiness_url}}">full documentation</a>)</summary>
 
 | Nr | Asset | alpha | rc | initial<br>public | stable<br>public |
 |----|-------|:-----:|:--:|:-------:|:------:|
