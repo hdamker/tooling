@@ -33,18 +33,18 @@ class TestRenderTemplate:
         assert "| DeviceLocation | `v2.0.0` | rc |" in result
         assert "### Codeowner Review" in result
         assert "### Release Management Review" in result
-        assert "**Verify snapshot content (during automation introduction phase):**" in result
+        assert "**Verify snapshot content (during automation introduction phase only):**" in result
         assert "**Update this PR:**" in result
         assert "**Confirm readiness:**" in result
-        assert "Move CHANGELOG entries" in result
+        assert "Move CHANGELOG candidate changes" in result
         assert "declared Commonalities version" in result
         assert "Commonalities r3.4" in result
-        assert "mandatory readiness assets for the API versions are present and confirmed" in result
+        assert "mandatory release assets for the APIs are present per the API status and confirmed" in result
         assert "README update looks correct" in result
         assert "### Valid actions" in result
         assert "Snapshot: [`r4.1-abc1234`]" in result
         assert "<details>" in result
-        assert "Required assets per API status" in result
+        assert "Required release assets per API status" in result
 
     def test_render_release_review_pr_alpha_template(self):
         """Test rendering the release review PR template for alpha release."""
@@ -64,7 +64,7 @@ class TestRenderTemplate:
         assert "| NumberVerification | `v0.3.0-alpha.1` | alpha |" in result
         assert "API definitions are consistent with the declared API version" in result
         assert "API documentation (`info.description`) is up to date" in result
-        assert "Move CHANGELOG entries" in result
+        assert "Move CHANGELOG candidate changes" in result
         # Alpha should NOT have rc/public-specific items
         assert "Enhanced test cases" not in result
 
@@ -85,8 +85,8 @@ class TestRenderTemplate:
 
         assert "## Release r5.0 (public)" in result
         assert "| TestAPI | `v0.5.0` | initial public |" in result
-        assert "API description link is set" in result
-        assert "mandatory readiness assets for the API versions are present and confirmed" in result
+        assert "API description is set" in result
+        assert "mandatory release assets for the APIs are present per the API status and confirmed" in result
         # Initial public should NOT have stable-public-only items
         assert "Enhanced test cases" not in result
         assert "User stories" not in result
@@ -110,8 +110,8 @@ class TestRenderTemplate:
         assert "| TestAPI | `v1.0.0` | stable public |" in result
         assert "Enhanced test cases cover rainy day scenarios" in result
         assert "User stories are current" in result
-        assert "API description link is current" in result
-        assert "mandatory readiness assets for the API versions are present and confirmed" in result
+        assert "API description is up to date" in result
+        assert "mandatory release assets for the APIs are present per the API status and confirmed" in result
 
     def test_render_release_review_pr_no_apis(self):
         """Test rendering with no APIs (edge case)."""
