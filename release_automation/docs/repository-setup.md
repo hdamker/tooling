@@ -33,11 +33,15 @@ This document defines the required configuration for each API repository. It ser
 
 ---
 
-## Repository Ruleset
+## Repository Rulesets
 
-One ruleset protects the `release-snapshot/**` branches that the release automation creates and manages. It combines branch protection rules (restrict creation, deletion, force pushes) with PR review requirements (2 approvals, code owner review, RM team approval). The `pull_request` rule prevents direct pushes and enforces review gates; a separate `update` rule is not needed and would block PR merges for non-bypass actors.
+Three rulesets protect branches managed by the release automation:
 
-The `camara-release-automation` GitHub App is the bypass actor, allowing the workflow to create, push to, and delete snapshot branches while humans are fully governed by the PR + review gates.
+1. **Snapshot branch protection** — protects `release-snapshot/**` branches with branch protection rules and PR review requirements
+2. **Release pointer branch protection** — protects `release/**` pointer branches (fully immutable)
+3. **Pre-release pointer branch protection** — protects `pre-release/**` pointer branches (immutable but deletable by codeowners)
+
+The `camara-release-automation` GitHub App is the bypass actor for all rulesets, allowing the workflow to create and manage these branches while humans are governed by protection rules.
 
 No ruleset is needed for `release-review/**` branches — codeowners push review fixes directly to these branches, and the workflow handles creation and cleanup.
 
@@ -124,7 +128,107 @@ Notes:
 
 </details>
 
-### Applying the ruleset programmatically
+### Release Pointer Branch Protection
+
+After publication, the automation creates a pointer branch at the release tag commit (`release/rX.Y` for public releases, `pre-release/rX.Y` for pre-releases). This prevents GitHub's "commit does not belong to any branch" warning when browsing the tag tree view.
+
+Two rulesets enforce immutability (no commits, no force pushes). They differ only in deletion policy:
+
+**`release-pointer-protection`** — public release pointers are fully protected:
+
+| Property | Value |
+|----------|-------|
+| **Name** | `release-pointer-protection` |
+| **Enforcement** | Active |
+| **Target** | Include branches matching: `release/**` |
+| **Bypass actors** | `camara-release-automation` GitHub App (always), Organization admins (always) |
+
+Rules: restrict creations, restrict deletions, restrict updates, block force pushes. No PR review rules.
+
+**`pre-release-pointer-protection`** — pre-release pointers are immutable but deletable:
+
+| Property | Value |
+|----------|-------|
+| **Name** | `pre-release-pointer-protection` |
+| **Enforcement** | Active |
+| **Target** | Include branches matching: `pre-release/**` |
+| **Bypass actors** | `camara-release-automation` GitHub App (always), Organization admins (always) |
+
+Rules: restrict creations, restrict updates, block force pushes. **No deletion rule** — codeowners can delete older pre-release pointers to manage the branch list as pre-releases accumulate during a release cycle.
+
+<details>
+<summary>GitHub API payloads</summary>
+
+```json
+{
+  "name": "release-pointer-protection",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/release/**"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    { "type": "creation" },
+    { "type": "deletion" },
+    { "type": "update" },
+    { "type": "non_fast_forward" }
+  ],
+  "bypass_actors": [
+    {
+      "actor_id": null,
+      "actor_type": "OrganizationAdmin",
+      "bypass_mode": "always"
+    },
+    {
+      "actor_id": 2865881,
+      "actor_type": "Integration",
+      "bypass_mode": "always"
+    }
+  ]
+}
+```
+
+```json
+{
+  "name": "pre-release-pointer-protection",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/pre-release/**"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    { "type": "creation" },
+    { "type": "update" },
+    { "type": "non_fast_forward" }
+  ],
+  "bypass_actors": [
+    {
+      "actor_id": null,
+      "actor_type": "OrganizationAdmin",
+      "bypass_mode": "always"
+    },
+    {
+      "actor_id": 2865881,
+      "actor_type": "Integration",
+      "bypass_mode": "always"
+    }
+  ]
+}
+```
+
+Notes:
+- `actor_id: 2865881` is the `camara-release-automation` GitHub App ID
+- The `update` rule prevents any commits to pointer branches — they must stay at the tag commit
+
+</details>
+
+### Applying rulesets programmatically
 
 The GitHub Rulesets API is **not idempotent** — calling `POST` twice creates duplicate rulesets. The admin script in `project-administration` uses a check-then-create/update pattern:
 
@@ -349,7 +453,7 @@ For stronger protection, the `pr_validation` workflow can be extended to block P
 
 Use this checklist to verify that a repository is correctly configured for release automation. This is the acceptance checklist for test repo setup.
 
-### Ruleset
+### Rulesets
 
 - [ ] Ruleset `release-snapshot-protection` exists and is **active**
   - Target: `release-snapshot/**`
@@ -357,6 +461,14 @@ Use this checklist to verify that a repository is correctly configured for relea
   - PR rules: 2 approvals, code owner review, dismiss stale reviews
   - Required reviewers: `release-management_reviewers` (1 approval)
   - Bypass: `camara-release-automation` GitHub App
+- [ ] Ruleset `release-pointer-protection` exists and is **active**
+  - Target: `release/**`
+  - Rules: restrict creations, deletions, updates, block force pushes
+  - Bypass: `camara-release-automation` GitHub App, Organization admins
+- [ ] Ruleset `pre-release-pointer-protection` exists and is **active**
+  - Target: `pre-release/**`
+  - Rules: restrict creations, updates, block force pushes (no deletion rule)
+  - Bypass: `camara-release-automation` GitHub App, Organization admins
 
 ### CODEOWNERS
 
