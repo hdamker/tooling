@@ -467,9 +467,9 @@ class TestIssueManagerGenerateIssueBodyTemplate:
 
         assert "`/create-snapshot`" in body
 
-        # Check preparation prerequisites section
-        assert "### Preparation Prerequisites" in body
-        assert "Release configuration matches intent" in body
+        # Check preparation section
+        assert "### Preparing the release content" in body
+        assert "release-plan.yaml" in body
         assert "Commonalities and ICM dependency versions" in body
         assert "CI checks are green" in body
         assert "All intended implementation PRs are merged" in body
@@ -477,7 +477,7 @@ class TestIssueManagerGenerateIssueBodyTemplate:
 
         # Check readiness details block in static body
         assert "<details>" in body
-        assert "Required assets per API status" in body
+        assert "Required release assets per API status" in body
         assert "full documentation" in body  # convenience copy label
         assert "| 1 | Release Plan | M | M | M | M |" in body
         assert "api-readiness-checklist.md" in body

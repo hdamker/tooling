@@ -129,5 +129,42 @@ class TestGitHubClient(unittest.TestCase):
         fn.assert_called_once()
         mock_sleep.assert_not_called()
 
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_get_tag_sha_success(self, mock_run_gh):
+        mock_run_gh.return_value = "abc123def456\n"
+        sha = self.client.get_tag_sha("r4.1")
+        self.assertEqual(sha, "abc123def456")
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_get_tag_sha_not_found(self, mock_run_gh):
+        mock_run_gh.side_effect = GitHubClientError("404 Not Found")
+        sha = self.client.get_tag_sha("missing")
+        self.assertIsNone(sha)
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_get_tag_sha_empty_response(self, mock_run_gh):
+        mock_run_gh.return_value = "\n"
+        sha = self.client.get_tag_sha("r4.1")
+        self.assertIsNone(sha)
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_create_branch_at_sha_success(self, mock_run_gh):
+        mock_run_gh.return_value = '{"ref": "refs/heads/release/r4.1"}'
+        result = self.client.create_branch_at_sha("release/r4.1", "abc123")
+        self.assertTrue(result)
+        mock_run_gh.assert_called_once()
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_create_branch_at_sha_already_exists(self, mock_run_gh):
+        mock_run_gh.side_effect = GitHubClientError("422: Reference already exists")
+        result = self.client.create_branch_at_sha("release/r4.1", "abc123")
+        self.assertFalse(result)
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_create_branch_at_sha_api_error(self, mock_run_gh):
+        mock_run_gh.side_effect = GitHubClientError("500: Internal server error")
+        with self.assertRaises(GitHubClientError):
+            self.client.create_branch_at_sha("release/r4.1", "abc123")
+
 if __name__ == '__main__':
     unittest.main()

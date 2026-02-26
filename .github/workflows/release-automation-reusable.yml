@@ -1098,6 +1098,7 @@ jobs:
       success: ${{ steps.publish.outputs.success }}
       release_url: ${{ steps.publish.outputs.release_url }}
       reference_tag: ${{ steps.publish.outputs.reference_tag }}
+      pointer_branch: ${{ steps.publish.outputs.pointer_branch }}
       error_message: ${{ steps.publish.outputs.error_message }}
     steps:
       - name: Checkout tooling
@@ -1175,6 +1176,7 @@ jobs:
           warnings = []
           release_url = ''
           reference_tag = ''
+          pointer_branch = ''
 
           # Step 1: Publish the release (CRITICAL)
           print('Step 1: Publishing release...')
@@ -1184,10 +1186,12 @@ jobs:
               set_output('error_message', publish_result.error_message or 'Unknown error')
               set_output('release_url', '')
               set_output('reference_tag', '')
+              set_output('pointer_branch', '')
               print(f'::error::Publication failed: {publish_result.error_message}')
               sys.exit(0)  # Exit cleanly to allow post-result to run
 
           release_url = publish_result.release_url or ''
+          is_prerelease = publish_result.is_prerelease
           print(f'Release published: {release_url}')
 
           # Step 2: Create reference tag (non-critical)
@@ -1200,8 +1204,18 @@ jobs:
               warnings.append('Failed to create reference tag')
               print('::warning::Failed to create reference tag')
 
-          # Step 3: Cleanup branches (non-critical)
-          print('Step 3: Cleaning up branches...')
+          # Step 3: Create pointer branch (non-critical)
+          print('Step 3: Creating pointer branch...')
+          ptr_branch = publisher.create_pointer_branch(release_tag, is_prerelease)
+          if ptr_branch:
+              pointer_branch = ptr_branch
+              print(f'Pointer branch created: {pointer_branch}')
+          else:
+              warnings.append('Failed to create pointer branch')
+              print('::warning::Failed to create pointer branch')
+
+          # Step 4: Cleanup branches (non-critical)
+          print('Step 4: Cleaning up branches...')
           cleanup_result = publisher.cleanup_branches(snapshot_branch, release_review_branch)
           for op, status in cleanup_result.items():
               if status == 'error':
@@ -1214,6 +1228,7 @@ jobs:
           set_output('success', 'true')
           set_output('release_url', release_url)
           set_output('reference_tag', reference_tag)
+          set_output('pointer_branch', pointer_branch)
           if warnings:
               set_output('error_message', '; '.join(warnings))
           else:

@@ -23,6 +23,8 @@ class PublishResult:
     release_url: Optional[str] = None
     release_id: Optional[int] = None
     reference_tag: Optional[str] = None
+    pointer_branch: Optional[str] = None
+    is_prerelease: bool = False
     error_message: Optional[str] = None
 
 
@@ -194,7 +196,8 @@ class ReleasePublisher:
         return PublishResult(
             success=True,
             release_url=updated.get("html_url"),
-            release_id=release_id
+            release_id=release_id,
+            is_prerelease=is_prerelease
         )
 
     def create_reference_tag(
@@ -232,6 +235,51 @@ class ReleasePublisher:
                 logger.warning(f"Reference tag {tag_name} already exists (race condition)")
                 return tag_name
             logger.error(f"Failed to create reference tag {tag_name}: {e}")
+            return None
+
+    def create_pointer_branch(
+        self,
+        release_tag: str,
+        is_prerelease: bool
+    ) -> Optional[str]:
+        """Create a pointer branch at the release tag commit.
+
+        Public releases get release/rX.Y, pre-releases get pre-release/rX.Y.
+        The pointer branch ensures the tag commit remains reachable from a
+        branch, preventing GitHub's "commit does not belong to any branch"
+        warning.
+
+        Args:
+            release_tag: Release tag (e.g., "r4.1")
+            is_prerelease: Whether this is a pre-release
+
+        Returns:
+            Created branch name or None on error
+        """
+        prefix = "pre-release" if is_prerelease else "release"
+        branch_name = f"{prefix}/{release_tag}"
+
+        # Resolve tag to commit SHA
+        tag_sha = self.gh.get_tag_sha(release_tag)
+        if not tag_sha:
+            logger.error(f"Cannot resolve tag {release_tag} to SHA")
+            return None
+
+        try:
+            created = self.gh.create_branch_at_sha(branch_name, tag_sha)
+            if created:
+                logger.info(f"Created pointer branch {branch_name} at {tag_sha[:8]}")
+            else:
+                logger.warning(f"Pointer branch {branch_name} already exists")
+            return branch_name
+        except GitHubClientError as e:
+            error_msg = str(e).lower()
+            if "422" in error_msg or "reference already exists" in error_msg:
+                logger.warning(
+                    f"Pointer branch {branch_name} already exists (race condition)"
+                )
+                return branch_name
+            logger.error(f"Failed to create pointer branch {branch_name}: {e}")
             return None
 
     def cleanup_branches(

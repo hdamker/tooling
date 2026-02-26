@@ -447,3 +447,92 @@ class TestCleanupBranches:
 
         assert result["snapshot_deleted"] == "not_found"
         assert result["review_renamed"] == "not_found"
+
+
+class TestCreatePointerBranch:
+    """Tests for create_pointer_branch method."""
+
+    def test_public_release_creates_release_branch(self, publisher, mock_github_client):
+        """Public release creates release/rX.Y branch."""
+        mock_github_client.get_tag_sha.return_value = "abc123def456"
+        mock_github_client.create_branch_at_sha.return_value = True
+
+        result = publisher.create_pointer_branch("r4.1", is_prerelease=False)
+
+        assert result == "release/r4.1"
+        mock_github_client.get_tag_sha.assert_called_once_with("r4.1")
+        mock_github_client.create_branch_at_sha.assert_called_once_with(
+            "release/r4.1", "abc123def456"
+        )
+
+    def test_prerelease_creates_pre_release_branch(self, publisher, mock_github_client):
+        """Pre-release creates pre-release/rX.Y branch."""
+        mock_github_client.get_tag_sha.return_value = "abc123def456"
+        mock_github_client.create_branch_at_sha.return_value = True
+
+        result = publisher.create_pointer_branch("r4.1", is_prerelease=True)
+
+        assert result == "pre-release/r4.1"
+        mock_github_client.create_branch_at_sha.assert_called_once_with(
+            "pre-release/r4.1", "abc123def456"
+        )
+
+    def test_tag_sha_not_found(self, publisher, mock_github_client):
+        """Tag cannot be resolved to SHA - returns None."""
+        mock_github_client.get_tag_sha.return_value = None
+
+        result = publisher.create_pointer_branch("r4.1", is_prerelease=False)
+
+        assert result is None
+        mock_github_client.create_branch_at_sha.assert_not_called()
+
+    def test_branch_already_exists(self, publisher, mock_github_client):
+        """Branch already exists - returns branch name (idempotent)."""
+        mock_github_client.get_tag_sha.return_value = "abc123def456"
+        mock_github_client.create_branch_at_sha.return_value = False
+
+        result = publisher.create_pointer_branch("r4.1", is_prerelease=False)
+
+        assert result == "release/r4.1"
+
+    def test_race_condition_422(self, publisher, mock_github_client):
+        """Branch created between check and create - handles gracefully."""
+        mock_github_client.get_tag_sha.return_value = "abc123def456"
+        mock_github_client.create_branch_at_sha.side_effect = GitHubClientError(
+            "422: Reference already exists"
+        )
+
+        result = publisher.create_pointer_branch("r4.1", is_prerelease=False)
+
+        assert result == "release/r4.1"
+
+    def test_api_error(self, publisher, mock_github_client):
+        """API error - returns None."""
+        mock_github_client.get_tag_sha.return_value = "abc123def456"
+        mock_github_client.create_branch_at_sha.side_effect = GitHubClientError(
+            "500: Internal server error"
+        )
+
+        result = publisher.create_pointer_branch("r4.1", is_prerelease=False)
+
+        assert result is None
+
+
+class TestPublishResultDataclass:
+    """Tests for PublishResult dataclass fields."""
+
+    def test_default_values(self):
+        """Default values for new fields."""
+        result = PublishResult(success=True)
+        assert result.pointer_branch is None
+        assert result.is_prerelease is False
+
+    def test_prerelease_flag(self):
+        """is_prerelease can be set."""
+        result = PublishResult(success=True, is_prerelease=True)
+        assert result.is_prerelease is True
+
+    def test_pointer_branch_field(self):
+        """pointer_branch can be set."""
+        result = PublishResult(success=True, pointer_branch="release/r4.1")
+        assert result.pointer_branch == "release/r4.1"

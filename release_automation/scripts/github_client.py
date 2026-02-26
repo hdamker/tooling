@@ -126,6 +126,25 @@ class GitHubClient:
         except GitHubClientError:
             return False
 
+    def get_tag_sha(self, tag: str) -> Optional[str]:
+        """Get the commit SHA that a tag points to.
+
+        Args:
+            tag: Tag name (e.g., "r4.1")
+
+        Returns:
+            Commit SHA or None if tag doesn't exist
+        """
+        try:
+            output = self._run_gh([
+                "api",
+                f"repos/{self.repo}/git/refs/tags/{tag}",
+                "--jq", ".object.sha"
+            ])
+            return output.strip() if output.strip() else None
+        except GitHubClientError:
+            return None
+
     def list_branches(self, pattern: Optional[str] = None) -> List[Branch]:
         """
         List branches in the repository, optionally filtered by pattern.
@@ -974,6 +993,34 @@ class GitHubClient:
         ])
 
         return True
+
+    def create_branch_at_sha(self, branch_name: str, sha: str) -> bool:
+        """Create a branch at a specific commit SHA.
+
+        Args:
+            branch_name: Branch name (without refs/heads/)
+            sha: Target commit SHA
+
+        Returns:
+            True if created, False if branch already exists
+
+        Raises:
+            GitHubClientError: If creation fails for other reasons
+        """
+        try:
+            self._run_gh([
+                "api",
+                f"repos/{self.repo}/git/refs",
+                "-X", "POST",
+                "-f", f"ref=refs/heads/{branch_name}",
+                "-f", f"sha={sha}"
+            ])
+            return True
+        except GitHubClientError as e:
+            error_msg = str(e).lower()
+            if "422" in error_msg or "reference already exists" in error_msg:
+                return False
+            raise
 
     def close_issue(
         self,
