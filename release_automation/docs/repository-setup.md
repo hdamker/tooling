@@ -190,6 +190,106 @@ Both groups must approve before the PR can be merged.
 
 </details>
 
+### 4. Release Pointer Branch Protection
+
+After publication, the automation creates a pointer branch at the release tag commit (`release/rX.Y` for public releases, `pre-release/rX.Y` for pre-releases). This prevents GitHub's "commit does not belong to any branch" warning when browsing the tag tree view.
+
+Two rulesets enforce immutability (no commits, no force pushes). They differ only in deletion policy:
+
+**`release-pointer-protection`** — public release pointers are fully protected:
+
+| Property | Value |
+|----------|-------|
+| **Name** | `release-pointer-protection` |
+| **Enforcement** | Active |
+| **Target** | Include branches matching: `release/**` |
+| **Bypass actors** | `camara-release-automation` GitHub App (always), Organization admins (always) |
+
+Rules: restrict creations, restrict deletions, restrict updates, block force pushes. No PR review rules.
+
+**`pre-release-pointer-protection`** — pre-release pointers are immutable but deletable:
+
+| Property | Value |
+|----------|-------|
+| **Name** | `pre-release-pointer-protection` |
+| **Enforcement** | Active |
+| **Target** | Include branches matching: `pre-release/**` |
+| **Bypass actors** | `camara-release-automation` GitHub App (always), Organization admins (always) |
+
+Rules: restrict creations, restrict updates, block force pushes. **No deletion rule** — codeowners can delete older pre-release pointers to manage the branch list as pre-releases accumulate during a release cycle.
+
+<details>
+<summary>GitHub API payloads</summary>
+
+```json
+{
+  "name": "release-pointer-protection",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/release/**"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    { "type": "creation" },
+    { "type": "deletion" },
+    { "type": "update" },
+    { "type": "non_fast_forward" }
+  ],
+  "bypass_actors": [
+    {
+      "actor_id": null,
+      "actor_type": "OrganizationAdmin",
+      "bypass_mode": "always"
+    },
+    {
+      "actor_id": 2865881,
+      "actor_type": "Integration",
+      "bypass_mode": "always"
+    }
+  ]
+}
+```
+
+```json
+{
+  "name": "pre-release-pointer-protection",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/pre-release/**"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    { "type": "creation" },
+    { "type": "update" },
+    { "type": "non_fast_forward" }
+  ],
+  "bypass_actors": [
+    {
+      "actor_id": null,
+      "actor_type": "OrganizationAdmin",
+      "bypass_mode": "always"
+    },
+    {
+      "actor_id": 2865881,
+      "actor_type": "Integration",
+      "bypass_mode": "always"
+    }
+  ]
+}
+```
+
+Notes:
+- `actor_id: 2865881` is the `camara-release-automation` GitHub App ID
+- The `update` rule prevents any commits to pointer branches — they must stay at the tag commit
+
+</details>
+
 ### Applying rulesets programmatically
 
 The GitHub Rulesets API is **not idempotent** — calling `POST` twice creates duplicate rulesets. Use the following pattern for safe re-application:
