@@ -50,6 +50,7 @@ class TestBotContext:
         assert ctx.sync_pr_url == ""
         assert ctx.src_commit_sha_short == ""
         assert ctx.confirm_tag == ""
+        assert ctx.publish_warnings == ""
 
         # List field defaults to empty list
         assert ctx.apis == []
@@ -66,6 +67,8 @@ class TestBotContext:
         assert ctx.trigger_release_plan_change is False
         assert ctx.has_meta_release is False
         assert ctx.has_reason is False
+        assert ctx.has_sync_pr is False
+        assert ctx.has_publish_warnings is False
 
     def test_derive_flags_missing_file(self):
         """error_type 'missing_file' sets is_missing_file flag."""
@@ -174,6 +177,7 @@ class TestBotContext:
             "release_url", "reference_tag", "reference_tag_url",
             "sync_pr_number", "sync_pr_url",
             "src_commit_sha_short", "confirm_tag",
+            "publish_warnings", "has_sync_pr", "has_publish_warnings",
         }
         assert set(d.keys()) == expected_keys
 
@@ -252,6 +256,7 @@ class TestBuildContext:
             "release_url", "reference_tag", "reference_tag_url",
             "sync_pr_number", "sync_pr_url",
             "src_commit_sha_short", "confirm_tag",
+            "publish_warnings", "has_sync_pr", "has_publish_warnings",
         }
         assert set(result.keys()) == expected_keys
 
@@ -389,6 +394,30 @@ class TestWP49Fields:
         ctx = BotContext(reason="")
         ctx.derive_flags()
         assert ctx.has_reason is False
+
+    def test_has_sync_pr_true(self):
+        """has_sync_pr is True when sync_pr_url is non-empty."""
+        ctx = BotContext(sync_pr_url="https://github.com/org/repo/pull/99")
+        ctx.derive_flags()
+        assert ctx.has_sync_pr is True
+
+    def test_has_sync_pr_false(self):
+        """has_sync_pr is False when sync_pr_url is empty."""
+        ctx = BotContext(sync_pr_url="")
+        ctx.derive_flags()
+        assert ctx.has_sync_pr is False
+
+    def test_has_publish_warnings_true(self):
+        """has_publish_warnings is True when publish_warnings is non-empty."""
+        ctx = BotContext(publish_warnings="Failed to create reference tag")
+        ctx.derive_flags()
+        assert ctx.has_publish_warnings is True
+
+    def test_has_publish_warnings_false(self):
+        """has_publish_warnings is False when publish_warnings is empty."""
+        ctx = BotContext(publish_warnings="")
+        ctx.derive_flags()
+        assert ctx.has_publish_warnings is False
 
     def test_short_type_alpha(self):
         """short_type derived from pre-release-alpha."""

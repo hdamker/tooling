@@ -89,6 +89,11 @@ class BotContext:
     sync_pr_url: str = ""
     src_commit_sha_short: str = ""  # First 7 chars of src_commit_sha
     confirm_tag: str = ""  # Tag from --confirm argument
+    publish_warnings: str = ""  # Semicolon-separated warnings from non-critical post-publish steps
+
+    # Derived publication flags (set by derive_flags())
+    has_sync_pr: bool = False
+    has_publish_warnings: bool = False
 
     def derive_flags(self) -> None:
         """Compute boolean flags and derived fields from string fields."""
@@ -103,6 +108,8 @@ class BotContext:
         self.trigger_release_plan_change = self.trigger_type == "release_plan_change"
         self.has_meta_release = bool(self.meta_release)
         self.has_reason = bool(self.reason)
+        self.has_sync_pr = bool(self.sync_pr_url)
+        self.has_publish_warnings = bool(self.publish_warnings)
         if not self.short_type:
             self.short_type = config.SHORT_TYPE_MAP.get(
                 self.release_type, self.release_type
@@ -177,4 +184,7 @@ class BotContext:
             "sync_pr_url": self.sync_pr_url,
             "src_commit_sha_short": self.src_commit_sha_short,
             "confirm_tag": self.confirm_tag,
+            "publish_warnings": self.publish_warnings,
+            "has_sync_pr": self.has_sync_pr,
+            "has_publish_warnings": self.has_publish_warnings,
         }

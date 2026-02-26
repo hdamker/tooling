@@ -2144,6 +2144,31 @@ jobs:
               --arg sync_pr_number "${{ needs.create-sync-pr.outputs.sync_pr_number }}" \
               --arg src_commit_sha_short "$SRC_SHA_SHORT" \
               '. + {release_url: $release_url, reference_tag: $reference_tag, reference_tag_url: $reference_tag_url, sync_pr_url: $sync_pr_url, sync_pr_number: $sync_pr_number, src_commit_sha_short: $src_commit_sha_short}')
+
+            # Collect post-publish warnings (ref tag, pointer branch, cleanup, sync PR)
+            PUBLISH_WARNINGS=""
+
+            # Warnings from publish job (non-critical steps 2-4)
+            PUBLISH_ERR="${{ needs.publish-release.outputs.error_message }}"
+            if [ -n "$PUBLISH_ERR" ]; then
+              PUBLISH_WARNINGS="$PUBLISH_ERR"
+            fi
+
+            # Warning for sync PR failure
+            if [ "${{ needs.create-sync-pr.outputs.success }}" != "true" ]; then
+              SYNC_WARNING="Post-release sync PR failed — create manually"
+              if [ -n "$PUBLISH_WARNINGS" ]; then
+                PUBLISH_WARNINGS="$PUBLISH_WARNINGS; $SYNC_WARNING"
+              else
+                PUBLISH_WARNINGS="$SYNC_WARNING"
+              fi
+            fi
+
+            if [ -n "$PUBLISH_WARNINGS" ]; then
+              CONTEXT=$(echo "$CONTEXT" | jq \
+                --arg pw "$PUBLISH_WARNINGS" \
+                '. + {publish_warnings: $pw}')
+            fi
           fi
 
           # Add error message for command failure cases
@@ -2195,6 +2220,8 @@ jobs:
           RELEASE_URL: ${{ needs.publish-release.outputs.release_url }}
           REFERENCE_TAG: ${{ needs.publish-release.outputs.reference_tag }}
           SYNC_PR_URL: ${{ needs.create-sync-pr.outputs.sync_pr_url }}
+          PUBLISH_WARNINGS: ${{ needs.publish-release.outputs.error_message }}
+          SYNC_PR_SUCCESS: ${{ needs.create-sync-pr.outputs.success }}
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
@@ -2204,6 +2231,8 @@ jobs:
             const releaseUrl = process.env.RELEASE_URL;
             const referenceTag = process.env.REFERENCE_TAG;
             const syncPrUrl = process.env.SYNC_PR_URL;
+            const publishWarnings = process.env.PUBLISH_WARNINGS;
+            const syncPrSuccess = process.env.SYNC_PR_SUCCESS;
             const repoUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}`;
 
             console.log(`Closing release issue #${issueNumber} after success message`);
@@ -2226,6 +2255,18 @@ jobs:
               stateLines.push(`📌 **Reference tag:** [\`${referenceTag}\`](${repoUrl}/tree/${referenceTag})`);
               if (syncPrUrl) {
                 stateLines.push(`🔄 **Sync PR:** [View PR](${syncPrUrl})`);
+              }
+
+              // Collect warnings from non-critical post-publish steps
+              let warnings = [];
+              if (publishWarnings) {
+                warnings.push(publishWarnings);
+              }
+              if (syncPrSuccess !== 'true') {
+                warnings.push('Post-release sync PR failed — create manually');
+              }
+              if (warnings.length > 0) {
+                stateLines.push(`⚠️ **Warnings:** ${warnings.join('; ')}`);
               }
               const stateContent = stateLines.join('\n');
 

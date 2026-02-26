@@ -478,7 +478,7 @@ class TestPublicationTemplates:
         assert "closed automatically" in result
 
     def test_release_published_template_without_sync_pr(self, bot_responder):
-        """release_published template renders without sync PR."""
+        """release_published template renders without sync PR — no broken link."""
         from release_automation.scripts.context_builder import build_context
 
         context = build_context(
@@ -490,8 +490,72 @@ class TestPublicationTemplates:
         )
         result = bot_responder.render("release_published", context)
         assert "Release published" in result
-        # sync_pr_number is empty but always rendered in new template
+        # Sync PR section should NOT render when no sync PR
+        assert "codeowner merge" not in result
+        assert "[#]" not in result  # No broken link
+
+    def test_release_published_template_with_warnings(self, bot_responder):
+        """release_published template shows warning section when warnings exist."""
+        from release_automation.scripts.context_builder import build_context
+
+        context = build_context(
+            release_tag="r4.1",
+            state="published",
+            release_type="public-release",
+            release_url="https://github.com/org/repo/releases/tag/r4.1",
+            sync_pr_number="99",
+            sync_pr_url="https://github.com/org/repo/pull/99",
+            publish_warnings="Failed to create reference tag; Failed to create pointer branch",
+            workflow_run_url="https://github.com/org/repo/actions/runs/12345",
+            apis=[],
+        )
+        result = bot_responder.render("release_published", context)
+        assert "Release published" in result
+        assert "Post-release warnings" in result
+        assert "Failed to create reference tag" in result
+        assert "Failed to create pointer branch" in result
+        assert "view log" in result
+        # Sync PR should still render
+        assert "pull/99" in result
         assert "codeowner merge" in result
+
+    def test_release_published_template_sync_pr_failure_warning(self, bot_responder):
+        """release_published shows warning when sync PR failed (no sync PR link)."""
+        from release_automation.scripts.context_builder import build_context
+
+        context = build_context(
+            release_tag="r4.1",
+            state="published",
+            release_type="public-release",
+            release_url="https://github.com/org/repo/releases/tag/r4.1",
+            publish_warnings="Post-release sync PR failed — create manually",
+            workflow_run_url="https://github.com/org/repo/actions/runs/12345",
+            apis=[],
+        )
+        result = bot_responder.render("release_published", context)
+        assert "Release published" in result
+        # No sync PR link
+        assert "codeowner merge" not in result
+        # Warning visible
+        assert "Post-release warnings" in result
+        assert "sync PR failed" in result
+
+    def test_release_published_template_no_warnings(self, bot_responder):
+        """release_published template hides warning section when no warnings."""
+        from release_automation.scripts.context_builder import build_context
+
+        context = build_context(
+            release_tag="r4.1",
+            state="published",
+            release_type="public-release",
+            release_url="https://github.com/org/repo/releases/tag/r4.1",
+            sync_pr_number="99",
+            sync_pr_url="https://github.com/org/repo/pull/99",
+            apis=[],
+        )
+        result = bot_responder.render("release_published", context)
+        assert "Release published" in result
+        assert "Post-release warnings" not in result
 
     def test_publish_failed_template(self, bot_responder):
         """publish_failed template renders with error message."""
