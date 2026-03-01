@@ -165,7 +165,20 @@ class TestApiSectionFormatting:
         assert "redocly.github.io/redoc" in result
         assert "camaraproject.github.io/swagger-ui" in result
 
-    def test_format_api_section_uses_api_name_as_fallback(self):
+    def test_format_api_section_uses_api_name_not_title(self):
+        """Heading must use kebab-case api_name, not the OpenAPI info.title."""
+        api = {
+            "api_name": "quality-on-demand",
+            "api_version": "v1.0.0",
+            "api_title": "CAMARA Quality On Demand",
+            "api_file_name": "quality-on-demand",
+        }
+        result = ChangelogGenerator.format_api_section(api, "r1.1", "TestRepo")
+        assert "## quality-on-demand v1.0.0" in result
+        assert "**quality-on-demand v1.0.0 is ...**" in result
+        assert "CAMARA" not in result
+
+    def test_format_api_section_without_title(self):
         api = {
             "api_name": "fallback-api",
             "api_version": "v1.0.0",

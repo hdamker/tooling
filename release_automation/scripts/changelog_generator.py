@@ -412,7 +412,7 @@ class ChangelogGenerator:
         description, documentation links, and change category stubs.
 
         Args:
-            api: Dict with api_name, api_version, api_title, api_file_name
+            api: Dict with api_name, api_version, api_file_name
             release_tag: For URL construction
             repo_name: For URL construction
             org: GitHub organization
@@ -420,7 +420,7 @@ class ChangelogGenerator:
         Returns:
             Formatted markdown section for this API
         """
-        title = api.get("api_title", api.get("api_name", ""))
+        title = api.get("api_name", "")
         version = api.get("api_version", "")
         file_name = api.get("api_file_name", api.get("api_name", ""))
         yaml_path = f"code/API_definitions/{file_name}.yaml"
