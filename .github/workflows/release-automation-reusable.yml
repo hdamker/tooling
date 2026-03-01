@@ -1951,6 +1951,7 @@ jobs:
       - name: Post Config Drift Warning
         if: |
           needs.check-trigger.outputs.trigger_type == 'release_plan_change' &&
+          needs.derive-state.outputs.release_issue_number != '' &&
           (needs.derive-state.outputs.state == 'snapshot-active' ||
            needs.derive-state.outputs.state == 'draft-ready')
         uses: ./_tooling/shared-actions/post-bot-comment
