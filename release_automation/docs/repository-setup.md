@@ -1,6 +1,6 @@
 # Repository Setup for Release Automation
 
-**Last Updated**: 2026-02-18
+**Last Updated**: 2026-03-01
 
 ## Overview
 
@@ -52,7 +52,7 @@ No ruleset is needed for `release-review/**` branches — codeowners push review
 | **Name** | `release-snapshot-protection` |
 | **Enforcement** | Active |
 | **Target** | Include branches matching: `release-snapshot/**` |
-| **Bypass actors** | `camara-release-automation` GitHub App (always) |
+| **Bypass actors** | `camara-release-automation` GitHub App (always), Organization admins (always) |
 
 **Branch protection rules:**
 - Restrict creations — only bypass actors may create snapshot branches
@@ -346,18 +346,19 @@ Minimum required fields:
 
 ```yaml
 repository:
+  release_track: meta-release          # or: independent
+  meta_release: Sync26                 # required when release_track is meta-release
   target_release_tag: r1.1
   target_release_type: pre-release-rc  # or: pre-release-alpha, public-release, none
-  release_track: meta-release           # independent or meta-release
-  meta_release: Sync26
-
-apis:
-  - api_name: quality-on-demand
-    api_version: 0.11.0
 
 dependencies:
-  commonalities: "0.5"                 # Commonalities version
-  identity-and-consent-management: "0.3"  # ICM version (if applicable)
+  commonalities_release: r4.1
+  identity_consent_management_release: r4.1
+
+apis:
+  - api_name: release-test
+    target_api_version: 1.0.0
+    target_api_status: rc              # or: draft, alpha, public
 ```
 
 Valid `target_release_type` values: `pre-release-alpha`, `pre-release-rc`, `public-release`, `maintenance-release`, `none`
