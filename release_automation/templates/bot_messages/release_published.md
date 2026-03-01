@@ -1,5 +1,5 @@
 **🚀 Release published — State: `published`**
-Release published. This issue will be closed automatically.
+Release published.{{#has_sync_pr}} This issue will be closed automatically.{{/has_sync_pr}}{{^has_sync_pr}} This issue remains open — manual follow-up required.{{/has_sync_pr}}
 **Release:** [`{{release_tag}}`]({{release_url}}){{#has_sync_pr}} · Post-release sync PR: [#{{sync_pr_number}}]({{sync_pr_url}}) (requires codeowner merge){{/has_sync_pr}}
 {{#has_publish_warnings}}
 ⚠️ **Post-release warnings:** {{publish_warnings}} ([view log]({{workflow_run_url}}))

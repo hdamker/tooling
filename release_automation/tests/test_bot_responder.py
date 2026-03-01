@@ -528,7 +528,7 @@ class TestPublicationTemplates:
             state="published",
             release_type="public-release",
             release_url="https://github.com/org/repo/releases/tag/r4.1",
-            publish_warnings="Post-release sync PR failed — create manually",
+            publish_warnings="Post-release sync PR creation failed — create manually",
             workflow_run_url="https://github.com/org/repo/actions/runs/12345",
             apis=[],
         )
@@ -538,7 +538,30 @@ class TestPublicationTemplates:
         assert "codeowner merge" not in result
         # Warning visible
         assert "Post-release warnings" in result
-        assert "sync PR failed" in result
+        assert "sync PR" in result
+        # Issue stays open (IMP-077)
+        assert "remains open" in result
+        assert "closed automatically" not in result
+
+    def test_release_published_template_issue_stays_open_no_changes(self, bot_responder):
+        """release_published shows 'remains open' when sync produced no changes."""
+        from release_automation.scripts.context_builder import build_context
+
+        context = build_context(
+            release_tag="r4.1",
+            state="published",
+            release_type="public-release",
+            release_url="https://github.com/org/repo/releases/tag/r4.1",
+            publish_warnings="Post-release sync skipped (no changes detected) — verify README/CHANGELOG",
+            workflow_run_url="https://github.com/org/repo/actions/runs/12345",
+            apis=[],
+        )
+        result = bot_responder.render("release_published", context)
+        assert "Release published" in result
+        assert "remains open" in result
+        assert "closed automatically" not in result
+        assert "Post-release warnings" in result
+        assert "no changes detected" in result
 
     def test_release_published_template_no_warnings(self, bot_responder):
         """release_published template hides warning section when no warnings."""
