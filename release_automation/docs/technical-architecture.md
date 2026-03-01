@@ -503,7 +503,7 @@ Creates a sync PR to main after release publication.
 - Release-specific CHANGELOG: `CHANGELOG/CHANGELOG-rX.md` (X = cycle number from release tag)
 - README Release Information section update (between delimiters)
 
-**Branch:** `post-release/rX.Y` created from main.
+**Branch:** `tmp/sync-main/rX.Y` created from main.
 
 **Merge policy:** Human approval required (no auto-merge).
 

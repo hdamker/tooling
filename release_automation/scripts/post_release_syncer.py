@@ -62,7 +62,7 @@ class PostReleaseSyncer:
         Returns:
             SyncPRResult with PR details or error
         """
-        sync_branch = f"post-release/{release_tag}"
+        sync_branch = f"tmp/sync-main/{release_tag}"
 
         try:
             # Step 1: Create sync branch from main

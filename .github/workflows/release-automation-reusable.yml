@@ -1515,7 +1515,7 @@ jobs:
             exit 0
           fi
 
-          SYNC_BRANCH="post-release/${RELEASE_TAG}"
+          SYNC_BRANCH="tmp/sync-main/${RELEASE_TAG}"
 
           # Create branch, stage, commit, push
           git checkout -b "$SYNC_BRANCH"

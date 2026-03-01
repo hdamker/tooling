@@ -117,7 +117,7 @@ class TestSyncChangelog:
 
         result = syncer._sync_changelog(
             "release-snapshot/r4.1-abc123",
-            "post-release/r4.1",
+            "tmp/sync-main/r4.1",
             "r4.1"
         )
 
@@ -125,7 +125,7 @@ class TestSyncChangelog:
         mock_github_client.update_file.assert_called_once()
         call_kwargs = mock_github_client.update_file.call_args.kwargs
         assert call_kwargs["path"] == "CHANGELOG/CHANGELOG-r4.md"
-        assert call_kwargs["branch"] == "post-release/r4.1"
+        assert call_kwargs["branch"] == "tmp/sync-main/r4.1"
 
     def test_sync_changelog_not_found(self, syncer, mock_github_client):
         """CHANGELOG not found - returns False."""
@@ -133,7 +133,7 @@ class TestSyncChangelog:
 
         result = syncer._sync_changelog(
             "release-snapshot/r4.1-abc123",
-            "post-release/r4.1",
+            "tmp/sync-main/r4.1",
             "r4.1"
         )
 
@@ -147,7 +147,7 @@ class TestSyncChangelog:
 
         result = syncer._sync_changelog(
             "release-snapshot/r4.1-abc123",
-            "post-release/r4.1",
+            "tmp/sync-main/r4.1",
             "r4.1"
         )
 
@@ -157,7 +157,7 @@ class TestSyncChangelog:
         """Invalid release tag format - returns False."""
         result = syncer._sync_changelog(
             "release-snapshot/invalid-abc123",
-            "post-release/invalid",
+            "tmp/sync-main/invalid",
             "invalid"
         )
 
@@ -172,7 +172,7 @@ class TestCreatePR:
         """Successfully creates PR."""
         mock_github_client._run_gh.return_value = "https://github.com/test-org/test-repo/pull/42"
 
-        result = syncer._create_pr("r4.1", "post-release/r4.1")
+        result = syncer._create_pr("r4.1", "tmp/sync-main/r4.1")
 
         assert result is not None
         assert result["number"] == 42
@@ -183,7 +183,7 @@ class TestCreatePR:
         mock_github_client._run_gh.side_effect = GitHubClientError("PR already exists")
         mock_github_client.find_pr_for_branch.return_value = 99
 
-        result = syncer._create_pr("r4.1", "post-release/r4.1")
+        result = syncer._create_pr("r4.1", "tmp/sync-main/r4.1")
 
         assert result is not None
         assert result["number"] == 99
