@@ -1249,7 +1249,7 @@ jobs:
     outputs:
       sync_pr_url: ${{ steps.sync.outputs.sync_pr_url }}
       sync_pr_number: ${{ steps.sync.outputs.sync_pr_number }}
-      success: ${{ steps.sync.outputs.success }}
+      sync_status: ${{ steps.sync.outputs.sync_status }}
     steps:
       - name: Checkout API repo (main branch)
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -1509,7 +1509,7 @@ jobs:
           # Check if there are any changes to commit
           if [ "$README_CHANGED" != "true" ] && [ "$CHANGELOG_SYNCED" != "true" ]; then
             echo "::warning::No content changes to sync"
-            echo "success=false" >> $GITHUB_OUTPUT
+            echo "sync_status=no_changes" >> $GITHUB_OUTPUT
             echo "sync_pr_url=" >> $GITHUB_OUTPUT
             echo "sync_pr_number=" >> $GITHUB_OUTPUT
             exit 0
@@ -1522,7 +1522,7 @@ jobs:
           git add -A
           git diff --cached --quiet && {
             echo "::warning::No actual file changes detected"
-            echo "success=false" >> $GITHUB_OUTPUT
+            echo "sync_status=no_changes" >> $GITHUB_OUTPUT
             echo "sync_pr_url=" >> $GITHUB_OUTPUT
             echo "sync_pr_number=" >> $GITHUB_OUTPUT
             exit 0
@@ -1533,8 +1533,8 @@ jobs:
           git commit -m "chore: post-release sync for ${RELEASE_TAG}"
           git push origin "$SYNC_BRANCH"
 
-          # Create PR
-          PR_URL=$(gh pr create \
+          # Create PR — capture failure as sync_status=failed
+          if PR_URL=$(gh pr create \
             --title "Release Automation: Post-release sync (${RELEASE_TAG})" \
             --body "Automated post-release sync PR for ${RELEASE_TAG}.
 
@@ -1544,17 +1544,23 @@ jobs:
 
           Created by release automation workflow." \
             --head "$SYNC_BRANCH" \
-            --base main)
+            --base main); then
 
-          PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+            PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
 
-          # Add labels
-          gh pr edit "$PR_NUMBER" --add-label "post-release" --add-label "automated" 2>/dev/null || true
+            # Add labels
+            gh pr edit "$PR_NUMBER" --add-label "post-release" --add-label "automated" 2>/dev/null || true
 
-          echo "sync_pr_url=$PR_URL" >> $GITHUB_OUTPUT
-          echo "sync_pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
-          echo "success=true" >> $GITHUB_OUTPUT
-          echo "Sync PR created: $PR_URL"
+            echo "sync_pr_url=$PR_URL" >> $GITHUB_OUTPUT
+            echo "sync_pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+            echo "sync_status=created" >> $GITHUB_OUTPUT
+            echo "Sync PR created: $PR_URL"
+          else
+            echo "::error::Failed to create post-release sync PR"
+            echo "sync_status=failed" >> $GITHUB_OUTPUT
+            echo "sync_pr_url=" >> $GITHUB_OUTPUT
+            echo "sync_pr_number=" >> $GITHUB_OUTPUT
+          fi
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 5g: Handle PR merge (draft release creation)
@@ -1951,6 +1957,7 @@ jobs:
       - name: Post Config Drift Warning
         if: |
           needs.check-trigger.outputs.trigger_type == 'release_plan_change' &&
+          needs.derive-state.outputs.release_issue_number != '' &&
           (needs.derive-state.outputs.state == 'snapshot-active' ||
            needs.derive-state.outputs.state == 'draft-ready')
         uses: ./_tooling/shared-actions/post-bot-comment
@@ -2154,9 +2161,17 @@ jobs:
               PUBLISH_WARNINGS="$PUBLISH_ERR"
             fi
 
-            # Warning for sync PR failure
-            if [ "${{ needs.create-sync-pr.outputs.success }}" != "true" ]; then
-              SYNC_WARNING="Post-release sync PR failed — create manually"
+            # Warning for sync PR anomaly (differentiated by status)
+            SYNC_STATUS="${{ needs.create-sync-pr.outputs.sync_status }}"
+            SYNC_WARNING=""
+            if [ "$SYNC_STATUS" = "failed" ]; then
+              SYNC_WARNING="Post-release sync PR creation failed — create manually"
+            elif [ "$SYNC_STATUS" = "no_changes" ]; then
+              SYNC_WARNING="Post-release sync skipped (no changes detected) — verify README/CHANGELOG"
+            elif [ "$SYNC_STATUS" != "created" ]; then
+              SYNC_WARNING="Post-release sync status unknown — verify README/CHANGELOG"
+            fi
+            if [ -n "$SYNC_WARNING" ]; then
               if [ -n "$PUBLISH_WARNINGS" ]; then
                 PUBLISH_WARNINGS="$PUBLISH_WARNINGS; $SYNC_WARNING"
               else
@@ -2209,8 +2224,8 @@ jobs:
           context: ${{ steps.context.outputs.context }}
           comment_id: ${{ needs.post-interim.outputs.comment_id }}
 
-      # Close issue AFTER success message is posted (not in publish-release job)
-      - name: Close Release Issue
+      # Update issue state and conditionally close (not in publish-release job)
+      - name: Update and Close Release Issue
         if: |
           needs.publish-release.outputs.success == 'true' &&
           needs.derive-state.outputs.release_issue_number != ''
@@ -2221,7 +2236,7 @@ jobs:
           REFERENCE_TAG: ${{ needs.publish-release.outputs.reference_tag }}
           SYNC_PR_URL: ${{ needs.create-sync-pr.outputs.sync_pr_url }}
           PUBLISH_WARNINGS: ${{ needs.publish-release.outputs.error_message }}
-          SYNC_PR_SUCCESS: ${{ needs.create-sync-pr.outputs.success }}
+          SYNC_STATUS: ${{ needs.create-sync-pr.outputs.sync_status }}
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
@@ -2232,10 +2247,10 @@ jobs:
             const referenceTag = process.env.REFERENCE_TAG;
             const syncPrUrl = process.env.SYNC_PR_URL;
             const publishWarnings = process.env.PUBLISH_WARNINGS;
-            const syncPrSuccess = process.env.SYNC_PR_SUCCESS;
+            const syncStatus = process.env.SYNC_STATUS;
             const repoUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}`;
 
-            console.log(`Closing release issue #${issueNumber} after success message`);
+            console.log(`Updating release issue #${issueNumber} after publish (sync status: ${syncStatus})`);
 
             try {
               // Get current issue
@@ -2262,8 +2277,12 @@ jobs:
               if (publishWarnings) {
                 warnings.push(publishWarnings);
               }
-              if (syncPrSuccess !== 'true') {
-                warnings.push('Post-release sync PR failed — create manually');
+              if (syncStatus === 'failed') {
+                warnings.push('Post-release sync PR creation failed — create manually');
+              } else if (syncStatus === 'no_changes') {
+                warnings.push('Post-release sync skipped (no changes detected) — verify README/CHANGELOG');
+              } else if (syncStatus !== 'created') {
+                warnings.push('Post-release sync status unknown — verify README/CHANGELOG');
               }
               if (warnings.length > 0) {
                 stateLines.push(`⚠️ **Warnings:** ${warnings.join('; ')}`);
@@ -2281,8 +2300,17 @@ jobs:
                        body.substring(stateEndIdx);
               }
 
-              // Update ACTIONS section (no actions available)
-              const actionsContent = '_No actions available - release is published._';
+              // Update ACTIONS section — conditional on sync status
+              let actionsContent;
+              if (syncStatus === 'created') {
+                actionsContent = '_No actions available - release is published._';
+              } else if (syncStatus === 'failed') {
+                actionsContent = '**Manual action required:** Create post-release sync PR manually (update README and CHANGELOG on main), then close this issue.';
+              } else if (syncStatus === 'no_changes') {
+                actionsContent = '**Manual action required:** Verify README and CHANGELOG on main are correct, then close this issue.';
+              } else {
+                actionsContent = '**Manual action required:** Verify post-release sync status, then close this issue.';
+              }
               const actionsStartMarker = '<!-- BEGIN:ACTIONS -->';
               const actionsEndMarker = '<!-- END:ACTIONS -->';
               const actionsStartIdx = body.indexOf(actionsStartMarker);
@@ -2321,16 +2349,19 @@ jobs:
                 labels: ['release-state:published']
               });
 
-              // Close the issue
-              await github.rest.issues.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber,
-                state: 'closed',
-                state_reason: 'completed'
-              });
-
-              console.log(`Issue #${issueNumber} closed successfully`);
+              // Close the issue only if sync PR was created successfully
+              if (syncStatus === 'created') {
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  state: 'closed',
+                  state_reason: 'completed'
+                });
+                console.log(`Issue #${issueNumber} closed successfully`);
+              } else {
+                console.log(`Issue #${issueNumber} left open — sync status: ${syncStatus}`);
+              }
             } catch (error) {
               console.log(`::warning::Failed to close issue: ${error.message}`);
               // Non-fatal - the release was already published
