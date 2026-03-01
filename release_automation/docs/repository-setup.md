@@ -112,6 +112,11 @@ The dual review gate ensures both API codeowners and Release Management reviewer
   ],
   "bypass_actors": [
     {
+      "actor_id": null,
+      "actor_type": "OrganizationAdmin",
+      "bypass_mode": "always"
+    },
+    {
       "actor_id": 2865881,
       "actor_type": "Integration",
       "bypass_mode": "always"
