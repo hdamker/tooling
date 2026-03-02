@@ -218,7 +218,7 @@ jobs:
 
       - name: Archive reports
         if: (success() || failure()) && steps.ml.outcome != 'skipped'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: MegaLinter reports
           include-hidden-files: "true"
