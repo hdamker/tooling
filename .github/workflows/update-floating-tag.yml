@@ -1,0 +1,104 @@
+# =========================================================================================
+# CAMARA Project - Update Floating Tag
+#
+# Moves a major-version floating tag (e.g., v0) to a specified release tag.
+# The floating tag is used by caller workflows in API repositories to reference
+# the latest stable version of reusable workflows and shared actions.
+#
+# USAGE:
+# - Trigger manually via workflow_dispatch after publishing a new release.
+# - Provide the release tag (e.g., v0.2.2) as input.
+# - The workflow validates the release before moving the floating tag.
+# - Use "allow_non_latest" to roll back to a previous release if needed.
+#
+# VALIDATION CHECKS:
+# 1. Tag format matches vMAJOR.MINOR.PATCH
+# 2. Tag has an associated GitHub Release (implicitly excludes drafts)
+# 3. Release is not a prerelease
+# 4. Release is marked as "latest" (unless allow_non_latest is set)
+# 5. Tagged commit is on the main branch
+#
+# SEE ALSO: https://github.com/camaraproject/tooling/issues/53
+# =========================================================================================
+
+name: Update floating tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_tag:
+        description: 'Release tag to point the floating tag to (e.g., v0.2.2)'
+        required: true
+        type: string
+      allow_non_latest:
+        description: 'Allow moving to a non-latest release (for rollback)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  update-floating-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release and update floating tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TARGET_TAG="${{ inputs.target_tag }}"
+          ALLOW_NON_LATEST="${{ inputs.allow_non_latest }}"
+
+          # Validate tag format
+          if ! [[ "$TARGET_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid tag format: $TARGET_TAG (expected vMAJOR.MINOR.PATCH)"
+            exit 1
+          fi
+
+          MAJOR=$(echo "$TARGET_TAG" | cut -d. -f1)
+
+          # Verify tag exists and has a published release
+          # (draft releases have no tag, so this implicitly excludes them)
+          RELEASE=$(gh api "repos/${{ github.repository }}/releases/tags/$TARGET_TAG" 2>/dev/null) || {
+            echo "::error::No release found for tag $TARGET_TAG"
+            exit 1
+          }
+
+          IS_PRERELEASE=$(echo "$RELEASE" | jq -r '.prerelease')
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            echo "::error::Release $TARGET_TAG is a prerelease"
+            exit 1
+          fi
+
+          # Verify release is "latest" (unless override is set)
+          if [ "$ALLOW_NON_LATEST" != "true" ]; then
+            LATEST_TAG=$(gh api "repos/${{ github.repository }}/releases/latest" --jq '.tag_name')
+            if [ "$TARGET_TAG" != "$LATEST_TAG" ]; then
+              echo "::error::Release $TARGET_TAG is not the latest release (latest: $LATEST_TAG). Use 'allow_non_latest' to override for rollback."
+              exit 1
+            fi
+          fi
+
+          # Verify tagged commit is on main
+          TAG_SHA=$(git rev-list -n1 "$TARGET_TAG")
+          if ! git merge-base --is-ancestor "$TAG_SHA" origin/main; then
+            echo "::error::Tag $TARGET_TAG ($TAG_SHA) is not on the main branch"
+            exit 1
+          fi
+
+          # Show current state
+          CURRENT_SHA=$(git rev-list -n1 "$MAJOR" 2>/dev/null) || CURRENT_SHA="(tag does not exist yet)"
+          echo "Current $MAJOR -> $CURRENT_SHA"
+          echo "Moving  $MAJOR -> $TARGET_TAG ($TAG_SHA)"
+
+          # Move the floating tag (annotated for audit trail)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -fa "$MAJOR" "$TAG_SHA" -m "Floating tag: $MAJOR -> $TARGET_TAG"
+          git push origin "$MAJOR" --force
+
+          echo "::notice::Successfully moved $MAJOR to $TARGET_TAG ($TAG_SHA)"
