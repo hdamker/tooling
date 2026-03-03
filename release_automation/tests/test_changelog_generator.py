@@ -221,7 +221,7 @@ class TestDraftGeneration:
         assert CANDIDATE_CHANGES_START_MARKER in result
         assert CANDIDATE_CHANGES_END_MARKER in result
         # Instruction text visible (not collapsed)
-        assert "must be removed before merge" in result
+        assert "auto-removed on merge" in result
         # Full Changelog link at end, outside markers
         assert "compare/r3.2...r4.1" in result
         end_marker_pos = result.index(CANDIDATE_CHANGES_END_MARKER)

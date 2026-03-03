@@ -36,7 +36,7 @@ class TestRenderTemplate:
         assert "**Verify snapshot content (during automation introduction phase only):**" in result
         assert "**Update this PR:**" in result
         assert "**Confirm readiness:**" in result
-        assert "Move CHANGELOG candidate changes" in result
+        assert "All relevant changes copied into Added" in result
         assert "declared Commonalities version" in result
         assert "Commonalities r3.4" in result
         assert "mandatory release assets for the APIs are present per the API status and confirmed" in result
@@ -64,7 +64,7 @@ class TestRenderTemplate:
         assert "| NumberVerification | `v0.3.0-alpha.1` | alpha |" in result
         assert "API definitions are consistent with the declared API version" in result
         assert "API documentation (`info.description`) is up to date" in result
-        assert "Move CHANGELOG candidate changes" in result
+        assert "All relevant changes copied into Added" in result
         # Alpha should NOT have rc/public-specific items
         assert "Enhanced test cases" not in result
 

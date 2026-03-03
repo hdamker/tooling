@@ -172,7 +172,7 @@ class TestBotContext:
             "trigger_workflow_dispatch", "trigger_issue_close",
             "trigger_release_plan_change",
             "has_meta_release", "has_reason",
-            "workflow_run_url", "draft_release_url", "reason",
+            "workflow_run_url", "draft_release_url", "candidate_block_stripped", "reason",
             # Publication fields
             "release_url", "reference_tag", "reference_tag_url",
             "sync_pr_number", "sync_pr_url",
@@ -251,7 +251,7 @@ class TestBuildContext:
             "trigger_workflow_dispatch", "trigger_issue_close",
             "trigger_release_plan_change",
             "has_meta_release", "has_reason",
-            "workflow_run_url", "draft_release_url", "reason",
+            "workflow_run_url", "draft_release_url", "candidate_block_stripped", "reason",
             # Publication fields
             "release_url", "reference_tag", "reference_tag_url",
             "sync_pr_number", "sync_pr_url",
