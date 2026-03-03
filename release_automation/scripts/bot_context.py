@@ -79,6 +79,7 @@ class BotContext:
     # Display fields
     workflow_run_url: str = ""
     draft_release_url: str = ""
+    candidate_block_stripped: str = ""
     reason: str = ""
 
     # Publication fields
@@ -175,6 +176,7 @@ class BotContext:
             # Display fields
             "workflow_run_url": self.workflow_run_url,
             "draft_release_url": self.draft_release_url,
+            "candidate_block_stripped": self.candidate_block_stripped,
             "reason": self.reason,
             # Publication fields
             "release_url": self.release_url,
