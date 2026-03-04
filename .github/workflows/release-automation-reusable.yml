@@ -64,7 +64,7 @@ jobs:
     steps:
       - name: Detect Trigger Type
         id: detect
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@v8
         with:
           script: |
             const eventName = context.eventName;
@@ -257,7 +257,7 @@ jobs:
         id: ack
         if: steps.detect.outputs.trigger_type == 'slash_command'
         continue-on-error: true
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ github.token }}
           script: |
@@ -313,7 +313,7 @@ jobs:
       meta_release: ${{ steps.state.outputs.meta_release }}
     steps:
       - name: Checkout tooling
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.TOOLING_REPO }}
           ref: ${{ env.TOOLING_REF }}
@@ -356,14 +356,14 @@ jobs:
       - name: Generate App Token
         id: app-token
         if: steps.decide.outputs.action == 'post_comment' && vars.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Checkout tooling (for slash command)
         if: steps.decide.outputs.action == 'post_comment'
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.TOOLING_REPO }}
           ref: ${{ env.TOOLING_REF }}
@@ -433,7 +433,7 @@ jobs:
       base_context: ${{ steps.assemble.outputs.base_context }}
     steps:
       - name: Checkout tooling
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.TOOLING_REPO }}
           ref: ${{ env.TOOLING_REF }}
@@ -484,7 +484,7 @@ jobs:
       # No App token needed — interim updates the ack comment using GITHUB_TOKEN
       # to avoid triggering extra workflow runs from issue_comment events.
       - name: Checkout tooling
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.TOOLING_REPO }}
           ref: ${{ env.TOOLING_REF }}
@@ -523,7 +523,7 @@ jobs:
     steps:
       - name: Validate Command
         id: validate
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@v8
         with:
           script: |
             const user = '${{ needs.check-trigger.outputs.user }}';
@@ -685,7 +685,7 @@ jobs:
       # No App token needed — rejection updates the ack comment using GITHUB_TOKEN
       # to avoid triggering extra workflow runs from issue_comment events.
       - name: Checkout tooling
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.TOOLING_REPO }}
           ref: ${{ env.TOOLING_REF }}
@@ -732,13 +732,13 @@ jobs:
       - name: Generate App Token
         id: app-token
         if: vars.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Checkout tooling
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.TOOLING_REPO }}
           ref: ${{ env.TOOLING_REF }}
@@ -805,14 +805,14 @@ jobs:
       - name: Generate App Token
         id: app-token
         if: vars.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Discard Snapshot
         id: discard
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
@@ -860,7 +860,7 @@ jobs:
       - name: Cleanup review branch
         id: cleanup
         if: steps.discard.outputs.success == 'true'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
@@ -915,14 +915,14 @@ jobs:
       - name: Generate App Token
         id: app-token
         if: vars.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Delete Draft Release
         id: delete
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
@@ -991,7 +991,7 @@ jobs:
       - name: Cleanup review branch
         id: cleanup
         if: steps.delete.outputs.success == 'true'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
@@ -1043,13 +1043,13 @@ jobs:
       - name: Generate App Token
         id: app-token
         if: vars.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Checkout tooling
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.TOOLING_REPO }}
           ref: ${{ env.TOOLING_REF }}
@@ -1102,7 +1102,7 @@ jobs:
       error_message: ${{ steps.publish.outputs.error_message }}
     steps:
       - name: Checkout tooling
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.TOOLING_REPO }}
           ref: ${{ env.TOOLING_REF }}
@@ -1112,7 +1112,7 @@ jobs:
             shared-actions
 
       - name: Setup Python
-        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -1122,7 +1122,7 @@ jobs:
       - name: Generate App Token
         id: app-token
         if: vars.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -1252,13 +1252,13 @@ jobs:
       sync_status: ${{ steps.sync.outputs.sync_status }}
     steps:
       - name: Checkout API repo (main branch)
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        uses: actions/checkout@v6
         with:
           path: api-repo
           fetch-depth: 1
 
       - name: Checkout tooling
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.TOOLING_REPO }}
           ref: ${{ env.TOOLING_REF }}
@@ -1270,13 +1270,13 @@ jobs:
       - name: Generate App Token
         id: app-token
         if: vars.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Setup Python
-        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -1288,7 +1288,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
           RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@v8
         with:
           script: |
             const tag = process.env.RELEASE_TAG;
@@ -1439,7 +1439,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
           RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require('fs');
@@ -1577,14 +1577,14 @@ jobs:
       - name: Generate App Token
         id: app-token
         if: vars.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Extract CHANGELOG release notes
         id: changelog
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
@@ -1716,7 +1716,7 @@ jobs:
 
       - name: Create Draft Release
         id: create-draft
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@v8
         env:
           RELEASE_NOTES: ${{ steps.changelog.outputs.release_notes }}
         with:
@@ -1773,7 +1773,7 @@ jobs:
 
       - name: Checkout tooling for bot comment
         if: steps.create-draft.outputs.success == 'true' && needs.derive-state.outputs.release_issue_number != ''
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.TOOLING_REPO }}
           ref: ${{ env.TOOLING_REF }}
@@ -1818,13 +1818,13 @@ jobs:
       - name: Generate App Token
         id: app-token
         if: vars.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Checkout tooling
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.TOOLING_REPO }}
           ref: ${{ env.TOOLING_REF }}
@@ -1836,7 +1836,7 @@ jobs:
 
       - name: Handle Issue Event
         id: handle
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
@@ -1927,13 +1927,13 @@ jobs:
       - name: Generate App Token
         id: app-token
         if: vars.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Checkout tooling
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.TOOLING_REPO }}
           ref: ${{ env.TOOLING_REF }}
@@ -2054,13 +2054,13 @@ jobs:
       - name: Generate App Token
         id: app-token
         if: vars.RELEASE_APP_ID != ''
-        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Checkout tooling
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.TOOLING_REPO }}
           ref: ${{ env.TOOLING_REF }}
@@ -2286,7 +2286,7 @@ jobs:
           SYNC_PR_URL: ${{ needs.create-sync-pr.outputs.sync_pr_url }}
           PUBLISH_WARNINGS: ${{ needs.publish-release.outputs.error_message }}
           SYNC_STATUS: ${{ needs.create-sync-pr.outputs.sync_status }}
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |

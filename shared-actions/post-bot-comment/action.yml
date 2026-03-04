@@ -42,7 +42,7 @@ runs:
   using: composite
   steps:
     - name: Setup Python
-      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      uses: actions/setup-python@v6
       with:
         python-version: "3.11"
 
@@ -150,7 +150,7 @@ runs:
 
     - name: Post or Update Comment
       id: post
-      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+      uses: actions/github-script@v8
       env:
         ISSUE_NUMBER: ${{ inputs.issue_number }}
         EXISTING_COMMENT_ID: ${{ inputs.comment_id }}
