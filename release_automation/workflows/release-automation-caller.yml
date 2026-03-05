@@ -79,5 +79,5 @@ jobs:
        github.event.pull_request.merged == true &&
        startsWith(github.event.pull_request.base.ref, 'release-snapshot/'))
 
-    uses: camaraproject/tooling/.github/workflows/release-automation-reusable.yml@release-automation
+    uses: camaraproject/tooling/.github/workflows/release-automation-reusable.yml@ra-v1-rc
     secrets: inherit
