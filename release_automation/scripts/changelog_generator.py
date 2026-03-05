@@ -109,7 +109,7 @@ class ChangelogGenerator:
         # Extract API info for template
         apis = metadata.get("apis", [])
         api_list = [
-            {"api_title": api.get("api_title", api.get("api_name", "")),
+            {"api_name": api.get("api_name", ""),
              "api_version": api.get("api_version", "")}
             for api in apis
         ]
