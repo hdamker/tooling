@@ -267,6 +267,29 @@ class TestDraftGeneration:
         assert "qos-profiles v1.1.0" in result
         assert "public release" in result
 
+    def test_generate_draft_uses_api_name_not_title_in_summary(self, generator):
+        """Release notes summary list must use api_name, not api_title."""
+        metadata = {
+            "repository": {"release_type": "pre-release-alpha"},
+            "apis": [
+                {
+                    "api_name": "quality-on-demand",
+                    "api_version": "v1.0.0-alpha.1",
+                    "api_title": "CAMARA Quality On Demand",
+                    "api_file_name": "quality-on-demand",
+                }
+            ],
+            "dependencies": {
+                "commonalities_release": "v0.6.0 (r3.3)",
+                "identity_consent_management_release": "v0.4.0 (r3.3)",
+            },
+        }
+        result = generator.generate_draft(
+            release_tag="r1.1", metadata=metadata, repo_name="TestRepo"
+        )
+        assert "* quality-on-demand v1.0.0-alpha.1" in result
+        assert "CAMARA Quality On Demand" not in result
+
 
 # --- File Writing ---
 
