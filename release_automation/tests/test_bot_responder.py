@@ -290,6 +290,38 @@ class TestRealTemplates:
         assert "Unexpected error" in result
         assert "'str' object has no attribute 'get'" in result
 
+    def test_issue_created_template_with_pr(self, bot_responder):
+        """issue_created template shows PR link when trigger_pr_number is set."""
+        from release_automation.scripts.context_builder import build_context
+        context = build_context(
+            release_tag="r4.1",
+            state="planned",
+            trigger_type="release_plan_change",
+            trigger_pr_number="42",
+            trigger_pr_url="https://github.com/org/repo/pull/42",
+            apis=[{"api_name": "quality-on-demand", "api_version": "1.0.0"}],
+        )
+        result = bot_responder.render("issue_created", context)
+        assert "Release issue created" in result
+        assert "PR [#42]" in result
+        assert "pull/42" in result
+        assert "release-plan.yaml" in result
+
+    def test_issue_created_template_without_pr(self, bot_responder):
+        """issue_created template omits PR link when trigger_pr_number is empty."""
+        from release_automation.scripts.context_builder import build_context
+        context = build_context(
+            release_tag="r4.1",
+            state="planned",
+            trigger_type="release_plan_change",
+            apis=[{"api_name": "quality-on-demand", "api_version": "1.0.0"}],
+        )
+        result = bot_responder.render("issue_created", context)
+        assert "Release issue created" in result
+        assert "release-plan.yaml" in result
+        assert "[#]" not in result  # No broken link
+        assert "update." in result  # Sentence ends cleanly
+
 
 class TestContextIntegration:
     """Tests simulating the post-bot-comment action's context flow.

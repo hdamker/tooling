@@ -6,7 +6,7 @@ Created via workflow dispatch from [`release-plan.yaml`]({{release_plan_url}}).
 Created to replace closed [#{{closed_issue_number}}]({{closed_issue_url}}).
 {{/trigger_issue_close}}
 {{#trigger_release_plan_change}}
-Created after [`release-plan.yaml`]({{release_plan_url}}) update (PR [#{{trigger_pr_number}}]({{trigger_pr_url}})).
+Created after [`release-plan.yaml`]({{release_plan_url}}) update{{#trigger_pr_number}} (PR [#{{trigger_pr_number}}]({{trigger_pr_url}})){{/trigger_pr_number}}.
 {{/trigger_release_plan_change}}
 
 <details><summary><b>Configuration:</b> Release {{release_tag}}{{#short_type}} ({{short_type}}{{#has_meta_release}}, {{meta_release}}{{/has_meta_release}}){{/short_type}}</summary>
