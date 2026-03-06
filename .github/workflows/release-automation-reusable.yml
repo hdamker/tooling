@@ -39,8 +39,8 @@ permissions:
 env:
   # Tooling repository and ref for all checkout steps.
   # Change these when testing on a fork or switching between branches.
-  TOOLING_REPO: camaraproject/tooling
-  TOOLING_REF: release-automation
+  TOOLING_REPO: hdamker/tooling
+  TOOLING_REF: pre-snapshot-wip-check
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
