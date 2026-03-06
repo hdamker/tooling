@@ -24,6 +24,7 @@ from .readme_updater import ReadmeUpdater, ReadmeUpdateError
 from .state_manager import ReleaseState, ReleaseStateManager
 from .template_loader import render_template
 from .version_calculator import VersionCalculator
+from .wip_checker import check_wip_versions
 
 
 @dataclass
@@ -210,6 +211,14 @@ class SnapshotCreator:
 
             # Step 7: Create snapshot branch
             git_ops.create_branch(snapshot_branch)
+
+            # Step 7b: Validate wip versions before transformation
+            wip_result = check_wip_versions(temp_dir, release_plan)
+            if wip_result.warnings:
+                result.warnings.extend(wip_result.warnings)
+            if not wip_result.compliant:
+                result.errors.append(wip_result.format_error_message())
+                return result
 
             # Step 8: Apply transformations
             # Extract dependency release tags from release-plan.yaml

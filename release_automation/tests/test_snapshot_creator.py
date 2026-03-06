@@ -1047,3 +1047,118 @@ class TestReleaseDocumentation:
         mock_github_client.download_release_asset.return_value = None
         result = snapshot_creator._read_release_metadata("r3.2")
         assert result is None
+
+
+class TestWipCheckIntegration:
+    """Tests for wip version check integration in snapshot creation."""
+
+    @patch("release_automation.scripts.snapshot_creator.check_wip_versions")
+    @patch("release_automation.scripts.snapshot_creator.tempfile.mkdtemp")
+    @patch("release_automation.scripts.snapshot_creator.shutil.rmtree")
+    @patch("release_automation.scripts.snapshot_creator.GitOperations")
+    def test_wip_check_failure_blocks_snapshot(
+        self,
+        mock_git_ops_class,
+        mock_rmtree,
+        mock_mkdtemp,
+        mock_check_wip,
+        snapshot_creator,
+        sample_release_plan,
+    ):
+        """Wip check failure prevents transformation and returns error."""
+        from release_automation.scripts.wip_checker import WipCheckResult, WipViolation
+
+        mock_mkdtemp.return_value = "/tmp/test-snapshot"
+        mock_git_ops = MagicMock()
+        mock_git_ops_class.return_value = mock_git_ops
+
+        mock_check_wip.return_value = WipCheckResult(
+            compliant=False,
+            violations=[
+                WipViolation(
+                    file="code/API_definitions/test.yaml",
+                    check_type="info.version",
+                    actual="0.11.0",
+                    expected="wip",
+                ),
+            ],
+        )
+
+        config = SnapshotConfig(release_tag="r4.1")
+        result = snapshot_creator.create_snapshot(sample_release_plan, config)
+
+        assert result.success is False
+        assert any("wip version check failed" in e for e in result.errors)
+        # Transformer should NOT have been called
+        snapshot_creator.transformer.apply_all.assert_not_called()
+
+    @patch("release_automation.scripts.snapshot_creator.check_wip_versions")
+    @patch("release_automation.scripts.snapshot_creator.tempfile.mkdtemp")
+    @patch("release_automation.scripts.snapshot_creator.shutil.rmtree")
+    @patch("release_automation.scripts.snapshot_creator.GitOperations")
+    @patch("builtins.open", create=True)
+    def test_wip_check_pass_continues_to_transform(
+        self,
+        mock_open,
+        mock_git_ops_class,
+        mock_rmtree,
+        mock_mkdtemp,
+        mock_check_wip,
+        snapshot_creator,
+        mock_transformer,
+        sample_release_plan,
+    ):
+        """Compliant wip check allows snapshot creation to proceed."""
+        from release_automation.scripts.wip_checker import WipCheckResult
+
+        mock_mkdtemp.return_value = "/tmp/test-snapshot"
+        mock_git_ops = MagicMock()
+        mock_git_ops_class.return_value = mock_git_ops
+        mock_git_ops.create_pr.return_value = PullRequestInfo(number=1, url="url")
+
+        mock_check_wip.return_value = WipCheckResult(compliant=True)
+
+        config = SnapshotConfig(release_tag="r4.1")
+        result = snapshot_creator.create_snapshot(sample_release_plan, config)
+
+        assert result.success is True
+        mock_transformer.apply_all.assert_called_once()
+
+    @patch("release_automation.scripts.snapshot_creator.check_wip_versions")
+    @patch("release_automation.scripts.snapshot_creator.tempfile.mkdtemp")
+    @patch("release_automation.scripts.snapshot_creator.shutil.rmtree")
+    @patch("release_automation.scripts.snapshot_creator.GitOperations")
+    def test_wip_check_warnings_propagated(
+        self,
+        mock_git_ops_class,
+        mock_rmtree,
+        mock_mkdtemp,
+        mock_check_wip,
+        snapshot_creator,
+        sample_release_plan,
+    ):
+        """Warnings from wip check appear in result even on failure."""
+        from release_automation.scripts.wip_checker import WipCheckResult, WipViolation
+
+        mock_mkdtemp.return_value = "/tmp/test-snapshot"
+        mock_git_ops = MagicMock()
+        mock_git_ops_class.return_value = mock_git_ops
+
+        mock_check_wip.return_value = WipCheckResult(
+            compliant=False,
+            violations=[
+                WipViolation(
+                    file="code/API_definitions/test.yaml",
+                    check_type="info.version",
+                    actual="1.0.0",
+                    expected="wip",
+                ),
+            ],
+            warnings=["No code/Test_definitions/ directory found"],
+        )
+
+        config = SnapshotConfig(release_tag="r4.1")
+        result = snapshot_creator.create_snapshot(sample_release_plan, config)
+
+        assert result.success is False
+        assert "Test_definitions" in result.warnings[0]
