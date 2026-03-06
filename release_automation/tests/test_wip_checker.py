@@ -317,6 +317,8 @@ class TestFormatErrorMessage:
             ],
         )
         msg = result.format_error_message()
+        assert "\n" not in msg  # Must be single-line for GITHUB_OUTPUT
         assert "Pre-snapshot wip version check failed" in msg
         assert "code/API_definitions/test.yaml: info.version is '0.11.0'" in msg
         assert "code/Test_definitions/test.feature:3: feature header version is 'v0.11.0'" in msg
+        assert " | " in msg  # Violations separated by pipe

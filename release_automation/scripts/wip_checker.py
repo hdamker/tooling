@@ -33,20 +33,24 @@ class WipCheckResult:
     warnings: List[str] = field(default_factory=list)
 
     def format_error_message(self) -> str:
-        """Format violations into a human-readable error message."""
-        lines = [
-            "Pre-snapshot wip version check failed. "
-            "The following files have non-wip versions:"
-        ]
+        """Format violations into a single-line error message.
+
+        Single-line because GitHub Actions GITHUB_OUTPUT truncates
+        at newlines when using key=value format.
+        """
+        parts = []
         for v in self.violations:
             file_ref = v.file
             if v.line_number is not None:
                 file_ref = f"{v.file}:{v.line_number}"
-            lines.append(
-                f"- {file_ref}: {v.check_type} is '{v.actual}', "
+            parts.append(
+                f"{file_ref}: {v.check_type} is '{v.actual}', "
                 f"expected '{v.expected}'"
             )
-        return "\n".join(lines)
+        return (
+            "Pre-snapshot wip version check failed: "
+            + " | ".join(parts)
+        )
 
 
 # Server URL pattern: {apiRoot}/<api-name>/<version>
