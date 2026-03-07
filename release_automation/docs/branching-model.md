@@ -112,6 +112,17 @@ uses: camaraproject/tooling/.github/workflows/release-automation-reusable.yml@<r
 
 The campaign infrastructure in `project-administration` distributes caller workflow updates when transitioning between phases.
 
+### Reusable workflow checkout consistency
+
+The reusable workflow derives tooling checkout repository and ref from OIDC claims:
+`job_workflow_ref` (repository identity) and `job_workflow_sha` (commit identity).
+This guarantees that Python scripts and shared actions are checked out from the same repository
+and commit as the reusable workflow itself, even when callers reference floating tags such as
+`ra-v1-rc` or `v1`.
+
+An optional `tooling_ref_override` input can be set in the caller workflow for break-glass
+or testing scenarios. The override must be a full 40-character SHA.
+
 ## Coexistence with pr_validation v0
 
 The release automation is designed to work alongside pr_validation v0 without changes to the existing validation workflow. The `release-automation` branch includes the current pr_validation v0 code (branched from `main`) plus the release automation additions. No modifications to pr_validation are required for the release automation to function.

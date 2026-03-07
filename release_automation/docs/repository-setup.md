@@ -330,9 +330,16 @@ When transitioning between phases, a campaign updates the `uses:` line across al
 
 | Aspect | Value | Purpose |
 |--------|-------|---------|
-| **Permissions** | `contents: write`, `issues: write`, `pull-requests: write` | Branch/release ops, issue management, PR creation |
+| **Permissions** | `contents: write`, `issues: write`, `pull-requests: write`, `id-token: write` | Branch/release ops, issue management, PR creation, OIDC claim access for called-workflow repo/SHA resolution |
 | **Concurrency** | `release-automation-${{ github.repository }}`, `cancel-in-progress: false` | Serialize runs, prevent race conditions |
 | **Triggers** | `issue_comment`, `issues`, `pull_request`, `push`, `workflow_dispatch` | Slash commands, lifecycle events, auto-sync, manual |
+
+For break-glass or testing, the caller can set `with.tooling_ref_override` in the workflow file.
+This requires committing a workflow file change in the target repository.
+The value must be a full 40-character SHA.
+
+No caller-side repository override is needed for fork testing: the reusable workflow derives the
+tooling repository from OIDC claim `job_workflow_ref`.
 
 ---
 

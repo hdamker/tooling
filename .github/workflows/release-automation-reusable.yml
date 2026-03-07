@@ -30,17 +30,17 @@ on:
         type: string
         required: false
         default: ""
+      tooling_ref_override:
+        description: "Optional tooling checkout ref override (40-char SHA)"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: write
   issues: write
   pull-requests: write
-
-env:
-  # Tooling repository and ref for all checkout steps.
-  # Change these when testing on a fork or switching between branches.
-  TOOLING_REPO: camaraproject/tooling
-  TOOLING_REF: release-automation
+  id-token: write
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
@@ -58,6 +58,11 @@ jobs:
       confirm_tag: ${{ steps.detect.outputs.confirm_tag }}
       trigger_pr_number: ${{ steps.detect.outputs.trigger_pr_number }}
       trigger_pr_url: ${{ steps.detect.outputs.trigger_pr_url }}
+      tooling_checkout_repo: ${{ steps.resolve-tooling-ref.outputs.tooling_checkout_repo }}
+      tooling_checkout_ref: ${{ steps.resolve-tooling-ref.outputs.tooling_checkout_ref }}
+      tooling_checkout_ref_source: ${{ steps.resolve-tooling-ref.outputs.tooling_checkout_ref_source }}
+      tooling_workflow_ref: ${{ steps.resolve-tooling-ref.outputs.tooling_workflow_ref }}
+      tooling_workflow_sha: ${{ steps.resolve-tooling-ref.outputs.tooling_workflow_sha }}
       comment_id: ${{ steps.ack.outputs.comment_id }}
       # Note: release_tag is NOT output here - it comes from derive-state job
       # which reads from authoritative sources (release-plan.yaml or release-metadata.yaml)
@@ -250,6 +255,73 @@ jobs:
             core.setOutput('should_continue', shouldContinue);
             core.setOutput('confirm_tag', confirmTag);
 
+      - name: Resolve Tooling Checkout Ref
+        id: resolve-tooling-ref
+        if: steps.detect.outputs.should_continue == 'true'
+        uses: actions/github-script@v8
+        env:
+          TOOLING_REF_OVERRIDE: ${{ inputs.tooling_ref_override }}
+        with:
+          script: |
+            const overrideRef = (process.env.TOOLING_REF_OVERRIDE || '').trim();
+            const shaPattern = /^[0-9a-f]{40}$/i;
+            const workflowRefPattern =
+              /^([^/]+\/[^/]+)\/\.github\/workflows\/release-automation-reusable\.yml@.+$/;
+
+            function decodeJwtPayload(jwt) {
+              const parts = jwt.split('.');
+              if (parts.length !== 3) {
+                throw new Error('OIDC token is not a valid JWT');
+              }
+
+              const payload = parts[1]
+                .replace(/-/g, '+')
+                .replace(/_/g, '/');
+              const padLength = (4 - (payload.length % 4)) % 4;
+              const padded = payload + '='.repeat(padLength);
+              return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+            }
+
+            const oidcToken = await core.getIDToken('release-automation-tooling-ref');
+            const claims = decodeJwtPayload(oidcToken);
+            const workflowRef = claims.job_workflow_ref || '';
+            const workflowSha = claims.job_workflow_sha || '';
+            const workflowRefMatch = workflowRef.match(workflowRefPattern);
+
+            if (!workflowRefMatch) {
+              core.setFailed(`Unexpected job_workflow_ref claim: ${workflowRef}`);
+              return;
+            }
+
+            if (!shaPattern.test(workflowSha)) {
+              core.setFailed(`Invalid job_workflow_sha claim: ${workflowSha}`);
+              return;
+            }
+
+            const checkoutRepo = workflowRefMatch[1];
+            let checkoutRef = workflowSha.toLowerCase();
+            let checkoutRefSource = 'oidc_job_workflow_sha';
+
+            if (overrideRef !== '') {
+              if (!shaPattern.test(overrideRef)) {
+                core.setFailed('tooling_ref_override must be a full 40-character SHA');
+                return;
+              }
+              checkoutRef = overrideRef.toLowerCase();
+              checkoutRefSource = 'override';
+            }
+
+            core.info(`tooling_checkout_repo=${checkoutRepo}`);
+            core.info(`tooling_checkout_ref=${checkoutRef} source=${checkoutRefSource}`);
+            core.info(`job_workflow_ref=${workflowRef}`);
+            core.info(`job_workflow_sha=${workflowSha}`);
+
+            core.setOutput('tooling_checkout_repo', checkoutRepo);
+            core.setOutput('tooling_checkout_ref', checkoutRef);
+            core.setOutput('tooling_checkout_ref_source', checkoutRefSource);
+            core.setOutput('tooling_workflow_ref', workflowRef);
+            core.setOutput('tooling_workflow_sha', workflowSha);
+
       # Post early acknowledgment for slash commands (within check-trigger to avoid runner cold-start)
       # This comment is later updated by post-interim (valid) or post-rejection (rejected).
       # Uses GITHUB_TOKEN (not App token) to avoid triggering extra workflow runs.
@@ -315,8 +387,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v6
         with:
-          repository: ${{ env.TOOLING_REPO }}
-          ref: ${{ env.TOOLING_REF }}
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -365,8 +437,8 @@ jobs:
         if: steps.decide.outputs.action == 'post_comment'
         uses: actions/checkout@v6
         with:
-          repository: ${{ env.TOOLING_REPO }}
-          ref: ${{ env.TOOLING_REF }}
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -435,8 +507,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v6
         with:
-          repository: ${{ env.TOOLING_REPO }}
-          ref: ${{ env.TOOLING_REF }}
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -486,8 +558,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v6
         with:
-          repository: ${{ env.TOOLING_REPO }}
-          ref: ${{ env.TOOLING_REF }}
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -687,8 +759,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v6
         with:
-          repository: ${{ env.TOOLING_REPO }}
-          ref: ${{ env.TOOLING_REF }}
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -740,8 +812,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v6
         with:
-          repository: ${{ env.TOOLING_REPO }}
-          ref: ${{ env.TOOLING_REF }}
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -1051,8 +1123,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v6
         with:
-          repository: ${{ env.TOOLING_REPO }}
-          ref: ${{ env.TOOLING_REF }}
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
           path: _tooling
           sparse-checkout: |
             release_automation
@@ -1104,8 +1176,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v6
         with:
-          repository: ${{ env.TOOLING_REPO }}
-          ref: ${{ env.TOOLING_REF }}
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
           path: _tooling
           sparse-checkout: |
             release_automation
@@ -1260,8 +1332,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v6
         with:
-          repository: ${{ env.TOOLING_REPO }}
-          ref: ${{ env.TOOLING_REF }}
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
           path: _tooling
           sparse-checkout: |
             release_automation
@@ -1775,8 +1847,8 @@ jobs:
         if: steps.create-draft.outputs.success == 'true' && needs.derive-state.outputs.release_issue_number != ''
         uses: actions/checkout@v6
         with:
-          repository: ${{ env.TOOLING_REPO }}
-          ref: ${{ env.TOOLING_REF }}
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -1826,8 +1898,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v6
         with:
-          repository: ${{ env.TOOLING_REPO }}
-          ref: ${{ env.TOOLING_REF }}
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -1935,8 +2007,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v6
         with:
-          repository: ${{ env.TOOLING_REPO }}
-          ref: ${{ env.TOOLING_REF }}
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts
@@ -2062,8 +2134,8 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v6
         with:
-          repository: ${{ env.TOOLING_REPO }}
-          ref: ${{ env.TOOLING_REF }}
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
           path: _tooling
           sparse-checkout: |
             release_automation/scripts

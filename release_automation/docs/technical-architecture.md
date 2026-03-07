@@ -564,6 +564,8 @@ Each API repository has a minimal caller workflow that forwards events to the re
 
 **Concurrency:** Global concurrency group per repository (`release-automation-{repo}`) with `cancel-in-progress: false`. This prevents overlapping workflow runs from producing inconsistent state.
 
+**Permissions:** Caller workflows grant `id-token: write` so the reusable workflow can resolve the called-workflow commit via OIDC claims.
+
 **Commands:**
 
 | Command | Description | Required State | Who may execute |
@@ -579,6 +581,8 @@ Each API repository has a minimal caller workflow that forwards events to the re
 ### 3.3 Reusable Workflow (Tooling Repository)
 
 The reusable workflow (`release-automation-reusable.yml`) orchestrates all release operations. Jobs execute in phases with conditional branching based on trigger type and command validation.
+
+**Workflow/script ref consistency:** Tooling scripts and shared actions are checked out using OIDC claims from the called reusable workflow: `job_workflow_ref` (repository) and `job_workflow_sha` (commit). This binds checkout content to the exact repository and commit of the called reusable workflow. An optional break-glass override (`tooling_ref_override`) is available as a caller-side `with:` value and must be a full 40-character SHA.
 
 **Job execution order:**
 
