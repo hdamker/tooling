@@ -83,6 +83,38 @@ class TestDeriveState:
 
         assert state == ReleaseState.SNAPSHOT_ACTIVE
 
+    @patch("release_automation.scripts.state_manager.time.sleep")
+    def test_draft_ready_retries_when_enabled(
+        self, mock_sleep, state_manager, mock_github_client
+    ):
+        """Draft release detection retries before concluding DRAFT_READY."""
+        mock_github_client.list_branches.return_value = [
+            Branch(name="release-snapshot/r4.1-abc1234", sha="abc1234")
+        ]
+        mock_github_client.draft_release_exists.side_effect = [False, False, True]
+
+        state = state_manager.derive_state("r4.1", retry_draft_release=True)
+
+        assert state == ReleaseState.DRAFT_READY
+        assert mock_github_client.draft_release_exists.call_count == 3
+        assert mock_sleep.call_count == 2
+
+    @patch("release_automation.scripts.state_manager.time.sleep")
+    def test_snapshot_active_when_retry_exhausted(
+        self, mock_sleep, state_manager, mock_github_client
+    ):
+        """Retry exhaustion falls back to SNAPSHOT_ACTIVE."""
+        mock_github_client.list_branches.return_value = [
+            Branch(name="release-snapshot/r4.1-abc1234", sha="abc1234")
+        ]
+        mock_github_client.draft_release_exists.side_effect = [False, False, False]
+
+        state = state_manager.derive_state("r4.1", retry_draft_release=True)
+
+        assert state == ReleaseState.SNAPSHOT_ACTIVE
+        assert mock_github_client.draft_release_exists.call_count == 3
+        assert mock_sleep.call_count == 2
+
     def test_planned_when_release_plan_defines_release(
         self, state_manager, mock_github_client
     ):

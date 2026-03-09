@@ -161,6 +161,7 @@ class TestSyncReleaseIssue:
         state_manager = MagicMock()
         issue_manager = MagicMock()
         bot_responder = MagicMock()
+        state_manager.get_current_snapshot.return_value = None
 
         # Make retry_on_not_found call the function directly (no actual retry in tests)
         gh.retry_on_not_found.side_effect = lambda fn, **kwargs: fn()
@@ -283,6 +284,80 @@ class TestSyncReleaseIssue:
 
         assert result.action == "none"
         assert result.reason == "missing_release_tag"
+
+    def test_force_update_refreshes_issue_when_state_matches(self):
+        """Test force_update refreshes issue even when label and title already match."""
+        manager, gh, state_manager, issue_manager, _ = self._create_manager()
+
+        release_plan = {
+            "repository": {
+                "target_release_tag": "r4.1",
+                "target_release_type": "pre-release-rc"
+            }
+        }
+
+        gh.search_issues.return_value = [
+            {
+                "number": 1,
+                "title": "Release r4.1 (RC)",
+                "body": f"{WORKFLOW_MARKER}\n<!-- release-automation:release-tag:r4.1 -->",
+                "labels": [{"name": "release-state:snapshot-active"}]
+            }
+        ]
+        gh.get_issue.return_value = {"number": 1, "title": "Release r4.1 (RC)"}
+        issue_manager.should_update_title.return_value = False
+        issue_manager.generate_state_section.return_value = "**State**: snapshot-active"
+        issue_manager.update_section.return_value = "updated body"
+
+        result = manager.sync_release_issue(
+            release_plan,
+            state_override=ReleaseState.SNAPSHOT_ACTIVE,
+            force_update=True,
+        )
+
+        assert result.action == "updated"
+        state_manager.derive_state.assert_not_called()
+
+    def test_uses_draft_release_url_override_for_draft_ready(self):
+        """Test draft release URL override is passed to the issue body generator."""
+        manager, gh, _, issue_manager, _ = self._create_manager()
+
+        release_plan = {
+            "repository": {
+                "target_release_tag": "r4.1",
+                "target_release_type": "pre-release-rc"
+            }
+        }
+
+        gh.search_issues.return_value = [
+            {
+                "number": 1,
+                "title": "Release r4.1 (RC)",
+                "body": f"{WORKFLOW_MARKER}\n<!-- release-automation:release-tag:r4.1 -->",
+                "labels": [{"name": "release-state:snapshot-active"}]
+            }
+        ]
+        gh.get_issue.return_value = {"number": 1, "title": "Release r4.1 (RC)"}
+        issue_manager.should_update_title.return_value = False
+        issue_manager.generate_state_section.return_value = "**State**: draft-ready"
+        issue_manager.update_section.return_value = "updated body"
+
+        draft_release_url = "https://github.com/org/repo/releases/tag/untagged-123"
+        result = manager.sync_release_issue(
+            release_plan,
+            state_override=ReleaseState.DRAFT_READY,
+            draft_release_url_override=draft_release_url,
+            force_update=True,
+        )
+
+        assert result.action == "updated"
+        issue_manager.generate_state_section.assert_called_once_with(
+            state=ReleaseState.DRAFT_READY.value,
+            snapshot_id="",
+            release_pr_url="",
+            draft_release_url=draft_release_url,
+            snapshot_branch_url=""
+        )
 
 
 class TestCreateReleaseIssue:

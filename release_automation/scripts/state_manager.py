@@ -8,6 +8,7 @@ the current release state by examining repository artifacts.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+import time
 from typing import Any, Dict, List, Optional
 
 import yaml
@@ -159,7 +160,11 @@ class ReleaseStateManager:
         """
         self.gh = github_client
 
-    def derive_state(self, release_tag: str) -> ReleaseState:
+    def derive_state(
+        self,
+        release_tag: str,
+        retry_draft_release: bool = False
+    ) -> ReleaseState:
         """
         Derive the current release state from repository artifacts.
 
@@ -175,6 +180,7 @@ class ReleaseStateManager:
 
         Args:
             release_tag: Release tag to check (e.g., "r4.1")
+            retry_draft_release: Retry draft-release detection for eventual consistency
 
         Returns:
             Current ReleaseState for the given release tag
@@ -188,7 +194,7 @@ class ReleaseStateManager:
 
         if snapshot_branches:
             # Step 3: Check for draft release
-            if self.gh.draft_release_exists(release_tag):
+            if self._draft_release_exists(release_tag, retry=retry_draft_release):
                 return ReleaseState.DRAFT_READY
             return ReleaseState.SNAPSHOT_ACTIVE
 
@@ -205,6 +211,28 @@ class ReleaseStateManager:
                     return ReleaseState.NOT_PLANNED
 
         return ReleaseState.NOT_PLANNED
+
+    def _draft_release_exists(self, release_tag: str, retry: bool = False) -> bool:
+        """
+        Check if a draft release exists, optionally retrying for eventual consistency.
+
+        Args:
+            release_tag: Release tag to check (e.g., "r4.1")
+            retry: Whether to retry draft-release detection
+
+        Returns:
+            True if a draft release exists, False otherwise
+        """
+        attempts = 3 if retry else 1
+
+        for attempt in range(attempts):
+            if self.gh.draft_release_exists(release_tag):
+                return True
+
+            if attempt < attempts - 1:
+                time.sleep(5)
+
+        return False
 
     def get_current_snapshot(self, release_tag: str) -> Optional[SnapshotInfo]:
         """
