@@ -1011,42 +1011,37 @@ class TestReleaseDocumentation:
         mock_instance.generate_draft.assert_called_once()
         mock_instance.write_changelog.assert_called_once()
 
-    def test_read_release_metadata_from_repo_tree(
+    def test_readme_update_uses_shared_release_metadata_loader(
         self, snapshot_creator, mock_github_client
     ):
-        """Returns metadata when file exists in repository tree at tag."""
-        yaml_content = "repository:\n  release_type: public-release\napis:\n- api_name: qod\n  api_version: v1.0.0\n"
-        mock_github_client.get_file_content.return_value = yaml_content
-        result = snapshot_creator._read_release_metadata("r3.2")
-        assert result is not None
-        assert result["repository"]["release_type"] == "public-release"
-        assert result["apis"][0]["api_version"] == "v1.0.0"
-        mock_github_client.get_file_content.assert_called_once_with(
-            "release-metadata.yaml", ref="r3.2"
-        )
+        """README update goes through GitHubClient shared metadata loading."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r3.2", draft=False, prerelease=False, html_url="")
+        ]
+        mock_github_client.get_release_metadata.return_value = {
+            "repository": {
+                "release_type": "public-release",
+                "meta_release": "Fall25",
+            },
+            "apis": [{
+                "api_name": "qod",
+                "api_version": "v1.0.0",
+            }],
+        }
 
-    def test_read_release_metadata_falls_back_to_release_asset(
-        self, snapshot_creator, mock_github_client
-    ):
-        """Falls back to release asset when file not in repo tree."""
-        mock_github_client.get_file_content.return_value = None
-        yaml_content = "repository:\n  release_type: public-release\napis:\n- api_name: qod\n  api_version: v1.0.0\n"
-        mock_github_client.download_release_asset.return_value = yaml_content
-        result = snapshot_creator._read_release_metadata("r3.2")
-        assert result is not None
-        assert result["apis"][0]["api_version"] == "v1.0.0"
-        mock_github_client.download_release_asset.assert_called_once_with(
-            "r3.2", "release-metadata.yaml"
-        )
+        with patch("release_automation.scripts.snapshot_creator.os.path.exists", return_value=True), \
+             patch("release_automation.scripts.snapshot_creator.ReadmeUpdater.update_release_info", return_value=True), \
+             patch("release_automation.scripts.snapshot_creator.ReadmeUpdater.format_api_links", return_value="formatted-links"):
+            result = snapshot_creator._update_readme(
+                temp_dir="/tmp/test-dir",
+                config=SnapshotConfig(release_tag="r4.1"),
+                release_plan={},
+                api_versions={"qod": "v1.1.0-rc.1"},
+                metadata={"repository": {"release_type": "pre-release-rc"}},
+            )
 
-    def test_read_release_metadata_returns_none_when_not_found(
-        self, snapshot_creator, mock_github_client
-    ):
-        """Returns None when metadata not found in tree or assets."""
-        mock_github_client.get_file_content.return_value = None
-        mock_github_client.download_release_asset.return_value = None
-        result = snapshot_creator._read_release_metadata("r3.2")
-        assert result is None
+        assert result is True
+        mock_github_client.get_release_metadata.assert_called_once_with("r3.2")
 
 
 class TestWipCheckIntegration:

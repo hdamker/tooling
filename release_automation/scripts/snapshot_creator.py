@@ -557,28 +557,6 @@ class SnapshotCreator:
             return releases[0].tag_name
         return None
 
-    def _read_release_metadata(self, tag: str) -> Optional[Dict[str, Any]]:
-        """Read release-metadata.yaml from a release tag.
-
-        Tries two sources in order:
-        1. Repository tree at tag (newer releases with committed file)
-        2. Release asset (legacy releases where metadata was uploaded)
-
-        Returns:
-            Parsed metadata dict, or None if not found/parseable.
-        """
-        # Try 1: repository tree (newer releases)
-        content = self.gh.get_file_content("release-metadata.yaml", ref=tag)
-        # Try 2: release asset (legacy releases)
-        if not content:
-            content = self.gh.download_release_asset(tag, "release-metadata.yaml")
-        if not content:
-            return None
-        try:
-            return yaml.safe_load(content)
-        except yaml.YAMLError:
-            return None
-
     def _get_candidate_changes(
         self, release_tag: str, previous_release: Optional[str]
     ) -> Optional[str]:
@@ -643,7 +621,7 @@ class SnapshotCreator:
             if is_prerelease:
                 # Pre-release: public section shows existing public release info
                 public_tag = existing_public
-                public_metadata = self._read_release_metadata(public_tag)
+                public_metadata = self.gh.get_release_metadata(public_tag)
                 public_apis = []
                 public_meta_release = ""
                 if public_metadata:

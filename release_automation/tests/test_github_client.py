@@ -79,6 +79,51 @@ class TestGitHubClient(unittest.TestCase):
         content = self.client.get_file_content("missing")
         self.assertIsNone(content)
 
+    @patch("release_automation.scripts.github_client.GitHubClient.download_release_asset")
+    @patch("release_automation.scripts.github_client.GitHubClient.get_file_content")
+    def test_get_release_metadata_from_repo_tree(
+        self, mock_get_file_content, mock_download_release_asset
+    ):
+        mock_get_file_content.return_value = (
+            "repository:\n  release_tag: r4.1\napis:\n  - api_name: test-api\n"
+            "    api_version: 1.0.0-rc.1\n"
+        )
+
+        metadata = self.client.get_release_metadata("r4.1")
+
+        self.assertEqual(metadata["repository"]["release_tag"], "r4.1")
+        self.assertEqual(metadata["apis"][0]["api_version"], "1.0.0-rc.1")
+        mock_get_file_content.assert_called_once_with("release-metadata.yaml", ref="r4.1")
+        mock_download_release_asset.assert_not_called()
+
+    @patch("release_automation.scripts.github_client.GitHubClient.download_release_asset")
+    @patch("release_automation.scripts.github_client.GitHubClient.get_file_content")
+    def test_get_release_metadata_falls_back_to_release_asset(
+        self, mock_get_file_content, mock_download_release_asset
+    ):
+        mock_get_file_content.return_value = None
+        mock_download_release_asset.return_value = (
+            "repository:\n  release_tag: r4.1\napis:\n  - api_name: test-api\n"
+            "    api_version: 1.0.0-rc.1\n"
+        )
+
+        metadata = self.client.get_release_metadata("r4.1")
+
+        self.assertEqual(metadata["apis"][0]["api_version"], "1.0.0-rc.1")
+        mock_download_release_asset.assert_called_once_with("r4.1", "release-metadata.yaml")
+
+    @patch("release_automation.scripts.github_client.GitHubClient.download_release_asset")
+    @patch("release_automation.scripts.github_client.GitHubClient.get_file_content")
+    def test_get_release_metadata_returns_none_for_invalid_yaml(
+        self, mock_get_file_content, mock_download_release_asset
+    ):
+        mock_get_file_content.return_value = "just-a-string"
+
+        metadata = self.client.get_release_metadata("r4.1")
+
+        self.assertIsNone(metadata)
+        mock_download_release_asset.assert_not_called()
+
     @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
     def test_create_issue(self, mock_run_gh):
         # create_issue returns a local dict from the URL output (no fetch-back)

@@ -22,6 +22,7 @@ def mock_github_client():
     client = Mock()
     client.get_releases.return_value = []
     client.get_file_content.return_value = None
+    client.get_release_metadata.return_value = None
     return client
 
 
@@ -65,13 +66,13 @@ class TestCalculateVersion:
             Release(tag_name="r4.1", name="Release r4.1", draft=False,
                     prerelease=True, html_url="")
         ]
-        mock_github_client.get_file_content.return_value = """
-repository:
-  release_tag: r4.1
-apis:
-  - api_name: location-verification
-    api_version: 3.2.0-rc.1
-"""
+        mock_github_client.get_release_metadata.return_value = {
+            "repository": {"release_tag": "r4.1"},
+            "apis": [{
+                "api_name": "location-verification",
+                "api_version": "3.2.0-rc.1",
+            }],
+        }
 
         result = calculator.calculate_version(
             api_name="location-verification",
@@ -80,6 +81,30 @@ apis:
         )
 
         assert result == "3.2.0-rc.2"
+
+    def test_second_rc_release_uses_release_asset_fallback(
+        self, calculator, mock_github_client
+    ):
+        """Legacy asset-only metadata still increments the RC extension."""
+        mock_github_client.get_releases.return_value = [
+            Release(tag_name="r2.1", name="Release r2.1", draft=False,
+                    prerelease=True, html_url="")
+        ]
+        mock_github_client.get_release_metadata.return_value = {
+            "repository": {"release_tag": "r2.1"},
+            "apis": [{
+                "api_name": "consent-info",
+                "api_version": "0.2.0-rc.1",
+            }],
+        }
+
+        result = calculator.calculate_version(
+            api_name="consent-info",
+            target_version="0.2.0",
+            target_status="rc"
+        )
+
+        assert result == "0.2.0-rc.2"
 
     def test_first_alpha_release_gets_extension_1(
         self, calculator, mock_github_client
@@ -103,22 +128,24 @@ apis:
             Release(tag_name="r3.2", name="", draft=False, prerelease=True, html_url="")
         ]
 
-        def get_content(path, ref):
+        def get_release_metadata(ref):
             if ref == "r3.0":
-                return """
-apis:
-  - api_name: test-api
-    api_version: 2.0.0-rc.1
-"""
+                return {
+                    "apis": [{
+                        "api_name": "test-api",
+                        "api_version": "2.0.0-rc.1",
+                    }]
+                }
             elif ref == "r3.2":
-                return """
-apis:
-  - api_name: test-api
-    api_version: 2.0.0-rc.3
-"""
+                return {
+                    "apis": [{
+                        "api_name": "test-api",
+                        "api_version": "2.0.0-rc.3",
+                    }]
+                }
             return None
 
-        mock_github_client.get_file_content.side_effect = get_content
+        mock_github_client.get_release_metadata.side_effect = get_release_metadata
 
         result = calculator.calculate_version(
             api_name="test-api",
@@ -134,11 +161,12 @@ apis:
         mock_github_client.get_releases.return_value = [
             Release(tag_name="r4.1", name="", draft=False, prerelease=True, html_url="")
         ]
-        mock_github_client.get_file_content.return_value = """
-apis:
-  - api_name: other-api
-    api_version: 3.2.0-rc.1
-"""
+        mock_github_client.get_release_metadata.return_value = {
+            "apis": [{
+                "api_name": "other-api",
+                "api_version": "3.2.0-rc.1",
+            }]
+        }
 
         result = calculator.calculate_version(
             api_name="location-verification",
@@ -154,11 +182,12 @@ apis:
         mock_github_client.get_releases.return_value = [
             Release(tag_name="r4.0", name="", draft=False, prerelease=True, html_url="")
         ]
-        mock_github_client.get_file_content.return_value = """
-apis:
-  - api_name: location-verification
-    api_version: 3.2.0-alpha.1
-"""
+        mock_github_client.get_release_metadata.return_value = {
+            "apis": [{
+                "api_name": "location-verification",
+                "api_version": "3.2.0-alpha.1",
+            }]
+        }
 
         result = calculator.calculate_version(
             api_name="location-verification",
@@ -177,11 +206,12 @@ apis:
         mock_github_client.get_releases.return_value = [
             Release(tag_name="r3.0", name="", draft=False, prerelease=True, html_url="")
         ]
-        mock_github_client.get_file_content.return_value = """
-apis:
-  - api_name: location-verification
-    api_version: 3.1.0-rc.5
-"""
+        mock_github_client.get_release_metadata.return_value = {
+            "apis": [{
+                "api_name": "location-verification",
+                "api_version": "3.1.0-rc.5",
+            }]
+        }
 
         result = calculator.calculate_version(
             api_name="location-verification",
@@ -199,11 +229,12 @@ apis:
         mock_github_client.get_releases.return_value = [
             Release(tag_name="r4.1", name="", draft=False, prerelease=True, html_url="")
         ]
-        mock_github_client.get_file_content.return_value = """
-apis:
-  - api_name: qos-profiles
-    api_version: 1.2.0-alpha.1
-"""
+        mock_github_client.get_release_metadata.return_value = {
+            "apis": [{
+                "api_name": "qos-profiles",
+                "api_version": "1.2.0-alpha.1",
+            }]
+        }
 
         result = calculator.calculate_version(
             api_name="qos-profiles",
@@ -221,11 +252,12 @@ apis:
         mock_github_client.get_releases.return_value = [
             Release(tag_name="r4.2", name="", draft=False, prerelease=True, html_url="")
         ]
-        mock_github_client.get_file_content.return_value = """
-apis:
-  - api_name: qos-profiles
-    api_version: 1.2.0-rc.1
-"""
+        mock_github_client.get_release_metadata.return_value = {
+            "apis": [{
+                "api_name": "qos-profiles",
+                "api_version": "1.2.0-rc.1",
+            }]
+        }
 
         result = calculator.calculate_version(
             api_name="qos-profiles",
@@ -245,22 +277,24 @@ apis:
             Release(tag_name="r6.1", name="", draft=False, prerelease=True, html_url="")
         ]
 
-        def get_content(path, ref):
+        def get_release_metadata(ref):
             if ref == "r4.1":
-                return """
-apis:
-  - api_name: qos-profiles
-    api_version: 1.2.0-alpha.1
-"""
+                return {
+                    "apis": [{
+                        "api_name": "qos-profiles",
+                        "api_version": "1.2.0-alpha.1",
+                    }]
+                }
             elif ref == "r6.1":
-                return """
-apis:
-  - api_name: qos-profiles
-    api_version: 1.3.0-alpha.2
-"""
+                return {
+                    "apis": [{
+                        "api_name": "qos-profiles",
+                        "api_version": "1.3.0-alpha.2",
+                    }]
+                }
             return None
 
-        mock_github_client.get_file_content.side_effect = get_content
+        mock_github_client.get_release_metadata.side_effect = get_release_metadata
 
         result = calculator.calculate_version(
             api_name="qos-profiles",
@@ -278,11 +312,12 @@ apis:
         mock_github_client.get_releases.return_value = [
             Release(tag_name="r4.1", name="", draft=False, prerelease=True, html_url="")
         ]
-        mock_github_client.get_file_content.return_value = """
-apis:
-  - api_name: qos-provisioning
-    api_version: 0.4.0-alpha.1
-"""
+        mock_github_client.get_release_metadata.return_value = {
+            "apis": [{
+                "api_name": "qos-provisioning",
+                "api_version": "0.4.0-alpha.1",
+            }]
+        }
 
         result = calculator.calculate_version(
             api_name="qos-provisioning",
@@ -300,11 +335,12 @@ apis:
         mock_github_client.get_releases.return_value = [
             Release(tag_name="r4.1", name="", draft=False, prerelease=True, html_url="")
         ]
-        mock_github_client.get_file_content.return_value = """
-apis:
-  - api_name: qos-provisioning
-    api_version: 0.4.0-alpha.1
-"""
+        mock_github_client.get_release_metadata.return_value = {
+            "apis": [{
+                "api_name": "qos-provisioning",
+                "api_version": "0.4.0-alpha.1",
+            }]
+        }
 
         result = calculator.calculate_version(
             api_name="qos-provisioning",
@@ -322,11 +358,12 @@ apis:
         mock_github_client.get_releases.return_value = [
             Release(tag_name="r4.1", name="", draft=False, prerelease=True, html_url="")
         ]
-        mock_github_client.get_file_content.return_value = """
-apis:
-  - api_name: quality-on-demand
-    api_version: 1.2.0-alpha.1
-"""
+        mock_github_client.get_release_metadata.return_value = {
+            "apis": [{
+                "api_name": "quality-on-demand",
+                "api_version": "1.2.0-alpha.1",
+            }]
+        }
 
         result = calculator.calculate_version(
             api_name="quality-on-demand",
@@ -364,22 +401,24 @@ class TestFindExistingExtensions:
             Release(tag_name="r3.1", name="", draft=False, prerelease=True, html_url="")
         ]
 
-        def get_content(path, ref):
+        def get_release_metadata(ref):
             if ref == "r3.0":
-                return """
-apis:
-  - api_name: test-api
-    api_version: 1.0.0-rc.1
-"""
+                return {
+                    "apis": [{
+                        "api_name": "test-api",
+                        "api_version": "1.0.0-rc.1",
+                    }]
+                }
             elif ref == "r3.1":
-                return """
-apis:
-  - api_name: test-api
-    api_version: 1.0.0-rc.2
-"""
+                return {
+                    "apis": [{
+                        "api_name": "test-api",
+                        "api_version": "1.0.0-rc.2",
+                    }]
+                }
             return None
 
-        mock_github_client.get_file_content.side_effect = get_content
+        mock_github_client.get_release_metadata.side_effect = get_release_metadata
 
         result = calculator.find_existing_extensions(
             api_name="test-api",
@@ -398,18 +437,19 @@ apis:
             Release(tag_name="r3.0", name="", draft=False, prerelease=True, html_url="")
         ]
 
-        def get_content(path, ref):
+        def get_release_metadata(ref):
             if ref == "r2.0":
                 return None  # No metadata
             elif ref == "r3.0":
-                return """
-apis:
-  - api_name: test-api
-    api_version: 1.0.0-rc.1
-"""
+                return {
+                    "apis": [{
+                        "api_name": "test-api",
+                        "api_version": "1.0.0-rc.1",
+                    }]
+                }
             return None
 
-        mock_github_client.get_file_content.side_effect = get_content
+        mock_github_client.get_release_metadata.side_effect = get_release_metadata
 
         result = calculator.find_existing_extensions(
             api_name="test-api",

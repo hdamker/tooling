@@ -9,8 +9,6 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional
 
-import yaml
-
 from .github_client import GitHubClient
 
 
@@ -177,7 +175,7 @@ class VersionCalculator:
 
         for release in releases:
             # Read release-metadata.yaml from the tag
-            metadata = self._read_release_metadata(release.tag_name)
+            metadata = self.gh.get_release_metadata(release.tag_name)
             if not metadata:
                 continue
 
@@ -223,26 +221,6 @@ class VersionCalculator:
                 )
 
         return versions
-
-    def _read_release_metadata(self, tag: str) -> Optional[dict]:
-        """
-        Read release-metadata.yaml from a release tag.
-
-        Args:
-            tag: Release tag name (e.g., "r4.1")
-
-        Returns:
-            Parsed YAML content or None if not found
-        """
-        content = self.gh.get_file_content("release-metadata.yaml", tag)
-        if not content:
-            return None
-
-        try:
-            return yaml.safe_load(content)
-        except yaml.YAMLError as e:
-            print(f"Warning: Failed to parse release-metadata.yaml from {tag}: {e}")
-            return None
 
     def _parse_extension(
         self,
