@@ -111,7 +111,12 @@ class IssueSyncManager:
     def sync_release_issue(
         self,
         release_plan: Dict[str, Any],
-        trigger_pr: Optional[int] = None
+        trigger_pr: Optional[int] = None,
+        state_override: Optional[ReleaseState] = None,
+        snapshot_branch_override: Optional[str] = None,
+        release_pr_number_override: Optional[str] = None,
+        draft_release_url_override: Optional[str] = None,
+        force_update: bool = False,
     ) -> SyncResult:
         """
         Ensure Release Issue exists and reflects current state.
@@ -125,6 +130,11 @@ class IssueSyncManager:
         Args:
             release_plan: Parsed release-plan.yaml content
             trigger_pr: Optional PR number that triggered the sync
+            state_override: Authoritative state for same-run workflow transitions
+            snapshot_branch_override: Authoritative snapshot branch for same-run updates
+            release_pr_number_override: Authoritative release PR number for same-run updates
+            draft_release_url_override: Authoritative draft release URL for same-run updates
+            force_update: Force a refresh even if state appears unchanged
 
         Returns:
             SyncResult with action taken and issue details
@@ -137,7 +147,19 @@ class IssueSyncManager:
         self.ensure_labels_exist()
 
         # Derive current state
-        state = self.state_manager.derive_state(release_tag)
+        state = state_override or self.state_manager.derive_state(
+            release_tag,
+            retry_draft_release=True,
+        )
+        context_source = "override" if state_override else "re-derived"
+        print(
+            f"Issue sync effective context: source={context_source}, "
+            f"state={state.value}, "
+            f"snapshot_branch={snapshot_branch_override or '(auto)'}, "
+            f"release_pr_number={release_pr_number_override or '(auto)'}, "
+            f"draft_release_url={'yes' if draft_release_url_override else 'auto'}, "
+            f"force_update={force_update}"
+        )
 
         # Find existing workflow-owned issue
         issue = self.find_workflow_owned_issue(release_tag)
@@ -151,7 +173,14 @@ class IssueSyncManager:
                 # Wrapped in retry_on_not_found because GitHub API may
                 # return 404 for a freshly created issue (eventual consistency).
                 def _post_create():
-                    self._update_release_issue(new_issue, state, release_plan)
+                    self._update_release_issue(
+                        new_issue,
+                        state,
+                        release_plan,
+                        snapshot_branch_override=snapshot_branch_override,
+                        release_pr_number_override=release_pr_number_override,
+                        draft_release_url_override=draft_release_url_override,
+                    )
                     return self.gh.get_issue(new_issue["number"])
                 updated_issue = self.gh.retry_on_not_found(_post_create)
                 return SyncResult(action="created", issue=updated_issue)
@@ -159,8 +188,15 @@ class IssueSyncManager:
                 return SyncResult(action="none", reason="no_planned_release")
 
         # Issue exists - check if update needed
-        if self._needs_update(issue, state, release_plan):
-            self._update_release_issue(issue, state, release_plan)
+        if force_update or self._needs_update(issue, state, release_plan):
+            self._update_release_issue(
+                issue,
+                state,
+                release_plan,
+                snapshot_branch_override=snapshot_branch_override,
+                release_pr_number_override=release_pr_number_override,
+                draft_release_url_override=draft_release_url_override,
+            )
             # Refetch issue after update
             updated_issue = self.gh.get_issue(issue["number"])
             return SyncResult(action="updated", issue=updated_issue)
@@ -287,7 +323,6 @@ class IssueSyncManager:
         expected_state_label = self.get_state_label(state)
 
         # Check if the expected state label is present
-        state_labels = [l for l in current_labels if l.startswith(self.STATE_LABEL_PREFIX)]
         if expected_state_label not in current_labels:
             return True
 
@@ -308,7 +343,10 @@ class IssueSyncManager:
         self,
         issue: Dict[str, Any],
         state: ReleaseState,
-        release_plan: Dict[str, Any]
+        release_plan: Dict[str, Any],
+        snapshot_branch_override: Optional[str] = None,
+        release_pr_number_override: Optional[str] = None,
+        draft_release_url_override: Optional[str] = None,
     ) -> None:
         """
         Update an existing Release Issue to match current state.
@@ -324,6 +362,9 @@ class IssueSyncManager:
             issue: Issue dict to update
             state: Current derived state
             release_plan: Current release plan
+            snapshot_branch_override: Authoritative snapshot branch for same-run updates
+            release_pr_number_override: Authoritative release PR number for same-run updates
+            draft_release_url_override: Authoritative draft release URL for same-run updates
         """
         issue_number = issue["number"]
         release_tag = release_plan.get("repository", {}).get("target_release_tag", "")
@@ -349,14 +390,20 @@ class IssueSyncManager:
         # Get snapshot info and artifact URLs
         snapshot = self.state_manager.get_current_snapshot(release_tag)
         snapshot_id = snapshot.snapshot_id if snapshot else ""
-        snapshot_branch = snapshot.snapshot_branch if snapshot else ""
+        snapshot_branch = snapshot_branch_override or (snapshot.snapshot_branch if snapshot else "")
         release_pr_url = ""
         draft_release_url = ""
         snapshot_branch_url = ""
+        release_pr_number = release_pr_number_override or (
+            str(snapshot.release_pr_number) if snapshot and snapshot.release_pr_number else ""
+        )
 
-        if snapshot and snapshot.release_pr_number:
+        if snapshot_branch and not snapshot_id:
+            snapshot_id = snapshot_branch.replace("release-snapshot/", "")
+
+        if release_pr_number:
             # Construct PR URL
-            release_pr_url = f"https://github.com/{self.gh.repo}/pull/{snapshot.release_pr_number}"
+            release_pr_url = f"https://github.com/{self.gh.repo}/pull/{release_pr_number}"
 
         if snapshot_branch:
             # Construct snapshot branch tree URL
@@ -364,7 +411,7 @@ class IssueSyncManager:
 
         # Get draft release URL if in draft-ready state
         if state == ReleaseState.DRAFT_READY:
-            draft_release_url = self._get_draft_release_url(release_tag)
+            draft_release_url = draft_release_url_override or self._get_draft_release_url(release_tag)
 
         # Update STATE section with artifact links
         new_state_content = self.issue_manager.generate_state_section(

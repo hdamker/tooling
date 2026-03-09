@@ -22,6 +22,26 @@ inputs:
     description: 'Release PR number if exists'
     required: false
     default: ''
+  state_override:
+    description: 'Authoritative state override for same-run transitions'
+    required: false
+    default: ''
+  snapshot_branch_override:
+    description: 'Authoritative snapshot branch override for same-run transitions'
+    required: false
+    default: ''
+  release_pr_number_override:
+    description: 'Authoritative release PR number override for same-run transitions'
+    required: false
+    default: ''
+  draft_release_url_override:
+    description: 'Authoritative draft release URL override for same-run transitions'
+    required: false
+    default: ''
+  force_update:
+    description: 'Force a Release Issue refresh even if state appears unchanged'
+    required: false
+    default: 'false'
   trigger_type:
     description: 'What triggered the workflow (slash_command, pr_merge, issue_event, workflow_dispatch)'
     required: false
@@ -62,14 +82,17 @@ runs:
         CURRENT_STATE: ${{ inputs.state }}
         SNAPSHOT_BRANCH: ${{ inputs.snapshot_branch }}
         RELEASE_PR_NUMBER: ${{ inputs.release_pr_number }}
+        STATE_OVERRIDE: ${{ inputs.state_override }}
+        SNAPSHOT_BRANCH_OVERRIDE: ${{ inputs.snapshot_branch_override }}
+        RELEASE_PR_NUMBER_OVERRIDE: ${{ inputs.release_pr_number_override }}
+        DRAFT_RELEASE_URL_OVERRIDE: ${{ inputs.draft_release_url_override }}
+        FORCE_UPDATE: ${{ inputs.force_update }}
         TRIGGER_TYPE: ${{ inputs.trigger_type }}
         REPO: ${{ github.repository }}
         SCRIPTS_PATH: ${{ github.action_path }}/../../release_automation/scripts
       run: |
         import os
         import sys
-        import json
-
         # Add scripts path to module search path
         scripts_path = os.environ['SCRIPTS_PATH']
         # Go up two levels: scripts -> release_automation -> tooling root
@@ -88,9 +111,26 @@ runs:
         token = os.environ['GITHUB_TOKEN']
         release_tag = os.environ.get('RELEASE_TAG', '').strip()
         current_state = os.environ.get('CURRENT_STATE', '').strip()
+        state_override_raw = os.environ.get('STATE_OVERRIDE', '').strip()
+        snapshot_branch_override = os.environ.get('SNAPSHOT_BRANCH_OVERRIDE', '').strip()
+        release_pr_number_override = os.environ.get('RELEASE_PR_NUMBER_OVERRIDE', '').strip()
+        draft_release_url_override = os.environ.get('DRAFT_RELEASE_URL_OVERRIDE', '').strip()
+        force_update = os.environ.get('FORCE_UPDATE', 'false').strip().lower() == 'true'
         trigger_type = os.environ.get('TRIGGER_TYPE', 'workflow_dispatch')
 
         output_file = os.environ['GITHUB_OUTPUT']
+
+        def parse_state(value):
+            normalized = value.strip().lower().replace('-', '_')
+            if not normalized:
+                return None
+
+            for state in ReleaseState:
+                state_value = state.value.lower().replace('-', '_')
+                if normalized in {state_value, state.name.lower()}:
+                    return state
+
+            raise ValueError(f"Unknown release state override: {value}")
 
         def write_outputs(issue_number='', issue_action='skipped', issue_url=''):
             """Write outputs to GITHUB_OUTPUT file."""
@@ -98,6 +138,24 @@ runs:
                 f.write(f"issue_number={issue_number}\n")
                 f.write(f"issue_action={issue_action}\n")
                 f.write(f"issue_url={issue_url}\n")
+
+        try:
+            state_override = parse_state(state_override_raw)
+        except ValueError as e:
+            print(f"::error::{e}")
+            write_outputs(issue_action='error')
+            sys.exit(1)
+
+        requested_state = state_override_raw or current_state
+        context_source = 'override' if state_override else 're-derived'
+
+        print("Effective sync context:")
+        print(f"  Source: {context_source}")
+        print(f"  Requested state: {requested_state or '(none)'}")
+        print(f"  Snapshot branch override: {snapshot_branch_override or '(none)'}")
+        print(f"  Release PR override: {release_pr_number_override or '(none)'}")
+        print(f"  Draft release URL override present: {'yes' if draft_release_url_override else 'no'}")
+        print(f"  Force update: {force_update}")
 
         # Skip if no release tag or state indicates no action needed
         if not release_tag:
@@ -107,13 +165,13 @@ runs:
 
         # Skip for states where no issue management is needed
         skip_states = ['published', '']
-        if current_state.lower() in skip_states:
-            print(f"State '{current_state}' does not require issue sync - skipping")
+        if requested_state.lower() in skip_states:
+            print(f"State '{requested_state}' does not require issue sync - skipping")
             # Write workflow summary for visibility
             summary_file = os.environ.get('GITHUB_STEP_SUMMARY', '')
             if summary_file:
                 with open(summary_file, 'a') as f:
-                    if current_state.lower() == 'published':
+                    if requested_state.lower() == 'published':
                         f.write(f"## Release Status: Published\n\n")
                         f.write(f"Release `{release_tag}` has already been published. No further actions needed.\n")
                     else:
@@ -167,9 +225,16 @@ runs:
             # Continue anyway - use the input release_tag as authoritative
 
         # Call sync_release_issue
-        print(f"Syncing Release Issue for {release_tag} (state: {current_state})")
+        print(f"Syncing Release Issue for {release_tag} (state: {requested_state or current_state})")
         try:
-            result = sync_manager.sync_release_issue(release_plan_data)
+            result = sync_manager.sync_release_issue(
+                release_plan_data,
+                state_override=state_override,
+                snapshot_branch_override=snapshot_branch_override or None,
+                release_pr_number_override=release_pr_number_override or None,
+                draft_release_url_override=draft_release_url_override or None,
+                force_update=force_update,
+            )
 
             # Extract results
             action = result.action  # 'created', 'updated', 'none'

@@ -2016,6 +2016,45 @@ jobs:
             shared-actions/sync-release-issue
             shared-actions/post-bot-comment
 
+      - name: Resolve Sync Context
+        id: sync-context
+        shell: bash
+        run: |
+          state_override=""
+          snapshot_branch_override=""
+          release_pr_number_override=""
+          draft_release_url_override=""
+          force_update="false"
+
+          if [ "${{ needs.create-snapshot.result }}" = "success" ] && [ "${{ needs.create-snapshot.outputs.success }}" = "true" ]; then
+            state_override="snapshot-active"
+            snapshot_branch_override="${{ needs.create-snapshot.outputs.snapshot_branch }}"
+            release_pr_number_override="${{ needs.create-snapshot.outputs.release_pr_number }}"
+            force_update="true"
+          elif [ "${{ needs.handle-pr-merge.result }}" = "success" ] && [ "${{ needs.handle-pr-merge.outputs.success }}" = "true" ]; then
+            state_override="draft-ready"
+            snapshot_branch_override="${{ needs.derive-state.outputs.snapshot_branch }}"
+            release_pr_number_override="${{ github.event.pull_request.number }}"
+            draft_release_url_override="${{ needs.handle-pr-merge.outputs.draft_release_url }}"
+            force_update="true"
+          elif [ "${{ needs.discard-snapshot.result }}" = "success" ] && [ "${{ needs.discard-snapshot.outputs.success }}" = "true" ]; then
+            state_override="planned"
+            force_update="true"
+          elif [ "${{ needs.delete-draft.result }}" = "success" ] && [ "${{ needs.delete-draft.outputs.success }}" = "true" ]; then
+            state_override="planned"
+            force_update="true"
+          elif [ "${{ needs.check-trigger.outputs.command }}" = "sync-issue" ]; then
+            force_update="true"
+          fi
+
+          {
+            echo "state_override=$state_override"
+            echo "snapshot_branch_override=$snapshot_branch_override"
+            echo "release_pr_number_override=$release_pr_number_override"
+            echo "draft_release_url_override=$draft_release_url_override"
+            echo "force_update=$force_update"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Sync Release Issue
         id: sync
         uses: ./_tooling/shared-actions/sync-release-issue
@@ -2024,6 +2063,11 @@ jobs:
           state: ${{ needs.derive-state.outputs.state }}
           snapshot_branch: ${{ needs.derive-state.outputs.snapshot_branch }}
           release_pr_number: ${{ needs.derive-state.outputs.release_pr_number }}
+          state_override: ${{ steps.sync-context.outputs.state_override }}
+          snapshot_branch_override: ${{ steps.sync-context.outputs.snapshot_branch_override }}
+          release_pr_number_override: ${{ steps.sync-context.outputs.release_pr_number_override }}
+          draft_release_url_override: ${{ steps.sync-context.outputs.draft_release_url_override }}
+          force_update: ${{ steps.sync-context.outputs.force_update }}
           trigger_type: ${{ needs.check-trigger.outputs.trigger_type }}
           github_token: ${{ steps.app-token.outputs.token || github.token }}
 
