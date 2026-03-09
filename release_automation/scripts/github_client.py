@@ -6,12 +6,14 @@ needed by the release automation workflow. It uses the `gh` CLI
 for authentication and API access.
 """
 
+from fnmatch import fnmatch
 import json
 import subprocess
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
-from fnmatch import fnmatch
+
+import yaml
 
 
 @dataclass
@@ -237,6 +239,19 @@ class GitHubClient:
             # Other errors (auth, server, rate limit) should be surfaced
             print(f"Warning: Failed to read {path} from {ref}: {e}")
             return None
+
+    def get_release_metadata(self, tag: str) -> Optional[dict]:
+        """Read release-metadata.yaml from a release tag or legacy asset."""
+        content = self.get_file_content("release-metadata.yaml", ref=tag)
+        if not content:
+            content = self.download_release_asset(tag, "release-metadata.yaml")
+        if not content:
+            return None
+        try:
+            metadata = yaml.safe_load(content)
+        except yaml.YAMLError:
+            return None
+        return metadata if isinstance(metadata, dict) else None
 
     def get_releases(self, include_drafts: bool = False) -> List[Release]:
         """
