@@ -38,6 +38,10 @@ def mock_github_client():
     client.list_branches.return_value = [
         Mock(name="main", sha="abc1234567890abcdef1234567890abcdef12345678")
     ]
+    client.get_repository_yaml_file.side_effect = lambda repo, path, ref="main": {
+        "camaraproject/Commonalities": {"version": "0.7.0-rc.1"},
+        "camaraproject/IdentityAndConsentManagement": {"version": "0.5.0-rc.1"},
+    }.get(repo)
     return client
 
 
@@ -683,6 +687,41 @@ class TestMetadataIntegration:
             "qos-profiles": "1.0.0",
         }
 
+    @patch("release_automation.scripts.snapshot_creator.tempfile.mkdtemp")
+    @patch("release_automation.scripts.snapshot_creator.shutil.rmtree")
+    @patch("release_automation.scripts.snapshot_creator.GitOperations")
+    @patch("builtins.open", create=True)
+    def test_passes_enriched_commonalities_dependency_to_metadata_generator(
+        self,
+        mock_open,
+        mock_git_ops_class,
+        mock_rmtree,
+        mock_mkdtemp,
+        snapshot_creator,
+        mock_metadata_generator,
+        sample_release_plan,
+    ):
+        """Metadata generation receives Commonalities release tag and version."""
+        mock_mkdtemp.return_value = "/tmp/test-snapshot"
+        mock_git_ops = MagicMock()
+        mock_git_ops_class.return_value = mock_git_ops
+        mock_git_ops.create_pr.return_value = PullRequestInfo(number=1, url="url")
+
+        snapshot_creator.create_snapshot(
+            sample_release_plan,
+            SnapshotConfig(release_tag="r4.1"),
+        )
+
+        metadata_plan = mock_metadata_generator.generate.call_args[0][0]
+        assert metadata_plan["dependencies"]["commonalities_release"] == {
+            "release_tag": "r3.4",
+            "version": "0.7.0-rc.1",
+        }
+        assert metadata_plan["dependencies"]["identity_consent_management_release"] == {
+            "release_tag": "r3.3",
+            "version": "0.5.0-rc.1",
+        }
+
 
 # --- Tests for version calculator integration ---
 
@@ -734,6 +773,7 @@ class TestVersionCalculatorIntegration:
             "qos-profiles": "1.0.0",
         }
         assert context.release_tag == "r4.1"
+        assert context.commonalities_version == "0.7.0-rc.1"
 
 
 # --- Tests for transformation integration ---
@@ -773,6 +813,73 @@ class TestTransformationIntegration:
         # These are derived from release_plan['dependencies']
         assert context.commonalities_release == "r3.4"
         assert context.icm_release == "r3.3"
+        assert context.commonalities_version == "0.7.0-rc.1"
+
+    @patch("release_automation.scripts.snapshot_creator.tempfile.mkdtemp")
+    @patch("release_automation.scripts.snapshot_creator.shutil.rmtree")
+    @patch("release_automation.scripts.snapshot_creator.GitOperations")
+    def test_fails_when_icm_version_cannot_be_resolved(
+        self,
+        mock_git_ops_class,
+        mock_rmtree,
+        mock_mkdtemp,
+        snapshot_creator,
+        mock_github_client,
+        sample_release_plan,
+    ):
+        """Missing ICM VERSION.yaml fails snapshot creation early."""
+        mock_mkdtemp.return_value = "/tmp/test-snapshot"
+
+        def version_lookup(repo, path, ref="main"):
+            if repo == "camaraproject/Commonalities":
+                return {"version": "0.7.0-rc.1"}
+            return None
+
+        mock_github_client.get_repository_yaml_file.side_effect = version_lookup
+
+        result = snapshot_creator.create_snapshot(
+            sample_release_plan,
+            SnapshotConfig(release_tag="r4.1"),
+        )
+
+        assert result.success is False
+        assert result.errors == [
+            "IdentityAndConsentManagement VERSION.yaml could not be resolved for release 'r3.3'"
+        ]
+        mock_git_ops_class.assert_not_called()
+
+    @patch("release_automation.scripts.snapshot_creator.tempfile.mkdtemp")
+    @patch("release_automation.scripts.snapshot_creator.shutil.rmtree")
+    @patch("release_automation.scripts.snapshot_creator.GitOperations")
+    def test_fails_when_commonalities_version_cannot_be_resolved(
+        self,
+        mock_git_ops_class,
+        mock_rmtree,
+        mock_mkdtemp,
+        snapshot_creator,
+        mock_github_client,
+        sample_release_plan,
+    ):
+        """Missing Commonalities VERSION.yaml fails snapshot creation early."""
+        mock_mkdtemp.return_value = "/tmp/test-snapshot"
+
+        def version_lookup(repo, path, ref="main"):
+            if repo == "camaraproject/Commonalities":
+                return None
+            return {"version": "0.5.0-rc.1"}
+
+        mock_github_client.get_repository_yaml_file.side_effect = version_lookup
+
+        result = snapshot_creator.create_snapshot(
+            sample_release_plan,
+            SnapshotConfig(release_tag="r4.1"),
+        )
+
+        assert result.success is False
+        assert result.errors == [
+            "Commonalities VERSION.yaml could not be resolved for release 'r3.4'"
+        ]
+        mock_git_ops_class.assert_not_called()
 
     @patch("release_automation.scripts.snapshot_creator.tempfile.mkdtemp")
     @patch("release_automation.scripts.snapshot_creator.shutil.rmtree")
@@ -1010,6 +1117,46 @@ class TestReleaseDocumentation:
         assert result == "CHANGELOG/CHANGELOG-r4.md"
         mock_instance.generate_draft.assert_called_once()
         mock_instance.write_changelog.assert_called_once()
+
+    @patch("release_automation.scripts.snapshot_creator.ChangelogGenerator")
+    def test_generate_changelog_uses_commonalities_version_only(
+        self, mock_gen_cls, snapshot_creator, mock_github_client, tmp_path
+    ):
+        """CHANGELOG generation uses semantic version instead of metadata display string."""
+        mock_github_client.get_releases.return_value = []
+        mock_github_client.generate_release_notes.return_value = None
+
+        mock_instance = Mock()
+        mock_instance.generate_draft.return_value = "# r4.1\n\nContent\n"
+        mock_instance.write_changelog.return_value = "CHANGELOG/CHANGELOG-r4.md"
+        mock_gen_cls.return_value = mock_instance
+
+        metadata = {
+            "repository": {"release_type": "pre-release-alpha"},
+            "apis": [],
+            "dependencies": {
+                "commonalities_release": "r4.1 (0.7.0-rc.1)",
+                "identity_consent_management_release": "r4.1 (0.5.0-rc.1)",
+            },
+        }
+
+        snapshot_creator._generate_changelog(
+            str(tmp_path),
+            SnapshotConfig(release_tag="r4.1"),
+            {},
+            {},
+            metadata,
+            "TestRepo-QoD",
+            commonalities_version="0.7.0-rc.1",
+            icm_version="0.5.0-rc.1",
+        )
+
+        draft_metadata = mock_instance.generate_draft.call_args.kwargs["metadata"]
+        assert draft_metadata["dependencies"]["commonalities_release"] == "0.7.0-rc.1"
+        assert (
+            draft_metadata["dependencies"]["identity_consent_management_release"]
+            == "0.5.0-rc.1"
+        )
 
     def test_readme_update_uses_shared_release_metadata_loader(
         self, snapshot_creator, mock_github_client

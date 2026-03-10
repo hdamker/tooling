@@ -204,6 +204,23 @@ class TestDraftGeneration:
         assert "quality-on-demand v1.1.0-rc.1" in result
         assert "Commonalities v0.6.0 (r3.3)" in result
 
+    def test_generate_draft_allows_commonalities_version_only(
+        self, generator, single_api_metadata
+    ):
+        single_api_metadata["dependencies"]["commonalities_release"] = "0.7.0-rc.1"
+        single_api_metadata["dependencies"][
+            "identity_consent_management_release"
+        ] = "0.5.0-rc.1"
+
+        result = generator.generate_draft(
+            release_tag="r4.1",
+            metadata=single_api_metadata,
+            repo_name="QualityOnDemand",
+        )
+
+        assert "Commonalities 0.7.0-rc.1" in result
+        assert "Identity and Consent Management 0.5.0-rc.1" in result
+
     def test_generate_draft_with_candidate_changes(
         self, generator, single_api_metadata, sample_changes_body
     ):

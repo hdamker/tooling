@@ -240,17 +240,64 @@ class GitHubClient:
             print(f"Warning: Failed to read {path} from {ref}: {e}")
             return None
 
+    def get_yaml_file(self, path: str, ref: str = "main") -> Optional[dict]:
+        """
+        Read and parse a YAML file from the repository.
+
+        Args:
+            path: File path relative to repository root
+            ref: Branch, tag, or commit SHA to read from
+
+        Returns:
+            Parsed YAML dict, or None if the file cannot be read or parsed
+        """
+        content = self.get_file_content(path, ref=ref)
+        if not content:
+            return None
+
+        try:
+            parsed = yaml.safe_load(content)
+        except yaml.YAMLError:
+            return None
+
+        return parsed if isinstance(parsed, dict) else None
+
+    def get_repository_yaml_file(
+        self, repo: str, path: str, ref: str = "main"
+    ) -> Optional[dict]:
+        """
+        Read and parse a YAML file from another repository using the same auth.
+
+        Args:
+            repo: Repository in format "owner/name"
+            path: File path relative to repository root
+            ref: Branch, tag, or commit SHA to read from
+
+        Returns:
+            Parsed YAML dict, or None if the file cannot be read or parsed
+        """
+        client = GitHubClient(repo=repo, token=self.token)
+        return client.get_yaml_file(path, ref=ref)
+
     def get_release_metadata(self, tag: str) -> Optional[dict]:
         """Read release-metadata.yaml from a release tag or legacy asset."""
         content = self.get_file_content("release-metadata.yaml", ref=tag)
-        if not content:
-            content = self.download_release_asset(tag, "release-metadata.yaml")
+        if content is not None:
+            try:
+                metadata = yaml.safe_load(content)
+            except yaml.YAMLError:
+                return None
+            return metadata if isinstance(metadata, dict) else None
+
+        content = self.download_release_asset(tag, "release-metadata.yaml")
         if not content:
             return None
+
         try:
             metadata = yaml.safe_load(content)
         except yaml.YAMLError:
             return None
+
         return metadata if isinstance(metadata, dict) else None
 
     def get_releases(self, include_drafts: bool = False) -> List[Release]:

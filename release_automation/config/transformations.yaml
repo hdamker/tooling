@@ -14,11 +14,12 @@
 #   - {major_version}: major version number (e.g., "3" from "3.2.0-rc.2")
 #   - {repo_name}: repository name (e.g., "QualityOnDemand")
 #   - {commonalities_release}: commonalities release tag from dependencies (e.g., "r3.4")
+#   - {commonalities_version}: commonalities semantic version from VERSION.yaml (e.g., "0.7.0-rc.1")
 #   - {icm_release}: ICM release tag from dependencies (e.g., "r3.3")
 #   - {api_name}: current API name
 #
-# Future (not yet available):
-#   - {commonalities_version}: commonalities documentation version (e.g., "0.5.0")
+# Available elsewhere in release automation, but not currently used by any
+# transformation rule in this file:
 #   - {icm_version}: ICM documentation version
 
 transformations:
@@ -64,8 +65,7 @@ transformations:
     file_pattern: "code/API_definitions/*.yaml"
     path: info.x-camara-commonalities
     # No match_value - replace any value (could be "wip", "0.6", etc.)
-    # Uses commonalities_release until commonalities_version is available
-    replacement: "{commonalities_release}"
+    replacement: "{commonalities_version}"
 
   # T4: REMOVED - x-camara-icm field does not (yet?) exist in CAMARA specs
 
