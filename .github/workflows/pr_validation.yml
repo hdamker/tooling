@@ -78,9 +78,11 @@ jobs:
 
             if (oidcUrl === '' || oidcTokenRequest === '') {
               core.warning('ID token is not available for this caller workflow. Falling back to legacy tooling ref camaraproject/tooling@v0.');
+              // Operational outputs — used by subsequent checkout steps
               core.setOutput('tooling_checkout_repo', 'camaraproject/tooling');
-              core.setOutput('tooling_checkout_ref', 'v0');
+              core.setOutput('tooling_checkout_ref', 'v0');  // tag ref, not pinned
               core.setOutput('tooling_ref_mode', 'legacy_v0');
+              // Informational outputs — not available in fallback mode
               core.setOutput('tooling_workflow_ref', '');
               core.setOutput('tooling_workflow_sha', '');
               return;
@@ -110,10 +112,12 @@ jobs:
             core.info(`job_workflow_ref=${workflowRef}`);
             core.info(`job_workflow_sha=${workflowSha}`);
 
+            // Operational outputs — used by subsequent checkout steps
             core.setOutput('tooling_checkout_repo', checkoutRepo);
-            core.setOutput('tooling_checkout_ref', checkoutRef);
+            core.setOutput('tooling_checkout_ref', checkoutRef);  // 40-char commit SHA for pinned checkout
             core.setOutput('tooling_ref_mode', 'resolved_from_oidc');
-            core.setOutput('tooling_workflow_ref', workflowRef);
+            // Informational outputs — for logging and diagnostics only
+            core.setOutput('tooling_workflow_ref', workflowRef);  // symbolic ref, e.g. .../pr_validation.yml@refs/tags/v0
             core.setOutput('tooling_workflow_sha', workflowSha);
 
       - name: Detect changed files
