@@ -79,6 +79,23 @@ class TestGitHubClient(unittest.TestCase):
         content = self.client.get_file_content("missing")
         self.assertIsNone(content)
 
+    @patch("release_automation.scripts.github_client.GitHubClient.get_file_content")
+    def test_get_yaml_file(self, mock_get_file_content):
+        mock_get_file_content.return_value = "version: 0.7.0-rc.1\n"
+
+        content = self.client.get_yaml_file("VERSION.yaml", ref="r4.1")
+
+        self.assertEqual(content, {"version": "0.7.0-rc.1"})
+        mock_get_file_content.assert_called_once_with("VERSION.yaml", ref="r4.1")
+
+    @patch("release_automation.scripts.github_client.GitHubClient.get_file_content")
+    def test_get_yaml_file_invalid(self, mock_get_file_content):
+        mock_get_file_content.return_value = "not: [valid"
+
+        content = self.client.get_yaml_file("VERSION.yaml", ref="r4.1")
+
+        self.assertIsNone(content)
+
     @patch("release_automation.scripts.github_client.GitHubClient.download_release_asset")
     @patch("release_automation.scripts.github_client.GitHubClient.get_file_content")
     def test_get_release_metadata_from_repo_tree(

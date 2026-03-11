@@ -35,6 +35,7 @@ def context():
         },
         commonalities_release="r3.4",
         icm_release="r3.3",
+        commonalities_version="0.7.0-rc.1",
         repo_name="QualityOnDemand",
     )
 
@@ -141,6 +142,13 @@ class TestResolveTemplate:
         )
         assert result == "r3.4"
 
+    def test_resolve_commonalities_version(self, transformer, context):
+        """Resolve {commonalities_version} variable."""
+        result = transformer._resolve_template(
+            "{commonalities_version}", context, None
+        )
+        assert result == "0.7.0-rc.1"
+
     def test_resolve_icm_release(self, transformer, context):
         """Resolve {icm_release} variable."""
         result = transformer._resolve_template(
@@ -209,6 +217,7 @@ class TestResolveTemplate:
             },
             commonalities_release="r3.4",
             icm_release="r3.3",
+            commonalities_version="0.7.0-rc.1",
         )
         # sim-swap-subscriptions-createSubscription → sim-swap-subscriptions
         result = transformer._resolve_template(
@@ -377,6 +386,7 @@ class TestYamlPathTransformation:
                 api_versions={"test": "3.2.0-rc.2"},
                 commonalities_release="r3.4",
                 icm_release="r3.3",
+                commonalities_version="0.7.0-rc.1",
                 repo_name="TestRepo",
             )
 

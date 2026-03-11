@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import tempfile
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -95,6 +96,11 @@ class TransformationError(SnapshotCreatorError):
     pass
 
 
+class DependencyResolutionError(SnapshotCreatorError):
+    """Raised when release dependency metadata cannot be resolved."""
+    pass
+
+
 class SnapshotCreator:
     """
     Orchestrates release snapshot creation.
@@ -106,6 +112,9 @@ class SnapshotCreator:
     SNAPSHOT_BRANCH_PREFIX = "release-snapshot"
     RELEASE_REVIEW_BRANCH_PREFIX = "release-review"
     SHORT_SHA_LENGTH = 7
+    COMMONALITIES_REPO = "camaraproject/Commonalities"
+    ICM_REPO = "camaraproject/IdentityAndConsentManagement"
+    COMMONALITIES_VERSION_FILE = "VERSION.yaml"
 
     def __init__(
         self,
@@ -193,6 +202,16 @@ class SnapshotCreator:
             result.snapshot_branch = snapshot_branch
             result.release_review_branch = release_review_branch
 
+            # Step 5b: Resolve Commonalities semantic version from VERSION.yaml
+            dependencies = release_plan.get("dependencies", {})
+            commonalities_release = dependencies.get("commonalities_release", "main")
+            icm_release = dependencies.get("identity_consent_management_release", "main")
+            icm_dependency_configured = "identity_consent_management_release" in dependencies
+            commonalities_version = self._resolve_commonalities_version(
+                commonalities_release
+            )
+            icm_version = self._resolve_icm_version(icm_release) if icm_dependency_configured else ""
+
             if config.dry_run:
                 result.success = True
                 result.warnings.append("Dry run: no branches or PR created")
@@ -221,15 +240,11 @@ class SnapshotCreator:
                 return result
 
             # Step 8: Apply transformations
-            # Extract dependency release tags from release-plan.yaml
-            dependencies = release_plan.get("dependencies", {})
-            commonalities_release = dependencies.get("commonalities_release", "main")
-            icm_release = dependencies.get("identity_consent_management_release", "main")
-
             context = TransformationContext(
                 release_tag=config.release_tag,
                 api_versions=api_versions,
                 commonalities_release=commonalities_release,
+                commonalities_version=commonalities_version,
                 icm_release=icm_release,
                 repo_name=self.gh.repo.split("/")[-1],
                 release_plan=release_plan,
@@ -248,8 +263,18 @@ class SnapshotCreator:
 
             # Step 9: Generate and write release-metadata.yaml
             api_titles = self._extract_api_titles(release_plan, temp_dir)
+            metadata_release_plan = self._build_release_plan_for_metadata(
+                release_plan,
+                commonalities_release,
+                commonalities_version,
+                icm_release if icm_dependency_configured else "",
+                icm_version,
+            )
             metadata = self.metadata_gen.generate(
-                release_plan, api_versions, base_sha, api_titles,
+                metadata_release_plan,
+                api_versions,
+                base_sha,
+                api_titles,
                 repo=self.gh.repo,
             )
             metadata_path = os.path.join(temp_dir, "release-metadata.yaml")
@@ -291,7 +316,14 @@ class SnapshotCreator:
             try:
                 repo_name = self.gh.repo.split("/")[-1]
                 self._generate_changelog(
-                    temp_dir, config, release_plan, api_versions, metadata, repo_name
+                    temp_dir,
+                    config,
+                    release_plan,
+                    api_versions,
+                    metadata,
+                    repo_name,
+                    commonalities_version=commonalities_version,
+                    icm_version=icm_version,
                 )
                 git_ops.commit_all(
                     f"Add CHANGELOG draft for {config.release_tag}"
@@ -317,6 +349,8 @@ class SnapshotCreator:
 
         except InvalidStateError as e:
             result.errors.append(str(e))
+        except DependencyResolutionError as e:
+            result.errors.append(str(e))
         except TransformationError as e:
             result.errors.append(str(e))
             cleanup_errors = self._cleanup_branches(snapshot_branch, release_review_branch)
@@ -335,6 +369,90 @@ class SnapshotCreator:
                 shutil.rmtree(temp_dir, ignore_errors=True)
 
         return result
+
+    def _resolve_commonalities_version(self, release_tag: str) -> str:
+        """
+        Resolve the Commonalities semantic version from VERSION.yaml.
+
+        Args:
+            release_tag: Commonalities release tag from release-plan.yaml
+
+        Returns:
+            Semantic version string from VERSION.yaml
+
+        Raises:
+            DependencyResolutionError: If VERSION.yaml cannot be resolved or parsed
+        """
+        return self._resolve_dependency_version(
+            repo=self.COMMONALITIES_REPO,
+            release_tag=release_tag,
+            display_name="Commonalities",
+        )
+
+    def _resolve_icm_version(self, release_tag: str) -> str:
+        """Resolve the Identity and Consent Management semantic version."""
+        return self._resolve_dependency_version(
+            repo=self.ICM_REPO,
+            release_tag=release_tag,
+            display_name="IdentityAndConsentManagement",
+        )
+
+    def _resolve_dependency_version(
+        self,
+        repo: str,
+        release_tag: str,
+        display_name: str,
+    ) -> str:
+        """Resolve a dependency semantic version from VERSION.yaml."""
+        version_data = self.gh.get_repository_yaml_file(
+            repo,
+            self.COMMONALITIES_VERSION_FILE,
+            ref=release_tag,
+        )
+        if version_data is None:
+            raise DependencyResolutionError(
+                f"{display_name} VERSION.yaml could not be resolved for "
+                f"release '{release_tag}'"
+            )
+
+        if not isinstance(version_data, dict):
+            raise DependencyResolutionError(
+                f"{display_name} VERSION.yaml could not be resolved for "
+                f"release '{release_tag}': expected a YAML mapping"
+            )
+
+        version = version_data.get("version")
+        if not isinstance(version, str) or not version.strip():
+            raise DependencyResolutionError(
+                f"{display_name} VERSION.yaml could not be resolved for "
+                f"release '{release_tag}': missing 'version'"
+            )
+
+        return version.strip()
+
+    def _build_release_plan_for_metadata(
+        self,
+        release_plan: Dict[str, Any],
+        commonalities_release: str,
+        commonalities_version: str,
+        icm_release: str,
+        icm_version: str,
+    ) -> Dict[str, Any]:
+        """
+        Enrich release-plan dependencies for release-metadata generation only.
+        """
+        enriched_plan = deepcopy(release_plan)
+        dependencies = enriched_plan.setdefault("dependencies", {})
+        dependencies["commonalities_release"] = {
+            "release_tag": commonalities_release,
+            "version": commonalities_version,
+        }
+        if icm_release and icm_version:
+            dependencies["identity_consent_management_release"] = {
+                "release_tag": icm_release,
+                "version": icm_version,
+            }
+        return enriched_plan
 
     def validate_preconditions(self, release_tag: str) -> List[str]:
         """
@@ -671,6 +789,8 @@ class SnapshotCreator:
         api_versions: Dict[str, str],
         metadata: Dict[str, Any],
         repo_name: str,
+        commonalities_version: str = "",
+        icm_version: str = "",
     ) -> str:
         """Generate CHANGELOG draft on release-review branch.
 
@@ -684,11 +804,20 @@ class SnapshotCreator:
         candidate_changes = self._get_candidate_changes(
             config.release_tag, previous_release
         )
+        changelog_metadata = deepcopy(metadata)
+        if commonalities_version:
+            changelog_metadata.setdefault("dependencies", {})[
+                "commonalities_release"
+            ] = commonalities_version
+        if icm_version:
+            changelog_metadata.setdefault("dependencies", {})[
+                "identity_consent_management_release"
+            ] = icm_version
 
         generator = ChangelogGenerator()
         content = generator.generate_draft(
             release_tag=config.release_tag,
-            metadata=metadata,
+            metadata=changelog_metadata,
             repo_name=repo_name,
             candidate_changes=candidate_changes,
         )

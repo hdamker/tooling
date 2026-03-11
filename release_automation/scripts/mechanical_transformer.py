@@ -71,6 +71,7 @@ class TransformationContext:
     api_versions: Dict[str, str]
     commonalities_release: str  # Release tag, e.g., "r3.4"
     icm_release: str  # Release tag, e.g., "r3.3"
+    commonalities_version: str = ""  # Semantic version, e.g., "0.7.0-rc.1"
     repo_name: str = ""  # Repository name, e.g., "QualityOnDemand"
     release_plan: Dict[str, Any] = field(default_factory=dict)
 
@@ -452,6 +453,7 @@ class MechanicalTransformer:
         - {major_version}
         - {repo_name}
         - {commonalities_release}
+        - {commonalities_version}
         - {icm_release}
         - {api_name}
 
@@ -496,6 +498,7 @@ class MechanicalTransformer:
             "{major_version}": major_version,
             "{repo_name}": context.repo_name,
             "{commonalities_release}": context.commonalities_release,
+            "{commonalities_version}": context.commonalities_version,
             "{icm_release}": context.icm_release,
             "{api_name}": api_name or "",
         }
