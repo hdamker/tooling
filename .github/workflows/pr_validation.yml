@@ -30,11 +30,14 @@ on:
         required: false
         default: ""
 
-permissions:
-  contents: read
-  issues: write
-  pull-requests: write
-  statuses: write
+# permissions block removed to inherit from caller workflow — enables
+# conditional OIDC ref resolution for callers that grant id-token: write
+# while keeping legacy v0 fallback for callers that don't.
+# permissions:
+#   contents: read
+#   issues: write
+#   pull-requests: write
+#   statuses: write
 
 jobs:
   pr-validation:
