@@ -77,14 +77,23 @@ API-repository/
    └── spectral-oas-caller.yml 
 ```
     
-The job input parameter `configurations` in caller workflows allows to specify the branch of the `tooling` repository from which the configuration files stored in `/linting/config/` are applied in the reusable workflows. 
-By default, the main branch of tooling is used.
+The caller workflow `uses:` line selects which version of `tooling` provides the reusable workflow, for example:
+
+```yaml
+uses: camaraproject/tooling/.github/workflows/pr_validation.yml@v0
+```
+
+Inside `pr_validation.yml`, workflow-owned assets are resolved from that same effective tooling repository and commit, so branch-based or SHA-based pilot calls stay internally consistent.
+
+For backward compatibility, callers that still use the older permissions block without `id-token: write` automatically fall back to the legacy internal `camaraproject/tooling@v0` asset resolution. That keeps existing API repositories working while a coordinated caller migration is prepared.
+
+The `configurations` input does **not** select a tooling branch. It selects a subfolder inside `/linting/config/` from the tooling ref already chosen by the reusable workflow call.
 
 ```yaml
 #    with:
 #      configurations: staging
 ```
-This way custom configurations can be used (if needed by given repository or for canary deployment of new configurations) - first the relevant branch needs to be created in the `tooling` repository.
+This way custom configurations can be used if needed by a given repository. Create the relevant subfolder in `tooling/linting/config/` and reference it through `configurations`.
 
 ## Runnig Linting Workflows
 

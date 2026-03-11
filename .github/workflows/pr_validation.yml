@@ -30,6 +30,13 @@ on:
         required: false
         default: ""
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  statuses: write
+  id-token: write
+
 jobs:
   pr-validation:
     name: PR Validation
@@ -41,6 +48,71 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
+
+      - name: Resolve tooling checkout ref
+        id: resolve-tooling-ref
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const workflowRefPattern =
+              /^([^/]+\/[^/]+)\/\.github\/workflows\/pr_validation\.yml@.+$/;
+            const shaPattern = /^[0-9a-f]{40}$/i;
+            const oidcUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL || '';
+            const oidcTokenRequest = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN || '';
+
+            function decodeJwtPayload(jwt) {
+              const parts = jwt.split('.');
+              if (parts.length !== 3) {
+                throw new Error('OIDC token is not a valid JWT');
+              }
+
+              const payload = parts[1]
+                .replace(/-/g, '+')
+                .replace(/_/g, '/');
+              const padLength = (4 - (payload.length % 4)) % 4;
+              const padded = payload + '='.repeat(padLength);
+              return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+            }
+
+            if (oidcUrl === '' || oidcTokenRequest === '') {
+              core.warning('ID token is not available for this caller workflow. Falling back to legacy tooling ref camaraproject/tooling@v0.');
+              core.setOutput('tooling_checkout_repo', 'camaraproject/tooling');
+              core.setOutput('tooling_checkout_ref', 'v0');
+              core.setOutput('tooling_ref_mode', 'legacy_v0');
+              core.setOutput('tooling_workflow_ref', '');
+              core.setOutput('tooling_workflow_sha', '');
+              return;
+            }
+
+            const oidcToken = await core.getIDToken('pr-validation-tooling-ref');
+            const claims = decodeJwtPayload(oidcToken);
+            const workflowRef = claims.job_workflow_ref || '';
+            const workflowSha = claims.job_workflow_sha || '';
+            const workflowRefMatch = workflowRef.match(workflowRefPattern);
+
+            if (!workflowRefMatch) {
+              core.setFailed(`Unexpected job_workflow_ref claim: ${workflowRef}`);
+              return;
+            }
+
+            if (!shaPattern.test(workflowSha)) {
+              core.setFailed(`Invalid job_workflow_sha claim: ${workflowSha}`);
+              return;
+            }
+
+            const checkoutRepo = workflowRefMatch[1];
+            const checkoutRef = workflowSha.toLowerCase();
+
+            core.info(`tooling_checkout_repo=${checkoutRepo}`);
+            core.info(`tooling_checkout_ref=${checkoutRef}`);
+            core.info(`job_workflow_ref=${workflowRef}`);
+            core.info(`job_workflow_sha=${workflowSha}`);
+
+            core.setOutput('tooling_checkout_repo', checkoutRepo);
+            core.setOutput('tooling_checkout_ref', checkoutRef);
+            core.setOutput('tooling_ref_mode', 'resolved_from_oidc');
+            core.setOutput('tooling_workflow_ref', workflowRef);
+            core.setOutput('tooling_workflow_sha', workflowSha);
 
       - name: Detect changed files
         id: changes
@@ -76,10 +148,22 @@ jobs:
             exit 1
           fi
 
+      - name: Checkout tooling assets
+        if: steps.changes.outputs.release_plan_any_changed != 'true' || steps.exclusivity.outcome != 'failure'
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.resolve-tooling-ref.outputs.tooling_checkout_repo }}
+          ref: ${{ steps.resolve-tooling-ref.outputs.tooling_checkout_ref }}
+          path: tooling-assets
+          sparse-checkout: |
+            linting/config
+            shared-actions/validate-release-plan
+          sparse-checkout-cone-mode: false
+
       - name: Validate release-plan.yaml
         if: steps.changes.outputs.release_plan_any_changed == 'true'
         id: validate
-        uses: camaraproject/tooling/shared-actions/validate-release-plan@v0
+        uses: ./tooling-assets/shared-actions/validate-release-plan
         with:
           release_plan_path: release-plan.yaml
           check_files: 'true'
@@ -176,22 +260,12 @@ jobs:
       # - release-plan.yaml was changed AND validation passed
       # Skipped when release-plan.yaml validation fails (no point linting with invalid rules)
 
-      - name: Checkout linting config
-        if: steps.changes.outputs.release_plan_any_changed != 'true' || steps.validate.outputs.valid == 'true'
-        uses: actions/checkout@v6
-        with:
-          repository: camaraproject/tooling
-          path: lint-config
-          # using configurations from v0 floating tag
-          ref: v0
-          sparse-checkout: |
-            linting/config/
-          sparse-checkout-cone-mode: false
-
       - name: Copy config to workspace
         if: steps.changes.outputs.release_plan_any_changed != 'true' || steps.validate.outputs.valid == 'true'
+        # configurations selects a subfolder inside linting/config from the resolved tooling workflow ref
+        # or the legacy v0 fallback when the caller workflow does not grant ID-token access
         # --strip-trailing-slashes removes any trailing slashes from each SOURCE argument (when ${{ inputs.configurations }} is empty)
-        run: cp -RT --strip-trailing-slashes ${{ github.workspace }}/lint-config/linting/config/${{ inputs.configurations }} ${{ github.workspace }}
+        run: cp -RT --strip-trailing-slashes ${{ github.workspace }}/tooling-assets/linting/config/${{ inputs.configurations }} ${{ github.workspace }}
 
       - name: MegaLinter
         id: ml
