@@ -85,7 +85,7 @@ uses: camaraproject/tooling/.github/workflows/pr_validation.yml@v0
 
 Inside `pr_validation.yml`, workflow-owned assets are resolved from that same effective tooling repository and commit, so branch-based or SHA-based pilot calls stay internally consistent.
 
-For backward compatibility, callers that still use the older permissions block without `id-token: write` automatically fall back to the legacy internal `camaraproject/tooling@v0` asset resolution. That keeps existing API repositories working while a coordinated caller migration is prepared.
+For backward compatibility, callers that still use the older permissions block without `id-token: write` can still start the reusable workflow and automatically fall back to the legacy internal `camaraproject/tooling@v0` asset resolution. That keeps existing API repositories working while a coordinated caller migration is prepared.
 
 The `configurations` input does **not** select a tooling branch. It selects a subfolder inside `/linting/config/` from the tooling ref already chosen by the reusable workflow call.
 

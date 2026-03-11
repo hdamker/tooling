@@ -35,7 +35,6 @@ permissions:
   issues: write
   pull-requests: write
   statuses: write
-  id-token: write
 
 jobs:
   pr-validation:
