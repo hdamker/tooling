@@ -772,7 +772,7 @@ class SnapshotCreator:
                 f"https://github.com/{org}/{repo_name}/releases/tag/{config.release_tag}"
             )
             data["prerelease_type"] = (
-                "release candidate" if release_type == "pre-release-rc" else "pre-release"
+                "release candidate" if release_type == "pre-release-rc" else "alpha"
             )
             data["formatted_prerelease_apis"] = ReadmeUpdater.format_api_links(
                 apis_list, repo_name, config.release_tag, org
