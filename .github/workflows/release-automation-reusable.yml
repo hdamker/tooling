@@ -25,11 +25,6 @@ on:
         type: string
         required: false
         default: ""
-      trigger_pr:
-        description: "PR number that triggered this workflow"
-        type: string
-        required: false
-        default: ""
       tooling_ref_override:
         description: "Optional tooling checkout ref override (40-char SHA)"
         type: string
