@@ -1324,16 +1324,6 @@ jobs:
           path: api-repo
           fetch-depth: 1
 
-      - name: Checkout tooling
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
-          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
-          path: _tooling
-          sparse-checkout: |
-            release_automation
-            shared-actions
-
       - name: Generate App Token
         id: app-token
         if: vars.RELEASE_APP_ID != ''
@@ -1342,164 +1332,76 @@ jobs:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: pip install pyyaml pystache
-
-      - name: Read release metadata from tag
-        id: metadata
+      - name: Copy README release info from tag
+        id: readme
         env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
           RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
         uses: actions/github-script@v8
         with:
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
+            const fs = require('fs');
             const tag = process.env.RELEASE_TAG;
-            let content;
+
+            // Read README from release tag
+            let tagReadme;
             try {
               const { data } = await github.rest.repos.getContent({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                path: 'release-metadata.yaml',
+                path: 'README.md',
                 ref: tag
               });
-              content = Buffer.from(data.content, 'base64').toString('utf8');
+              tagReadme = Buffer.from(data.content, 'base64').toString('utf8');
             } catch (e) {
-              core.warning(`Could not read release-metadata.yaml from tag ${tag}: ${e.message}`);
-              core.setOutput('metadata_yaml', '');
+              core.warning(`Could not read README.md from tag ${tag}: ${e.message}`);
+              core.setOutput('changed', 'false');
               return;
             }
-            core.setOutput('metadata_yaml', content);
 
-      - name: Determine release state and build data
-        id: release-data
-        env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
-          METADATA_YAML: ${{ steps.metadata.outputs.metadata_yaml }}
-          RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
-        shell: python
-        run: |
-          import os, sys, json, yaml
+            const START = '<!-- CAMARA:RELEASE-INFO:START -->';
+            const END = '<!-- CAMARA:RELEASE-INFO:END -->';
 
-          release_tag = os.environ['RELEASE_TAG']
-          metadata_yaml = os.environ.get('METADATA_YAML', '')
+            // Extract release info block from tag README
+            const tagStart = tagReadme.indexOf(START);
+            const tagEnd = tagReadme.indexOf(END);
+            if (tagStart === -1 || tagEnd === -1) {
+              core.warning('Tag README missing release info delimiters');
+              core.setOutput('changed', 'false');
+              return;
+            }
+            const tagBlock = tagReadme.substring(tagStart, tagEnd + END.length);
 
-          if not metadata_yaml:
-              print('::warning::No release metadata available')
-              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                  f.write('release_state=no_release\n')
-                  f.write('data_json={}\n')
-              sys.exit(0)
+            // Read local README (main branch checkout)
+            const localPath = 'api-repo/README.md';
+            if (!fs.existsSync(localPath)) {
+              core.warning('README.md not found in API repo checkout');
+              core.setOutput('changed', 'false');
+              return;
+            }
+            const localReadme = fs.readFileSync(localPath, 'utf8');
+            const localStart = localReadme.indexOf(START);
+            const localEnd = localReadme.indexOf(END);
+            if (localStart === -1 || localEnd === -1) {
+              core.warning('Main README missing release info delimiters');
+              core.setOutput('changed', 'false');
+              return;
+            }
 
-          metadata = yaml.safe_load(metadata_yaml)
-          repo_info = metadata.get('repository', {})
-          release_type = repo_info.get('release_type', '')
-          meta_release = repo_info.get('meta_release', '')
-          is_prerelease = release_type in ('pre-release-alpha', 'pre-release-rc')
+            // Replace local block with tag block
+            const newReadme = localReadme.substring(0, localStart) +
+                              tagBlock +
+                              localReadme.substring(localEnd + END.length);
 
-          # Query existing public releases via gh CLI
-          import subprocess
-          result = subprocess.run(
-              ['gh', 'api', f'repos/{os.environ.get("GITHUB_REPOSITORY", "")}/releases',
-               '--jq', '[.[] | select(.draft == false and .prerelease == false)] | .[0].tag_name // empty'],
-              capture_output=True, text=True
-          )
-          existing_public = result.stdout.strip() if result.returncode == 0 else ''
+            if (newReadme === localReadme) {
+              console.log('README release info already up to date');
+              core.setOutput('changed', 'false');
+              return;
+            }
 
-          # Determine release state
-          if is_prerelease and not existing_public:
-              release_state = 'prerelease_only'
-          elif is_prerelease and existing_public:
-              release_state = 'public_with_prerelease'
-          elif not is_prerelease:
-              release_state = 'public_release'
-          else:
-              release_state = 'no_release'
-
-          # Build API lists from metadata
-          apis = metadata.get('apis', [])
-          current_apis = []
-          for api in apis:
-              current_apis.append({
-                  'file_name': api.get('api_file_name', api.get('api_name', '')),
-                  'version': api.get('api_version', '')
-              })
-
-          # For public_with_prerelease, we need existing public release's API info
-          public_apis_json = '[]'
-          prerelease_apis_json = '[]'
-          latest_public = ''
-          newest_prerelease = ''
-          public_meta_release = ''
-
-          if release_state == 'public_release':
-              latest_public = release_tag
-              public_apis_json = json.dumps(current_apis)
-              public_meta_release = meta_release
-          elif release_state == 'prerelease_only':
-              newest_prerelease = release_tag
-              prerelease_apis_json = json.dumps(current_apis)
-          elif release_state == 'public_with_prerelease':
-              newest_prerelease = release_tag
-              prerelease_apis_json = json.dumps(current_apis)
-              latest_public = existing_public
-              # Read existing public release metadata for its API info
-              result2 = subprocess.run(
-                  ['gh', 'api',
-                   f'repos/{os.environ.get("GITHUB_REPOSITORY", "")}/contents/release-metadata.yaml?ref={existing_public}',
-                   '--jq', '.content'],
-                  capture_output=True, text=True
-              )
-              if result2.returncode == 0 and result2.stdout.strip():
-                  import base64
-                  try:
-                      pub_content = base64.b64decode(result2.stdout.strip()).decode('utf8')
-                      pub_metadata = yaml.safe_load(pub_content)
-                      pub_apis = []
-                      for api in pub_metadata.get('apis', []):
-                          pub_apis.append({
-                              'file_name': api.get('api_file_name', api.get('api_name', '')),
-                              'version': api.get('api_version', '')
-                          })
-                      public_apis_json = json.dumps(pub_apis)
-                      public_meta_release = pub_metadata.get('repository', {}).get('meta_release', '')
-                  except Exception as e:
-                      print(f'::warning::Could not parse public release metadata: {e}')
-
-          prerelease_type = ''
-          if is_prerelease:
-              prerelease_type = 'release candidate' if release_type == 'pre-release-rc' else 'pre-release'
-
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f'release_state={release_state}\n')
-              f.write(f'latest_public={latest_public}\n')
-              f.write(f'newest_prerelease={newest_prerelease}\n')
-              f.write(f'public_apis_json={public_apis_json}\n')
-              f.write(f'prerelease_apis_json={prerelease_apis_json}\n')
-              f.write(f'meta_release={public_meta_release}\n')
-              f.write(f'prerelease_type={prerelease_type}\n')
-
-          print(f'Release state: {release_state}')
-          print(f'Latest public: {latest_public}')
-          print(f'Newest prerelease: {newest_prerelease}')
-
-      - name: Update README Release Information
-        id: readme
-        uses: ./_tooling/shared-actions/update-readme-release-info
-        with:
-          readme_path: api-repo/README.md
-          repo_name: ${{ github.event.repository.name }}
-          release_state: ${{ steps.release-data.outputs.release_state }}
-          latest_public_release: ${{ steps.release-data.outputs.latest_public }}
-          newest_prerelease: ${{ steps.release-data.outputs.newest_prerelease }}
-          public_apis_json: ${{ steps.release-data.outputs.public_apis_json }}
-          prerelease_apis_json: ${{ steps.release-data.outputs.prerelease_apis_json }}
-          meta_release: ${{ steps.release-data.outputs.meta_release }}
-          prerelease_type: ${{ steps.release-data.outputs.prerelease_type }}
+            fs.writeFileSync(localPath, newReadme);
+            core.setOutput('changed', 'true');
+            console.log('README release info synced from tag');
 
       - name: Copy CHANGELOG from release tag
         id: changelog
@@ -1606,7 +1508,7 @@ jobs:
             --body "Automated post-release sync PR for ${RELEASE_TAG}.
 
           This PR updates:
-          - README.md Release Information section (template-based, matching snapshot format)
+          - README.md Release Information section (copied from release tag)
           - CHANGELOG for the release cycle
 
           Created by release automation workflow." \
