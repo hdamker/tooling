@@ -87,7 +87,7 @@ Legacy API review validation system (Fall25 meta-release specific).
 Reusable GitHub Actions for cross-repository use.
 
 * **Location**: [shared-actions/](shared-actions/)
-* **Actions**: `validate-release-plan` (stub - full implementation pending)
+* **Actions**: `validate-release-plan` — schema and semantic validation for release-plan.yaml
 
 ## Repository Structure
 
@@ -97,6 +97,7 @@ tooling/
 │   └── workflows/               # Reusable workflows (public interface)
 │       ├── api-review-reusable.yml  # Deprecated
 │       ├── pr_validation.yml
+│       ├── release-automation-reusable.yml
 │       └── spectral-oas.yml
 ├── api-review/                  # Deprecated
 │   ├── docs/
@@ -108,7 +109,7 @@ tooling/
 ├── scripts/                     # Deprecated
 │   └── api_review_validator_v0_6.py
 ├── shared-actions/
-│   └── validate-release-plan/   # Composite GitHub Action (stub)
+│   └── validate-release-plan/   # Composite GitHub Action
 └── validation/
     ├── docs/
     ├── schemas/                 # JSON/YAML schemas
@@ -120,8 +121,10 @@ tooling/
 
 ## Release Information
 
-The repository has no (pre)releases yet. Work in progress is within the main branch.
+The latest release is [v0.2.3](https://github.com/camaraproject/tooling/releases/tag/v0.2.3).
 
+* API repositories reference the `v0` floating tag, which tracks the latest patch release
+* The release candidate of CAMARA Release Automation is on the [`release-automation`](https://github.com/camaraproject/tooling/tree/release-automation) branch (tag `ra-v1-rc`), to be merged into `main` soon
 * Tested versions are in the `main` branch
 * Versions under development are in feature branches
 
