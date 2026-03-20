@@ -675,6 +675,79 @@ class SnapshotCreator:
             return releases[0].tag_name
         return None
 
+    def _get_compare_base(
+        self, release_type: str, release_tag: str
+    ) -> Optional[str]:
+        """Determine the compare base for CHANGELOG candidate changes.
+
+        The CHANGELOG convention defines different comparison bases:
+        - Alpha: delta to the previous release (any type)
+        - First RC: all changes since the last public release
+        - Subsequent RC: delta to the previous release-candidate
+        - Public/maintenance: all changes since the previous public release
+
+        For RC releases, checks same-cycle prereleases via release-metadata.yaml
+        to distinguish first RC from subsequent RC.
+
+        Args:
+            release_type: From release-metadata.yaml (e.g., "pre-release-alpha",
+                "pre-release-rc", "public-release", "maintenance-release")
+            release_tag: Current release tag (e.g., "r4.2") for cycle detection.
+
+        Returns:
+            Tag name of the compare base, or None if no prior release exists.
+        """
+        if release_type == "pre-release-alpha":
+            return self._get_previous_release()
+
+        if release_type == "pre-release-rc":
+            return self._get_rc_compare_base(release_tag)
+
+        # Public and maintenance: compare against last public release
+        return self._get_latest_public_release()
+
+    def _get_rc_compare_base(self, release_tag: str) -> Optional[str]:
+        """Find compare base for an RC release.
+
+        Checks same-cycle prereleases for a previous RC. If found,
+        this is a subsequent RC (compare against it). Otherwise,
+        this is the first RC (compare against last public release).
+
+        Args:
+            release_tag: Current release tag (e.g., "r4.2") for cycle detection.
+
+        Returns:
+            Tag name of the compare base, or None if no prior release exists.
+        """
+        releases = self.gh.get_releases(include_drafts=False)
+        if not releases:
+            return None
+
+        # Extract cycle prefix (e.g., "r4." from "r4.2")
+        match = re.match(r"(r\d+\.)", release_tag)
+        cycle_prefix = match.group(1) if match else None
+
+        if cycle_prefix:
+            for r in releases:
+                if not r.tag_name.startswith(cycle_prefix):
+                    continue  # Different cycle
+                if not r.prerelease:
+                    break  # Public release in same cycle — no prior RC possible
+                # Same-cycle prerelease — check if it's an RC
+                metadata = self.gh.get_release_metadata(r.tag_name)
+                if metadata:
+                    prev_type = metadata.get("repository", {}).get(
+                        "release_type", ""
+                    )
+                    if prev_type == "pre-release-rc":
+                        return r.tag_name  # Subsequent RC
+
+        # No previous RC in same cycle → first RC → last public (any cycle)
+        for r in releases:
+            if not r.prerelease:
+                return r.tag_name
+        return None
+
     def _get_candidate_changes(
         self, release_tag: str, previous_release: Optional[str]
     ) -> Optional[str]:
@@ -794,15 +867,17 @@ class SnapshotCreator:
     ) -> str:
         """Generate CHANGELOG draft on release-review branch.
 
-        Determines previous release, fetches candidate changes from GitHub's
-        generate-notes API, generates draft, writes to CHANGELOG directory.
+        Determines compare base (dependent on release type), fetches candidate
+        changes from GitHub's generate-notes API, generates draft, writes to
+        CHANGELOG directory.
 
         Returns:
             Relative path to the written CHANGELOG file.
         """
-        previous_release = self._get_previous_release()
+        release_type = metadata.get("repository", {}).get("release_type", "")
+        compare_base = self._get_compare_base(release_type, config.release_tag)
         candidate_changes = self._get_candidate_changes(
-            config.release_tag, previous_release
+            config.release_tag, compare_base
         )
         changelog_metadata = deepcopy(metadata)
         if commonalities_version:

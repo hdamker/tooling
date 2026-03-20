@@ -1030,6 +1030,136 @@ class TestReleaseDocumentation:
         result = snapshot_creator._get_previous_release()
         assert result is None
 
+    # --- Tests for _get_compare_base ---
+
+    def test_compare_base_alpha_uses_previous_release(
+        self, snapshot_creator, mock_github_client
+    ):
+        """Alpha compares against previous release (any type)."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r4.1", prerelease=True),
+            Mock(tag_name="r3.2", prerelease=False),
+        ]
+        result = snapshot_creator._get_compare_base("pre-release-alpha", "r4.2")
+        assert result == "r4.1"
+
+    def test_compare_base_first_rc_uses_last_public(
+        self, snapshot_creator, mock_github_client
+    ):
+        """First RC (no prior RC in same cycle) compares against last public."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r4.1", prerelease=True),
+            Mock(tag_name="r4.0", prerelease=True),
+            Mock(tag_name="r3.2", prerelease=False),
+        ]
+        # Same-cycle prereleases are alphas
+        mock_github_client.get_release_metadata.side_effect = [
+            {"repository": {"release_type": "pre-release-alpha"}},
+            {"repository": {"release_type": "pre-release-alpha"}},
+        ]
+        result = snapshot_creator._get_compare_base("pre-release-rc", "r4.2")
+        assert result == "r3.2"
+
+    def test_compare_base_subsequent_rc_uses_previous_rc(
+        self, snapshot_creator, mock_github_client
+    ):
+        """Subsequent RC compares against previous RC in same cycle."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r4.2", prerelease=True),
+            Mock(tag_name="r4.1", prerelease=True),
+            Mock(tag_name="r3.2", prerelease=False),
+        ]
+        # First same-cycle prerelease is an RC
+        mock_github_client.get_release_metadata.return_value = {
+            "repository": {"release_type": "pre-release-rc"},
+        }
+        result = snapshot_creator._get_compare_base("pre-release-rc", "r4.3")
+        assert result == "r4.2"
+        # Should only check the first same-cycle prerelease
+        mock_github_client.get_release_metadata.assert_called_once_with("r4.2")
+
+    def test_compare_base_public_uses_last_public(
+        self, snapshot_creator, mock_github_client
+    ):
+        """Public release compares against previous public release."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r4.1", prerelease=True),
+            Mock(tag_name="r3.2", prerelease=False),
+        ]
+        result = snapshot_creator._get_compare_base("public-release", "r4.2")
+        assert result == "r3.2"
+
+    def test_compare_base_maintenance_uses_last_public(
+        self, snapshot_creator, mock_github_client
+    ):
+        """Maintenance release compares against last public release."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r3.2", prerelease=False),
+            Mock(tag_name="r2.1", prerelease=False),
+        ]
+        result = snapshot_creator._get_compare_base("maintenance-release", "r3.3")
+        assert result == "r3.2"
+
+    def test_compare_base_alpha_no_releases_returns_none(
+        self, snapshot_creator, mock_github_client
+    ):
+        """Alpha returns None when no releases exist."""
+        mock_github_client.get_releases.return_value = []
+        result = snapshot_creator._get_compare_base("pre-release-alpha", "r4.0")
+        assert result is None
+
+    def test_compare_base_rc_no_public_returns_none(
+        self, snapshot_creator, mock_github_client
+    ):
+        """RC returns None when no public releases exist and no prior RC."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r4.1", prerelease=True),
+        ]
+        mock_github_client.get_release_metadata.return_value = {
+            "repository": {"release_type": "pre-release-alpha"},
+        }
+        result = snapshot_creator._get_compare_base("pre-release-rc", "r4.2")
+        assert result is None
+
+    def test_compare_base_rc_legacy_prerelease_skipped(
+        self, snapshot_creator, mock_github_client
+    ):
+        """RC skips same-cycle prereleases with no release-metadata.yaml."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r4.1", prerelease=True),
+            Mock(tag_name="r3.2", prerelease=False),
+        ]
+        # Legacy release — no metadata
+        mock_github_client.get_release_metadata.return_value = None
+        result = snapshot_creator._get_compare_base("pre-release-rc", "r4.2")
+        assert result == "r3.2"
+
+    def test_compare_base_rc_skips_different_cycle(
+        self, snapshot_creator, mock_github_client
+    ):
+        """RC ignores prereleases from different cycles."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r3.1", prerelease=True),  # Different cycle
+            Mock(tag_name="r2.0", prerelease=False),
+        ]
+        # r3.1 is different cycle — get_release_metadata should not be called
+        result = snapshot_creator._get_compare_base("pre-release-rc", "r4.0")
+        assert result == "r2.0"
+        mock_github_client.get_release_metadata.assert_not_called()
+
+    def test_compare_base_rc_same_cycle_public_stops_search(
+        self, snapshot_creator, mock_github_client
+    ):
+        """RC stops searching same-cycle when public release found."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r4.0", prerelease=False),  # Public in same cycle
+            Mock(tag_name="r3.2", prerelease=False),
+        ]
+        result = snapshot_creator._get_compare_base("pre-release-rc", "r4.1")
+        # Should return r4.0 (last public, found after breaking from same-cycle search)
+        assert result == "r4.0"
+        mock_github_client.get_release_metadata.assert_not_called()
+
     def test_get_candidate_changes_works_without_previous(
         self, snapshot_creator, mock_github_client
     ):
@@ -1157,6 +1287,59 @@ class TestReleaseDocumentation:
             draft_metadata["dependencies"]["identity_consent_management_release"]
             == "0.5.0-rc.1"
         )
+
+    @patch("release_automation.scripts.snapshot_creator.ChangelogGenerator")
+    def test_generate_changelog_rc_uses_public_release_as_base(
+        self, mock_gen_cls, snapshot_creator, mock_github_client, tmp_path
+    ):
+        """RC changelog compares against last public release, not previous alpha."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r4.1", prerelease=True),
+            Mock(tag_name="r3.2", prerelease=False),
+        ]
+        mock_github_client.get_release_metadata.return_value = {
+            "repository": {"release_type": "pre-release-alpha"},
+        }
+        mock_github_client.generate_release_notes.return_value = "## What's Changed\n"
+
+        mock_instance = Mock()
+        mock_instance.generate_draft.return_value = "# r4.2\n\nContent\n"
+        mock_instance.write_changelog.return_value = "CHANGELOG/CHANGELOG-r4.md"
+        mock_gen_cls.return_value = mock_instance
+
+        config = SnapshotConfig(release_tag="r4.2")
+        metadata = {"repository": {"release_type": "pre-release-rc"}, "apis": [], "dependencies": {}}
+        snapshot_creator._generate_changelog(
+            str(tmp_path), config, {}, {}, metadata, "TestRepo-QoD"
+        )
+
+        # Should compare against r3.2 (last public), not r4.1 (previous alpha)
+        mock_github_client.generate_release_notes.assert_called_once_with("r4.2", "r3.2")
+
+    @patch("release_automation.scripts.snapshot_creator.ChangelogGenerator")
+    def test_generate_changelog_alpha_uses_previous_release_as_base(
+        self, mock_gen_cls, snapshot_creator, mock_github_client, tmp_path
+    ):
+        """Alpha changelog compares against previous release (any type)."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r4.1", prerelease=True),
+            Mock(tag_name="r3.2", prerelease=False),
+        ]
+        mock_github_client.generate_release_notes.return_value = "## What's Changed\n"
+
+        mock_instance = Mock()
+        mock_instance.generate_draft.return_value = "# r4.2\n\nContent\n"
+        mock_instance.write_changelog.return_value = "CHANGELOG/CHANGELOG-r4.md"
+        mock_gen_cls.return_value = mock_instance
+
+        config = SnapshotConfig(release_tag="r4.2")
+        metadata = {"repository": {"release_type": "pre-release-alpha"}, "apis": [], "dependencies": {}}
+        snapshot_creator._generate_changelog(
+            str(tmp_path), config, {}, {}, metadata, "TestRepo-QoD"
+        )
+
+        # Should compare against r4.1 (previous release), not r3.2 (last public)
+        mock_github_client.generate_release_notes.assert_called_once_with("r4.2", "r4.1")
 
     def test_readme_update_uses_shared_release_metadata_loader(
         self, snapshot_creator, mock_github_client
