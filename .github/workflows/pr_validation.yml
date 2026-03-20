@@ -84,26 +84,31 @@ jobs:
           release_plan_path: release-plan.yaml
           check_files: 'true'
 
-      - name: Report validation status
-        if: always() && steps.changes.outputs.release_plan_any_changed == 'true' && steps.exclusivity.outcome != 'failure'
+      - name: release-plan.yaml validation result
+        if: always() && steps.exclusivity.outcome != 'failure'
         uses: actions/github-script@v8
         with:
           script: |
+            const changed = '${{ steps.changes.outputs.release_plan_any_changed }}' === 'true';
+
+            if (!changed) {
+              core.notice('release-plan.yaml not modified, validation skipped');
+              return;
+            }
+
             const valid = '${{ steps.validate.outputs.valid }}' === 'true';
             const runUrl = '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}';
 
-            // Parse warnings first (needed for status description)
+            // Parse warnings
             const warningsStr = `${{ steps.validate.outputs.warnings }}`;
             let warnings = [];
             try {
               warnings = JSON.parse(warningsStr || '[]');
             } catch (e) {
-              if (warningsStr && warningsStr.trim()) {
-                warnings = [warningsStr];
-              }
+              if (warningsStr && warningsStr.trim()) warnings = [warningsStr];
             }
 
-            // Determine status description
+            // Determine status
             let description;
             if (!valid) {
               description = 'Validation failed';
@@ -113,7 +118,7 @@ jobs:
               description = 'Validation passed';
             }
 
-            // Create separate check status (visible in PR checks list)
+            // Try commit status silently (works on non-fork PRs, silently skipped on fork PRs)
             try {
               await github.rest.repos.createCommitStatus({
                 owner: context.repo.owner,
@@ -124,16 +129,11 @@ jobs:
                 description: description,
                 target_url: runUrl
               });
-            } catch (error) {
-              if (error.status === 403) {
-                core.warning('Cannot post commit status — insufficient permissions (common for fork PRs). Validation result: ' + description);
-              } else {
-                throw error;
-              }
+            } catch (e) {
+              // Silently ignore — fork PRs don't have write permissions
             }
 
             if (!valid) {
-              // Output errors as annotations
               const errorsStr = `${{ steps.validate.outputs.errors }}`;
               let errors = [];
               try {
@@ -141,16 +141,12 @@ jobs:
               } catch (e) {
                 errors = [errorsStr];
               }
-
               for (const err of errors) {
                 core.error(err, {file: 'release-plan.yaml'});
               }
-
-              // Job summary
               core.summary.addHeading('Release Plan Validation Failed', 2);
               core.summary.addList(errors);
               await core.summary.write();
-
               core.setFailed('Release plan validation failed');
             } else {
               if (warnings.length > 0) {
@@ -160,15 +156,11 @@ jobs:
                 core.summary.addHeading('Release Plan Validation Passed with Warnings', 2);
                 core.summary.addList(warnings);
               } else {
-                core.notice('Validation passed', {file: 'release-plan.yaml'});
+                core.notice('release-plan.yaml validation passed');
                 core.summary.addHeading('Release Plan Validation Passed', 2);
               }
               await core.summary.write();
             }
-
-      - name: Skip validation (no release-plan changes)
-        if: steps.changes.outputs.release_plan_any_changed != 'true'
-        run: echo "::notice::release-plan.yaml not modified, skipping validation"
 
       # ==================== MegaLinter ====================
       # Runs when:
