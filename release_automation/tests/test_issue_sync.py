@@ -501,6 +501,51 @@ class TestUpdateReleaseIssue:
         gh.remove_labels.assert_called_with(1, ["release-state:planned"])
         gh.add_labels.assert_called_with(1, ["release-state:snapshot-active"])
 
+    def test_skips_label_update_when_correct_label_already_present(self):
+        """Test that no label API calls are made when the correct state label is already set."""
+        gh = MagicMock()
+        issue_manager = MagicMock()
+        issue_manager.should_update_title.return_value = False
+        issue_manager.generate_state_section.return_value = "new state"
+        issue_manager.update_section.return_value = "same body"
+
+        manager = IssueSyncManager(gh, MagicMock(), issue_manager, MagicMock())
+
+        issue = {
+            "number": 1,
+            "body": "body",
+            "labels": [{"name": "release-issue"}, {"name": "release-state:planned"}]
+        }
+
+        manager._update_release_issue(issue, ReleaseState.PLANNED, {})
+
+        gh.remove_labels.assert_not_called()
+        gh.add_labels.assert_not_called()
+
+    def test_removes_extra_state_labels_when_correct_present(self):
+        """Test that extra state labels are removed when the correct one is already present."""
+        gh = MagicMock()
+        issue_manager = MagicMock()
+        issue_manager.should_update_title.return_value = False
+        issue_manager.generate_state_section.return_value = "new state"
+        issue_manager.update_section.return_value = "same body"
+
+        manager = IssueSyncManager(gh, MagicMock(), issue_manager, MagicMock())
+
+        issue = {
+            "number": 1,
+            "body": "body",
+            "labels": [
+                {"name": "release-state:planned"},
+                {"name": "release-state:snapshot-active"}
+            ]
+        }
+
+        manager._update_release_issue(issue, ReleaseState.PLANNED, {})
+
+        gh.remove_labels.assert_called_with(1, ["release-state:snapshot-active"])
+        gh.add_labels.assert_not_called()
+
     def test_updates_issue_body(self):
         """Test issue body is updated when changed."""
         gh = MagicMock()

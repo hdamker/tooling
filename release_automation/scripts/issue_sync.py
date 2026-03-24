@@ -375,17 +375,26 @@ class IssueSyncManager:
             for label in issue.get("labels", [])
         ]
 
-        # Remove old state labels
-        old_state_labels = [
-            l for l in current_labels
-            if l.startswith(self.STATE_LABEL_PREFIX)
-        ]
-        if old_state_labels:
-            self.gh.remove_labels(issue_number, old_state_labels)
-
-        # Add new state label
+        # Update state label only if needed
         new_state_label = self.get_state_label(state)
-        self.gh.add_labels(issue_number, [new_state_label])
+        if new_state_label in current_labels:
+            # Correct label already present (e.g., freshly created issue) —
+            # remove any extra state labels only
+            extra_state_labels = [
+                l for l in current_labels
+                if l.startswith(self.STATE_LABEL_PREFIX) and l != new_state_label
+            ]
+            if extra_state_labels:
+                self.gh.remove_labels(issue_number, extra_state_labels)
+        else:
+            # Remove old state labels, add new one
+            old_state_labels = [
+                l for l in current_labels
+                if l.startswith(self.STATE_LABEL_PREFIX)
+            ]
+            if old_state_labels:
+                self.gh.remove_labels(issue_number, old_state_labels)
+            self.gh.add_labels(issue_number, [new_state_label])
 
         # Get snapshot info and artifact URLs
         snapshot = self.state_manager.get_current_snapshot(release_tag)
