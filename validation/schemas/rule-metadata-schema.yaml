@@ -20,10 +20,10 @@ required:
 properties:
   id:
     type: string
-    pattern: "^[0-9]{3}$"
+    pattern: "^[A-Z]-[0-9]{3}$"
     description: >
-      Stable sequential ID (three-digit, zero-padded).  Survives engine
-      migrations — once assigned, never reused.
+      Stable ID with engine prefix and three-digit number (e.g. "S-042").
+      Once assigned, never reused even if the rule is retired.
 
   name:
     type: string

@@ -21,11 +21,11 @@ required:
 properties:
   rule_id:
     type: string
-    pattern: "^[0-9]{3}$"
+    pattern: "^[A-Z]-[0-9]{3}$"
     description: >
-      Framework rule ID (three-digit, zero-padded).  Looked up from rule
-      metadata by engine + engine_rule.  Auto-assigned for engine rules
-      without explicit metadata.
+      Framework rule ID (engine prefix + three-digit number, e.g. "S-042").
+      Looked up from rule metadata by engine + engine_rule.  Auto-assigned
+      for engine rules without explicit metadata.
 
   engine:
     type: string

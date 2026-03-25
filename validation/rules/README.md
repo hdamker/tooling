@@ -13,11 +13,12 @@ Schema: [../schemas/rule-metadata-schema.yaml](../schemas/rule-metadata-schema.y
 
 ## ID Assignment
 
-Rule IDs are three-digit, zero-padded, sequentially assigned:
+Rule IDs use an engine prefix and a three-digit sequential number:
 
-- `001`–`099`: Spectral rules
-- `100`–`149`: gherkin-lint rules
-- `150`–`199`: Python checks
-- `200`+: reserved for future engines
+- `S-nnn`: Spectral rules (e.g. `S-001`, `S-042`)
+- `P-nnn`: Python checks (e.g. `P-001`, `P-012`)
+- `G-nnn`: gherkin-lint rules (e.g. `G-001`)
+- `Y-nnn`: yamllint rules (e.g. `Y-001`)
+- `M-nnn`: manual rules — documented but not machine-checkable
 
 Once assigned, an ID is never reused even if the rule is retired.
