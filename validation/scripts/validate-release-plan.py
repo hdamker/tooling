@@ -3,6 +3,13 @@
 CAMARA Release Plan Validator
 
 Validates release-plan.yaml files against JSON schema and semantic rules.
+Called by the pr_validation workflow via the shared-actions/validate-release-plan/
+action. Do not modify the CLI interface or exit code semantics without checking
+that action for compatibility.
+
+The validation framework v1 will implement its own release-plan checks with a
+different architecture (common findings model, context-aware severity, profile
+filtering). Do not use this script as a blueprint for v1 checks.
 
 Usage:
     python3 validate-release-plan.py <release-plan-file> [--schema <schema-file>] [--check-files]

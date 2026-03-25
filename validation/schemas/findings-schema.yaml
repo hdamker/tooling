@@ -1,0 +1,81 @@
+# JSON Schema for the common findings model.
+# Every validation engine (Spectral, yamllint, gherkin-lint, Python checks)
+# normalizes its output into this format before the post-filter stage.
+
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: CAMARA Validation Finding
+description: >
+  A single finding produced by a validation engine and consumed by the
+  post-filter pipeline.  Arrays of these objects form the interchange
+  format between engine adapters and the post-filter/output stages.
+
+type: object
+required:
+  - engine
+  - engine_rule
+  - level
+  - message
+  - path
+  - line
+
+properties:
+  rule_id:
+    type: string
+    pattern: "^[0-9]{3}$"
+    description: >
+      Framework rule ID (three-digit, zero-padded).  Looked up from rule
+      metadata by engine + engine_rule.  Auto-assigned for engine rules
+      without explicit metadata.
+
+  engine:
+    type: string
+    enum: [spectral, yamllint, gherkin, python]
+    description: Validation engine that produced this finding.
+
+  engine_rule:
+    type: string
+    description: >
+      Native rule identifier within the engine (e.g. Spectral rule name,
+      Python check function name).
+
+  level:
+    type: string
+    enum: [error, warn, hint]
+    description: >
+      Severity as reported by the engine, before post-filter remapping.
+      The post-filter may change this based on conditional_level overrides
+      and may suppress the finding entirely (level "off").
+
+  message:
+    type: string
+    description: Human-readable description of the issue.
+
+  path:
+    type: string
+    description: >
+      File path relative to the repository root
+      (e.g. "code/API_definitions/quality-on-demand.yaml").
+
+  line:
+    type: integer
+    minimum: 1
+    description: >
+      1-indexed line number in the source file.  For findings on bundled
+      output, this is mapped back to the source file via the source map.
+
+  column:
+    type: ["integer", "null"]
+    minimum: 1
+    description: Column number, if available from the engine.
+
+  api_name:
+    type: ["string", "null"]
+    description: >
+      API name this finding belongs to, derived from the spec file path.
+      Null for repo-level findings (e.g. release-plan checks).
+
+  hint:
+    type: string
+    description: >
+      Actionable fix guidance.  From rule metadata if available, otherwise
+      falls back to the engine message.

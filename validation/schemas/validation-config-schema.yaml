@@ -1,0 +1,56 @@
+# JSON Schema for the central validation configuration file.
+# Located at validation-config.yaml in the tooling repository root.
+# Read by the reusable workflow on every run to determine per-repo behavior.
+
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: CAMARA Validation Config
+description: >
+  Central configuration controlling which repositories have validation
+  enabled and at what rollout stage.
+
+type: object
+required:
+  - version
+  - defaults
+
+properties:
+  version:
+    type: integer
+    const: 1
+    description: Schema version.  Allows future evolution.
+
+  defaults:
+    type: object
+    required: [stage]
+    properties:
+      stage:
+        type: string
+        enum: [disabled, advisory, standard]
+        description: >
+          Default stage for repositories not listed under "repositories".
+          disabled = dark (exit immediately), advisory = dispatch only,
+          standard = PRs and dispatch.
+    additionalProperties: false
+
+  fork_owners:
+    type: array
+    items:
+      type: string
+    description: >
+      GitHub usernames allowed to test in forks.  When the workflow runs
+      in a fork owned by a listed user, the stage is overridden to
+      "standard" regardless of the upstream repo's configured stage.
+
+  repositories:
+    type: object
+    description: Per-repository stage overrides.
+    additionalProperties:
+      type: object
+      required: [stage]
+      properties:
+        stage:
+          type: string
+          enum: [disabled, advisory, standard]
+      additionalProperties: false
+
+additionalProperties: false

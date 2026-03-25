@@ -1,0 +1,132 @@
+# JSON Schema for validation rule metadata definitions.
+# Each rule maps an engine-level check to framework-level applicability,
+# conditional severity, and fix guidance.
+
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: CAMARA Validation Rule Metadata
+description: >
+  Defines one validation rule within the framework.  Rule metadata files
+  contain an array of these objects.
+
+type: object
+required:
+  - id
+  - name
+  - engine
+  - engine_rule
+  - hint
+  - conditional_level
+
+properties:
+  id:
+    type: string
+    pattern: "^[0-9]{3}$"
+    description: >
+      Stable sequential ID (three-digit, zero-padded).  Survives engine
+      migrations — once assigned, never reused.
+
+  name:
+    type: string
+    pattern: "^[a-z][a-z0-9-]+$"
+    description: Human-readable kebab-case name.
+
+  engine:
+    type: string
+    enum: [spectral, yamllint, gherkin, python, manual]
+    description: >
+      Engine responsible for producing the finding.  "manual" means the
+      rule is documented but not machine-checkable.
+
+  engine_rule:
+    type: string
+    description: >
+      Native rule identifier within the engine.  For Spectral this is the
+      rule name in .spectral.yaml; for Python checks the function name.
+
+  hint:
+    type: string
+    description: Actionable fix guidance shown to the developer.
+
+  applicability:
+    type: object
+    description: >
+      Conditions under which this rule fires.  Omitted fields are
+      unconstrained (always match).  All present fields must match (AND).
+      Array fields use OR logic (value must be in the array).
+    properties:
+      branch_types:
+        type: array
+        items:
+          type: string
+          enum: [main, release, maintenance, feature]
+
+      trigger_types:
+        type: array
+        items:
+          type: string
+          enum: [pr, dispatch, release-automation, local]
+
+      target_release_type:
+        type: array
+        items:
+          type: string
+
+      target_api_status:
+        type: array
+        items:
+          type: string
+
+      target_api_maturity:
+        type: array
+        items:
+          type: string
+          enum: [initial, stable]
+
+      api_pattern:
+        type: array
+        items:
+          type: string
+          enum: [request-response, implicit-subscription, explicit-subscription]
+
+      commonalities_release:
+        type: string
+        description: >
+          Range expression for Commonalities version (e.g. ">=r4.1").
+
+      is_release_review_pr:
+        type: boolean
+
+      release_plan_changed:
+        type: boolean
+
+    additionalProperties: false
+
+  conditional_level:
+    type: object
+    required: [default]
+    properties:
+      default:
+        type: string
+        enum: [error, warn, hint, off]
+        description: >
+          Base severity level.  "off" means the rule is suppressed in
+          contexts where no override matches.
+
+      overrides:
+        type: array
+        description: >
+          Ordered list of condition/level pairs.  First match wins.
+        items:
+          type: object
+          required: [condition, level]
+          properties:
+            condition:
+              type: object
+              description: >
+                Same field vocabulary as applicability.  All present
+                fields must match; array fields use OR logic.
+            level:
+              type: string
+              enum: [error, warn, hint, off]
+
+additionalProperties: false
