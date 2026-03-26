@@ -103,7 +103,8 @@ def _minimal_rule(
     id: str = "S-001",
     engine: str = "spectral",
     engine_rule: str = "some-rule",
-    hint: str = "Fix this.",
+    message_override: str | None = None,
+    hint: str | None = None,
     default_level: str = "warn",
     applicability: dict | None = None,
     overrides: list[dict] | None = None,
@@ -113,9 +114,12 @@ def _minimal_rule(
         "id": id,
         "engine": engine,
         "engine_rule": engine_rule,
-        "hint": hint,
         "conditional_level": {"default": default_level},
     }
+    if message_override is not None:
+        rule["message_override"] = message_override
+    if hint is not None:
+        rule["hint"] = hint
     if applicability:
         rule["applicability"] = applicability
     if overrides:
@@ -226,7 +230,8 @@ class TestRunPostFilter:
         assert len(result.findings) == 1
         f = result.findings[0]
         assert f["level"] == "warn"
-        assert f["hint"] == "Use kebab-case"
+        assert f["message"] == "Use kebab-case"
+        assert "hint" not in f
         assert f["blocks"] is False
         assert "rule_id" not in f  # unmapped → no rule_id
 
@@ -238,7 +243,7 @@ class TestRunPostFilter:
         assert result.findings[0]["blocks"] is True
 
     def test_mapped_rule_enrichment(self, tmp_path: Path):
-        """Mapped rules get rule_id, hint, and resolved level."""
+        """Mapped rules get rule_id, optional hint, and resolved level."""
         _write_rules(tmp_path, [
             _minimal_rule(
                 id="S-001",
@@ -248,12 +253,13 @@ class TestRunPostFilter:
             )
         ])
         ctx = _make_context(profile="standard")
-        findings = [_make_finding(level="warn")]  # engine reports warn
+        findings = [_make_finding(level="warn", message="Original msg")]
         result = run_post_filter(findings, ctx, tmp_path)
 
         assert len(result.findings) == 1
         f = result.findings[0]
         assert f["rule_id"] == "S-001"
+        assert f["message"] == "Original msg"  # engine message preserved
         assert f["hint"] == "Do this instead."
         assert f["level"] == "error"  # remapped from warn to error by metadata
         assert f["blocks"] is True
@@ -492,7 +498,8 @@ class TestRunPostFilter:
         f = result.findings[0]
         assert f["rule_id"] == "S-018"
         assert f["level"] == "warn"  # engine level preserved
-        assert f["hint"] == "Engine message"  # falls back to message
+        assert f["message"] == "Engine message"
+        assert "hint" not in f  # no hint in metadata → no hint in output
         assert f["blocks"] is False  # warn doesn't block in standard
 
     def test_identity_entry_with_explicit_hint(self, tmp_path: Path):
@@ -510,8 +517,8 @@ class TestRunPostFilter:
         assert result.findings[0]["hint"] == "Custom guidance."
         assert result.findings[0]["rule_id"] == "S-018"
 
-    def test_mapped_rule_without_hint_falls_back(self, tmp_path: Path):
-        """Rule with conditional_level but no hint uses engine message."""
+    def test_mapped_rule_without_hint_preserves_message(self, tmp_path: Path):
+        """Rule without hint/message_override preserves engine message."""
         _write_rules(tmp_path, [{
             "id": "S-001",
             "engine": "spectral",
@@ -525,4 +532,41 @@ class TestRunPostFilter:
         f = result.findings[0]
         assert f["rule_id"] == "S-001"
         assert f["level"] == "error"  # from conditional_level
-        assert f["hint"] == "Engine says fix this"  # fallback from message
+        assert f["message"] == "Engine says fix this"  # preserved
+        assert "hint" not in f  # no hint in metadata → no hint in output
+
+    def test_message_override_replaces_message(self, tmp_path: Path):
+        """message_override replaces the engine message entirely."""
+        _write_rules(tmp_path, [{
+            "id": "S-001",
+            "engine": "spectral",
+            "engine_rule": "some-rule",
+            "message_override": "Better description.",
+            "conditional_level": {"default": "error"},
+        }])
+        ctx = _make_context()
+        findings = [_make_finding(message="Original engine message")]
+        result = run_post_filter(findings, ctx, tmp_path)
+
+        f = result.findings[0]
+        assert f["rule_id"] == "S-001"
+        assert f["message"] == "Better description."
+        assert "hint" not in f
+
+    def test_message_override_with_hint(self, tmp_path: Path):
+        """Both message_override and hint can be set together."""
+        _write_rules(tmp_path, [{
+            "id": "S-001",
+            "engine": "spectral",
+            "engine_rule": "some-rule",
+            "message_override": "Better description.",
+            "hint": "Fix by doing X.",
+            "conditional_level": {"default": "error"},
+        }])
+        ctx = _make_context()
+        findings = [_make_finding(message="Original engine message")]
+        result = run_post_filter(findings, ctx, tmp_path)
+
+        f = result.findings[0]
+        assert f["message"] == "Better description."
+        assert f["hint"] == "Fix by doing X."

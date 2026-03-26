@@ -273,15 +273,19 @@ class TestMetadataQuality:
         assert not missing, f"Python rules without conditional_level: {missing}"
 
     def test_hints_are_exception_not_norm(self, all_rules):
-        """Hints are rare overrides — engine messages serve as default guidance.
+        """Hints and message overrides are rare — engine messages are primary.
 
         Engine messages are the primary fix guidance (design doc 8.4.1).
-        Explicit hints should only exist when the engine message is
-        insufficient.  This test documents the current state; update
-        the count when hints are added in WS07.
+        Explicit hints and message overrides should only exist when the
+        engine message is insufficient.  Update counts when adding in WS07.
         """
-        with_hints = [r.id for r in all_rules if r.hint]
+        with_hints = [r.id for r in all_rules if r.hint is not None]
+        with_overrides = [r.id for r in all_rules if r.message_override is not None]
         assert len(with_hints) == 0, (
             f"Expected 0 explicit hints (update test if adding hints): "
             f"{with_hints}"
+        )
+        assert len(with_overrides) == 0, (
+            f"Expected 0 message overrides (update test if adding overrides): "
+            f"{with_overrides}"
         )

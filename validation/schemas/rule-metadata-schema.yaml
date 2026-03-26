@@ -42,11 +42,19 @@ properties:
       Native rule identifier within the engine.  For Spectral this is the
       rule name in .spectral.yaml; for Python checks the function name.
 
+  message_override:
+    type: string
+    description: >
+      Replaces the engine's finding message entirely.  Use when the
+      engine message is misleading or unhelpful.  Optional — when
+      omitted, the engine message is preserved.
+
   hint:
     type: string
     description: >
-      Actionable fix guidance shown to the developer.  Optional — when
-      omitted, the engine's finding message is used instead.
+      Additional fix guidance rendered alongside the finding message.
+      Optional — only set when there is "how to fix" guidance beyond
+      what the message already says.
 
   applicability:
     type: object

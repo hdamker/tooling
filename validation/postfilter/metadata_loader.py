@@ -69,7 +69,10 @@ class RuleMetadata:
         name: Human-readable kebab-case name.  Defaults to ``engine_rule``.
         engine: Engine responsible for producing the finding.
         engine_rule: Native rule identifier within the engine.
-        hint: Actionable fix guidance.  Empty string means "use engine message".
+        message_override: Replaces the engine's finding message.  ``None``
+            means keep the engine message.
+        hint: Additional fix guidance shown alongside the message.  ``None``
+            means no extra hint.
         applicability: Condition dict — omitted fields are unconstrained.
         conditional_level: Severity specification, or ``None`` to preserve
             engine-reported severity (identity mapping).
@@ -79,7 +82,8 @@ class RuleMetadata:
     name: str
     engine: str
     engine_rule: str
-    hint: str
+    message_override: Optional[str]
+    hint: Optional[str]
     applicability: dict
     conditional_level: Optional[ConditionalLevel]
 
@@ -142,7 +146,8 @@ def parse_rule_metadata(raw: dict) -> RuleMetadata:
         name=raw.get("name", raw["engine_rule"]),
         engine=raw["engine"],
         engine_rule=raw["engine_rule"],
-        hint=raw.get("hint", ""),
+        message_override=raw.get("message_override"),
+        hint=raw.get("hint"),
         applicability=raw.get("applicability", {}),
         conditional_level=conditional_level,
     )

@@ -77,5 +77,5 @@ properties:
   hint:
     type: string
     description: >
-      Actionable fix guidance.  From rule metadata if available, otherwise
-      falls back to the engine message.
+      Actionable fix guidance from rule metadata.  Only present when
+      the rule metadata explicitly provides a hint.
