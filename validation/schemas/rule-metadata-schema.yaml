@@ -11,11 +11,8 @@ description: >
 type: object
 required:
   - id
-  - name
   - engine
   - engine_rule
-  - hint
-  - conditional_level
 
 properties:
   id:
@@ -28,7 +25,9 @@ properties:
   name:
     type: string
     pattern: "^[a-z][a-z0-9-]+$"
-    description: Human-readable kebab-case name.
+    description: >
+      Human-readable kebab-case name.  Optional — defaults to engine_rule
+      when omitted.
 
   engine:
     type: string
@@ -45,7 +44,9 @@ properties:
 
   hint:
     type: string
-    description: Actionable fix guidance shown to the developer.
+    description: >
+      Actionable fix guidance shown to the developer.  Optional — when
+      omitted, the engine's finding message is used instead.
 
   applicability:
     type: object
@@ -103,6 +104,9 @@ properties:
 
   conditional_level:
     type: object
+    description: >
+      Severity specification.  Optional — when omitted, the engine's
+      reported severity is preserved (identity mapping).
     required: [default]
     properties:
       default:

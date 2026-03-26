@@ -1,0 +1,193 @@
+# Spectral rule metadata.
+# S-001 through S-199: reserved for CAMARA custom rules
+# S-200 through S-xxx: Built-in OAS rules
+# All entries are identity-only initially, can be extended if needed.
+# Hints default to the Spectral engine message; can be overridden in WS07.
+
+# ===== CAMARA custom rules (S-001+) =====
+
+- id: S-001
+  engine: spectral
+  engine_rule: camara-discriminator-use
+
+- id: S-002
+  engine: spectral
+  engine_rule: camara-get-no-request-body
+
+- id: S-003
+  engine: spectral
+  engine_rule: camara-http-methods
+
+- id: S-004
+  engine: spectral
+  engine_rule: camara-language-avoid-telco
+
+- id: S-005
+  engine: spectral
+  engine_rule: camara-oas-version
+
+- id: S-006
+  engine: spectral
+  engine_rule: camara-operation-summary
+
+- id: S-007
+  engine: spectral
+  engine_rule: camara-operationid-casing-convention
+
+- id: S-008
+  engine: spectral
+  engine_rule: camara-parameter-casing-convention
+
+- id: S-009
+  engine: spectral
+  engine_rule: camara-parameters-descriptions
+
+- id: S-010
+  engine: spectral
+  engine_rule: camara-path-param-id
+
+- id: S-011
+  engine: spectral
+  engine_rule: camara-properties-descriptions
+
+- id: S-012
+  engine: spectral
+  engine_rule: camara-reserved-words
+
+- id: S-013
+  engine: spectral
+  engine_rule: camara-response-descriptions
+
+- id: S-014
+  engine: spectral
+  engine_rule: camara-routes-description
+
+- id: S-015
+  engine: spectral
+  engine_rule: camara-schema-casing-convention
+
+- id: S-016
+  engine: spectral
+  engine_rule: camara-schema-type-check
+
+- id: S-017
+  engine: spectral
+  engine_rule: camara-security-no-secrets-in-path-or-query-parameters
+
+# ===== Built-in OAS rules (S-200+) =====
+
+- id: S-200
+  engine: spectral
+  engine_rule: duplicated-entry-in-enum
+
+- id: S-201
+  engine: spectral
+  engine_rule: info-description
+
+- id: S-202
+  engine: spectral
+  engine_rule: info-license
+
+- id: S-203
+  engine: spectral
+  engine_rule: license-url
+
+- id: S-204
+  engine: spectral
+  engine_rule: no-$ref-siblings
+
+- id: S-205
+  engine: spectral
+  engine_rule: no-eval-in-markdown
+
+- id: S-206
+  engine: spectral
+  engine_rule: no-script-tags-in-markdown
+
+- id: S-207
+  engine: spectral
+  engine_rule: oas3-api-servers
+
+- id: S-208
+  engine: spectral
+  engine_rule: oas3-examples-value-or-externalValue
+
+- id: S-209
+  engine: spectral
+  engine_rule: oas3-schema
+
+- id: S-210
+  engine: spectral
+  engine_rule: oas3-server-trailing-slash
+
+- id: S-211
+  engine: spectral
+  engine_rule: oas3-unused-component
+
+- id: S-212
+  engine: spectral
+  engine_rule: oas3-valid-media-example
+
+- id: S-213
+  engine: spectral
+  engine_rule: oas3-valid-schema-example
+
+- id: S-214
+  engine: spectral
+  engine_rule: openapi-tags-uniqueness
+
+- id: S-215
+  engine: spectral
+  engine_rule: operation-description
+
+- id: S-216
+  engine: spectral
+  engine_rule: operation-operationId
+
+- id: S-217
+  engine: spectral
+  engine_rule: operation-operationId-unique
+
+- id: S-218
+  engine: spectral
+  engine_rule: operation-operationId-valid-in-url
+
+- id: S-219
+  engine: spectral
+  engine_rule: operation-parameters
+
+- id: S-220
+  engine: spectral
+  engine_rule: operation-singular-tag
+
+- id: S-221
+  engine: spectral
+  engine_rule: operation-success-response
+
+- id: S-222
+  engine: spectral
+  engine_rule: operation-tag-defined
+
+- id: S-223
+  engine: spectral
+  engine_rule: operation-tags
+
+- id: S-224
+  engine: spectral
+  engine_rule: path-declarations-must-exist
+
+- id: S-225
+  engine: spectral
+  engine_rule: path-keys-no-trailing-slash
+
+- id: S-226
+  engine: spectral
+  engine_rule: path-not-include-query
+
+- id: S-227
+  engine: spectral
+  engine_rule: path-params
+
+- id: S-228
+  engine: spectral
+  engine_rule: typed-enum

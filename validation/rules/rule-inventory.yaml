@@ -1,0 +1,208 @@
+# CAMARA Validation Framework — Rule Inventory
+#
+# Complete inventory of all known validation rules across all sources.
+# Core set rules have metadata entries in *-rules.yaml files.
+# Gap and manual rules are tracked here for WS07 implementation.
+#
+# Status values:
+#   implemented — metadata in *-rules.yaml, engine check active
+#   gap         — documented in audit, no engine implementation yet
+#   manual      — requires human judgment, not machine-checkable
+#   pending     — in open PRs, not yet merged
+
+version: 1
+generated: 2026-03-26
+
+summary:
+  total_implemented: 96
+  total_gap: 21
+  total_manual: 25
+  total_pending: 17
+  by_engine:
+    spectral: 46
+    gherkin: 25
+    python: 12
+    yamllint: 13
+
+# ---------------------------------------------------------------------------
+# Implemented rules — metadata in *-rules.yaml
+# ---------------------------------------------------------------------------
+# Not duplicated here — the *-rules.yaml files ARE the authoritative registry.
+# See: python-rules.yaml, spectral-rules.yaml, gherkin-rules.yaml,
+#      yamllint-rules.yaml
+
+# ---------------------------------------------------------------------------
+# Gap rules — documented but not implemented (WS07 scope)
+# ---------------------------------------------------------------------------
+# Source: private-dev-docs/validation-framework/reviews/commonalities-design-guide-audit.md
+
+gap_rules:
+  # Spectral gaps (new rules needed)
+  - audit_id: DG-003
+    description: date-time description RFC 3339 format
+    target_engine: spectral
+    priority: low
+
+  - audit_id: DG-004
+    description: duration description RFC 3339 format
+    target_engine: spectral
+    priority: low
+
+  - audit_id: DG-008
+    description: "Object: required properties MUST exist in properties"
+    target_engine: spectral
+    priority: medium
+
+  - audit_id: DG-013
+    description: Error code MUST NOT be numeric
+    target_engine: spectral
+    priority: medium
+
+  - audit_id: DG-014
+    description: Error code MUST be SCREAMING_SNAKE_CASE (r4.x)
+    target_engine: spectral
+    priority: medium
+    notes: commonalities_release >=r4.0
+
+  - audit_id: DG-015
+    description: "API-specific error: API_NAME.SPECIFIC_CODE format"
+    target_engine: spectral
+    priority: medium
+
+  - audit_id: DG-017
+    description: All APIs MUST document 403 response
+    target_engine: spectral
+    priority: medium
+
+  - audit_id: DG-032
+    description: info.contact MUST be absent
+    target_engine: spectral
+    priority: low
+
+  - audit_id: DG-041
+    description: Tag names Title Case convention
+    target_engine: spectral
+    priority: low
+
+  - audit_id: DG-058
+    description: Array items MUST have description (r4.x)
+    target_engine: spectral
+    priority: medium
+    notes: commonalities_release >=r4.0
+
+  - audit_id: DG-087
+    description: "specversion MUST be '1.0' (subscription)"
+    target_engine: spectral
+    priority: low
+    notes: api_pattern subscription only
+
+  - audit_id: DG-090
+    description: "protocol MUST be 'HTTP' (subscription)"
+    target_engine: spectral
+    priority: low
+    notes: api_pattern subscription only
+
+  - audit_id: DG-091
+    description: sink MUST use HTTPS (subscription)
+    target_engine: spectral
+    priority: low
+    notes: api_pattern subscription only
+
+  - audit_id: DG-094
+    description: Notification content-type cloudevents+json (subscription)
+    target_engine: spectral
+    priority: low
+    notes: api_pattern subscription only
+
+  # Python gaps (new checks needed)
+  - audit_id: DG-011
+    description: contextCode SCREAMING_SNAKE_CASE format (r4.x)
+    target_engine: python
+    priority: low
+
+  - audit_id: DG-018
+    description: CONFLICT error code deprecated (r4.x)
+    target_engine: python
+    priority: low
+
+  - audit_id: DG-086
+    description: Event type format org.camaraproject validation (subscription)
+    target_engine: python
+    priority: medium
+
+  - audit_id: DG-088
+    description: Subscription API filename convention
+    target_engine: python
+    priority: medium
+
+  - audit_id: DG-092
+    description: sinkCredential not in responses
+    target_engine: python
+    priority: medium
+
+  - audit_id: DG-095
+    description: Event version independence from API version
+    target_engine: python
+    priority: low
+
+  # New rules (not from audit — identified during implementation)
+  - audit_id: NEW-001
+    description: README.md placeholder must be removed from API_definitions/ when spec files are present
+    target_engine: python
+    priority: medium
+
+# ---------------------------------------------------------------------------
+# Fixes needed — implemented rules with incorrect behavior
+# ---------------------------------------------------------------------------
+
+fixes:
+  - rule_id: P-007
+    engine_rule: check-test-file-version
+    status: suppressed
+    issue: Checks version suffix in filename, but version belongs inside .feature file (first line)
+    fix: Rewrite to parse file content, same approach as P-003 for spec info.version
+    conditional_level_after_fix:
+      default: hint
+      overrides:
+        - condition:
+            target_api_maturity: [stable]
+          level: warn
+
+# ---------------------------------------------------------------------------
+# Pending rules — in open PRs
+# ---------------------------------------------------------------------------
+# Source: tooling#95 (OWASP Spectral rules)
+
+pending_rules:
+  - source: tooling#95
+    description: OWASP API security rules (17 rules)
+    target_engine: spectral
+    notes: Parked per DEC-013. Introduce with v1 + bundling.
+    estimated_count: 17
+
+# ---------------------------------------------------------------------------
+# Manual rules — require human judgment
+# ---------------------------------------------------------------------------
+# Source: private-dev-docs/validation-framework/reviews/testing-guidelines-audit.md
+
+manual_rules:
+  count: 25
+  categories:
+    - name: Feature context sections
+      audit_ids: [TG-015, TG-016, TG-017]
+      description: Feature file should describe API context
+    - name: Background setup patterns
+      audit_ids: [TG-020, TG-021, TG-022, TG-023]
+      description: Background section setup conventions
+    - name: Standardized step syntax
+      audit_ids: [TG-042, TG-043, TG-044, TG-045, TG-046, TG-047, TG-048]
+      description: Given/When/Then step phrasing conventions
+    - name: Test coverage adequacy
+      audit_ids: [TG-054, TG-055]
+      description: Test plan completeness for RC and public releases
+    - name: Device identifier rules
+      audit_ids: [TG-057, TG-058]
+      description: Device identifier handling in test scenarios
+    - name: Other semantic rules
+      audit_ids: [TG-024, TG-025, TG-026, TG-027, TG-028, TG-029, TG-056, TG-059, TG-060]
+      description: Various semantic test quality rules

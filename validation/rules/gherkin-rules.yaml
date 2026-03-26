@@ -1,0 +1,103 @@
+# Gherkin-lint rule metadata.
+# All entries are identity-only initially, can be extended if needed.
+# All rules default to warn (gherkin-lint has no per-finding severity).
+
+- id: G-001
+  engine: gherkin
+  engine_rule: allowed-tags
+
+- id: G-002
+  engine: gherkin
+  engine_rule: indentation
+
+- id: G-003
+  engine: gherkin
+  engine_rule: keywords-in-logical-order
+
+- id: G-004
+  engine: gherkin
+  engine_rule: max-scenarios-per-file
+
+- id: G-005
+  engine: gherkin
+  engine_rule: name-length
+
+- id: G-006
+  engine: gherkin
+  engine_rule: no-background-only-scenario
+
+- id: G-007
+  engine: gherkin
+  engine_rule: no-dupe-feature-names
+
+- id: G-008
+  engine: gherkin
+  engine_rule: no-dupe-scenario-names
+
+- id: G-009
+  engine: gherkin
+  engine_rule: no-duplicate-tags
+
+- id: G-010
+  engine: gherkin
+  engine_rule: no-empty-background
+
+- id: G-011
+  engine: gherkin
+  engine_rule: no-empty-file
+
+- id: G-012
+  engine: gherkin
+  engine_rule: no-files-without-scenarios
+
+- id: G-013
+  engine: gherkin
+  engine_rule: no-homogenous-tags
+
+- id: G-014
+  engine: gherkin
+  engine_rule: no-multiple-empty-lines
+
+- id: G-015
+  engine: gherkin
+  engine_rule: no-partially-commented-tag-lines
+
+- id: G-016
+  engine: gherkin
+  engine_rule: no-restricted-tags
+
+- id: G-017
+  engine: gherkin
+  engine_rule: no-scenario-outlines-without-examples
+
+- id: G-018
+  engine: gherkin
+  engine_rule: no-superfluous-tags
+
+- id: G-019
+  engine: gherkin
+  engine_rule: no-trailing-spaces
+
+- id: G-020
+  engine: gherkin
+  engine_rule: no-unnamed-features
+
+- id: G-021
+  engine: gherkin
+  engine_rule: no-unnamed-scenarios
+
+- id: G-022
+  engine: gherkin
+  engine_rule: no-unused-variables
+
+- id: G-023
+  engine: gherkin
+  engine_rule: one-space-between-tags
+
+- id: G-024
+  engine: gherkin
+  engine_rule: required-tags
+
+- id: G-025
+  engine: gherkin
+  engine_rule: use-and

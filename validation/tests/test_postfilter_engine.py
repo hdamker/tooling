@@ -90,6 +90,15 @@ def _write_rules(tmp_path: Path, rules: list[dict], filename: str = "spectral-ru
     )
 
 
+def _identity_rule(
+    id: str = "S-001",
+    engine: str = "spectral",
+    engine_rule: str = "some-rule",
+) -> dict:
+    """Build an identity-only rule: just id, engine, engine_rule."""
+    return {"id": id, "engine": engine, "engine_rule": engine_rule}
+
+
 def _minimal_rule(
     id: str = "S-001",
     engine: str = "spectral",
@@ -99,9 +108,9 @@ def _minimal_rule(
     applicability: dict | None = None,
     overrides: list[dict] | None = None,
 ) -> dict:
+    """Build a rule with conditional_level (full behavior)."""
     rule: dict = {
         "id": id,
-        "name": "test-rule",
         "engine": engine,
         "engine_rule": engine_rule,
         "hint": hint,
@@ -471,3 +480,49 @@ class TestRunPostFilter:
         assert "1 errors" in result.summary
         assert "1 warnings" in result.summary
         assert "1 hints" in result.summary
+
+    def test_identity_only_entry(self, tmp_path: Path):
+        """Identity-only entry assigns rule_id but keeps engine level."""
+        _write_rules(tmp_path, [_identity_rule(id="S-018")])
+        ctx = _make_context(profile="standard")
+        findings = [_make_finding(level="warn", message="Engine message")]
+        result = run_post_filter(findings, ctx, tmp_path)
+
+        assert len(result.findings) == 1
+        f = result.findings[0]
+        assert f["rule_id"] == "S-018"
+        assert f["level"] == "warn"  # engine level preserved
+        assert f["hint"] == "Engine message"  # falls back to message
+        assert f["blocks"] is False  # warn doesn't block in standard
+
+    def test_identity_entry_with_explicit_hint(self, tmp_path: Path):
+        """Identity entry with explicit hint uses the hint, not message."""
+        _write_rules(tmp_path, [{
+            "id": "S-018",
+            "engine": "spectral",
+            "engine_rule": "some-rule",
+            "hint": "Custom guidance.",
+        }])
+        ctx = _make_context()
+        findings = [_make_finding(message="Engine message")]
+        result = run_post_filter(findings, ctx, tmp_path)
+
+        assert result.findings[0]["hint"] == "Custom guidance."
+        assert result.findings[0]["rule_id"] == "S-018"
+
+    def test_mapped_rule_without_hint_falls_back(self, tmp_path: Path):
+        """Rule with conditional_level but no hint uses engine message."""
+        _write_rules(tmp_path, [{
+            "id": "S-001",
+            "engine": "spectral",
+            "engine_rule": "some-rule",
+            "conditional_level": {"default": "error"},
+        }])
+        ctx = _make_context()
+        findings = [_make_finding(message="Engine says fix this")]
+        result = run_post_filter(findings, ctx, tmp_path)
+
+        f = result.findings[0]
+        assert f["rule_id"] == "S-001"
+        assert f["level"] == "error"  # from conditional_level
+        assert f["hint"] == "Engine says fix this"  # fallback from message

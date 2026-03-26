@@ -81,13 +81,19 @@ def _resolve_api_context(
 def _enrich_finding(
     finding: dict,
     rule: RuleMetadata,
-    resolved_level: str,
+    resolved_level: Optional[str] = None,
 ) -> dict:
-    """Create an enriched copy of a finding with metadata applied."""
+    """Create an enriched copy of a finding with metadata applied.
+
+    When *resolved_level* is ``None`` (identity-only entry without
+    ``conditional_level``), the engine's original level is preserved.
+    When *rule.hint* is empty, the engine's message is used instead.
+    """
     enriched = dict(finding)
     enriched["rule_id"] = rule.id
-    enriched["level"] = resolved_level
-    enriched["hint"] = rule.hint
+    if resolved_level is not None:
+        enriched["level"] = resolved_level
+    enriched["hint"] = rule.hint or finding.get("message", "")
     return enriched
 
 
@@ -217,12 +223,15 @@ def run_post_filter(
             if not is_applicable(rule.applicability, context, api_ctx):
                 continue
 
-            # Conditional level resolution
-            resolved_level = resolve_level(rule, context, api_ctx)
-            if resolved_level == "off":
-                continue
-
-            enriched = _enrich_finding(finding, rule, resolved_level)
+            # Conditional level resolution (skip for identity-only entries)
+            if rule.conditional_level is not None:
+                resolved_level = resolve_level(rule, context, api_ctx)
+                if resolved_level == "off":
+                    continue
+                enriched = _enrich_finding(finding, rule, resolved_level)
+            else:
+                # Identity-only: assign rule_id, keep engine level
+                enriched = _enrich_finding(finding, rule)
         else:
             # Step 4: Unmapped rule — pass-through
             enriched = _passthrough_finding(finding)

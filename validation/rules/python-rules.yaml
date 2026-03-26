@@ -1,0 +1,109 @@
+# Python check rule metadata.
+# These checks have context-dependent behavior: conditional levels based on
+# branch type, API maturity, and release context; applicability conditions
+# for release-review and release-plan-changed contexts.
+# Engine messages from make_finding() serve as hints (design doc section 8.4.1).
+
+# P-001: check-filename-kebab-case
+- id: P-001
+  engine: python
+  engine_rule: check-filename-kebab-case
+  conditional_level:
+    default: error
+
+# P-002: check-filename-matches-api-name
+- id: P-002
+  engine: python
+  engine_rule: check-filename-matches-api-name
+  conditional_level:
+    default: error
+
+# P-003: check-info-version-format
+- id: P-003
+  engine: python
+  engine_rule: check-info-version-format
+  conditional_level:
+    default: error
+
+# P-004: check-server-url-version
+- id: P-004
+  engine: python
+  engine_rule: check-server-url-version
+  conditional_level:
+    default: error
+    overrides:
+      - condition:
+          branch_types: [main, feature]
+        level: warn
+
+# P-005: check-server-url-api-name
+- id: P-005
+  engine: python
+  engine_rule: check-server-url-api-name
+  conditional_level:
+    default: error
+
+# P-006: check-test-files-exist
+- id: P-006
+  engine: python
+  engine_rule: check-test-files-exist
+  conditional_level:
+    default: hint
+    overrides:
+      - condition:
+          target_api_maturity: [stable]
+          target_release_type: [pre-release-rc, public-release]
+        level: warn
+
+# P-007: check-test-file-version — SUPPRESSED pending fix
+# Current check validates filename version suffix, but the version belongs
+# inside the .feature file (first line), not the filename. Needs rewrite
+# to parse file content (same approach as P-003 for spec info.version).
+- id: P-007
+  engine: python
+  engine_rule: check-test-file-version
+  conditional_level:
+    default: off
+
+# P-008: check-test-directory-exists
+- id: P-008
+  engine: python
+  engine_rule: check-test-directory-exists
+  conditional_level:
+    default: hint
+    overrides:
+      - condition:
+          target_release_type: [pre-release-rc, public-release]
+        level: warn
+
+# P-009: check-release-plan-semantics
+- id: P-009
+  engine: python
+  engine_rule: check-release-plan-semantics
+  applicability:
+    release_plan_changed: true
+  conditional_level:
+    default: error
+
+# P-010: check-changelog-format
+- id: P-010
+  engine: python
+  engine_rule: check-changelog-format
+  conditional_level:
+    default: warn
+
+# P-011: check-license-commonalities-consistency
+- id: P-011
+  engine: python
+  engine_rule: check-license-commonalities-consistency
+  conditional_level:
+    default: warn
+
+# P-012: check-release-review-file-restriction
+- id: P-012
+  engine: python
+  engine_rule: check-release-review-file-restriction
+  applicability:
+    is_release_review_pr: true
+  conditional_level:
+    default: error

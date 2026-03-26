@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # Required fields in a rule metadata entry
 # ---------------------------------------------------------------------------
 
-_REQUIRED_FIELDS = ("id", "name", "engine", "engine_rule", "hint", "conditional_level")
+_REQUIRED_FIELDS = ("id", "engine", "engine_rule")
 
 
 # ---------------------------------------------------------------------------
@@ -66,12 +66,13 @@ class RuleMetadata:
 
     Attributes:
         id: Stable ID with engine prefix (e.g. ``"S-042"``).
-        name: Human-readable kebab-case name.
+        name: Human-readable kebab-case name.  Defaults to ``engine_rule``.
         engine: Engine responsible for producing the finding.
         engine_rule: Native rule identifier within the engine.
-        hint: Actionable fix guidance shown to developers.
+        hint: Actionable fix guidance.  Empty string means "use engine message".
         applicability: Condition dict — omitted fields are unconstrained.
-        conditional_level: Severity specification with optional overrides.
+        conditional_level: Severity specification, or ``None`` to preserve
+            engine-reported severity (identity mapping).
     """
 
     id: str
@@ -80,7 +81,7 @@ class RuleMetadata:
     engine_rule: str
     hint: str
     applicability: dict
-    conditional_level: ConditionalLevel
+    conditional_level: Optional[ConditionalLevel]
 
 
 # ---------------------------------------------------------------------------
@@ -132,14 +133,18 @@ def parse_rule_metadata(raw: dict) -> RuleMetadata:
     if missing:
         raise ValueError(f"Missing required fields: {', '.join(missing)}")
 
+    # Optional conditional_level — None means identity mapping
+    raw_cl = raw.get("conditional_level")
+    conditional_level = _parse_conditional_level(raw_cl) if raw_cl is not None else None
+
     return RuleMetadata(
         id=raw["id"],
-        name=raw["name"],
+        name=raw.get("name", raw["engine_rule"]),
         engine=raw["engine"],
         engine_rule=raw["engine_rule"],
-        hint=raw["hint"],
+        hint=raw.get("hint", ""),
         applicability=raw.get("applicability", {}),
-        conditional_level=_parse_conditional_level(raw["conditional_level"]),
+        conditional_level=conditional_level,
     )
 
 

@@ -24,8 +24,19 @@ from validation.postfilter.metadata_loader import (
 
 
 def _minimal_rule_dict(**overrides: object) -> dict:
-    """Build a minimal valid rule metadata dict."""
-    base = {
+    """Build a minimal valid rule metadata dict (only required fields)."""
+    base: dict = {
+        "id": "S-001",
+        "engine": "spectral",
+        "engine_rule": "camara-test-rule",
+    }
+    base.update(overrides)
+    return base
+
+
+def _full_rule_dict(**overrides: object) -> dict:
+    """Build a rule metadata dict with all optional fields populated."""
+    base: dict = {
         "id": "S-001",
         "name": "test-rule",
         "engine": "spectral",
@@ -47,17 +58,47 @@ def _write_yaml(path: Path, data: object) -> None:
 
 
 class TestParseRuleMetadata:
-    def test_minimal_valid(self):
+    def test_identity_only(self):
+        """Minimal entry: just id, engine, engine_rule."""
         raw = _minimal_rule_dict()
         rule = parse_rule_metadata(raw)
         assert rule.id == "S-001"
-        assert rule.name == "test-rule"
+        assert rule.name == "camara-test-rule"  # defaults to engine_rule
         assert rule.engine == "spectral"
         assert rule.engine_rule == "camara-test-rule"
-        assert rule.hint == "Fix this issue."
+        assert rule.hint == ""
         assert rule.applicability == {}
+        assert rule.conditional_level is None
+
+    def test_full_entry(self):
+        raw = _full_rule_dict()
+        rule = parse_rule_metadata(raw)
+        assert rule.id == "S-001"
+        assert rule.name == "test-rule"
+        assert rule.hint == "Fix this issue."
+        assert rule.conditional_level is not None
         assert rule.conditional_level.default == "warn"
         assert rule.conditional_level.overrides == ()
+
+    def test_name_defaults_to_engine_rule(self):
+        raw = _minimal_rule_dict()
+        rule = parse_rule_metadata(raw)
+        assert rule.name == "camara-test-rule"
+
+    def test_explicit_name_overrides_default(self):
+        raw = _minimal_rule_dict(name="custom-name")
+        rule = parse_rule_metadata(raw)
+        assert rule.name == "custom-name"
+
+    def test_hint_defaults_to_empty(self):
+        raw = _minimal_rule_dict()
+        rule = parse_rule_metadata(raw)
+        assert rule.hint == ""
+
+    def test_explicit_hint(self):
+        raw = _minimal_rule_dict(hint="Do this instead.")
+        rule = parse_rule_metadata(raw)
+        assert rule.hint == "Do this instead."
 
     def test_with_applicability(self):
         raw = _minimal_rule_dict(
@@ -67,7 +108,7 @@ class TestParseRuleMetadata:
         assert rule.applicability == {"branch_types": ["main", "release"]}
 
     def test_with_overrides(self):
-        raw = _minimal_rule_dict(
+        raw = _full_rule_dict(
             conditional_level={
                 "default": "hint",
                 "overrides": [
@@ -92,13 +133,11 @@ class TestParseRuleMetadata:
         }
 
     def test_missing_required_field(self):
-        raw = _minimal_rule_dict()
-        del raw["hint"]
-        with pytest.raises(ValueError, match="hint"):
-            parse_rule_metadata(raw)
+        with pytest.raises(ValueError, match="engine_rule"):
+            parse_rule_metadata({"id": "S-001", "engine": "spectral"})
 
     def test_missing_multiple_fields(self):
-        with pytest.raises(ValueError, match="id.*name|name.*id"):
+        with pytest.raises(ValueError, match="id"):
             parse_rule_metadata({"engine": "spectral"})
 
     def test_conditional_level_missing_default(self):
@@ -112,7 +151,7 @@ class TestParseRuleMetadata:
             parse_rule_metadata(raw)
 
     def test_override_with_empty_condition(self):
-        raw = _minimal_rule_dict(
+        raw = _full_rule_dict(
             conditional_level={
                 "default": "warn",
                 "overrides": [{"condition": {}, "level": "error"}],
@@ -122,7 +161,7 @@ class TestParseRuleMetadata:
         assert rule.conditional_level.overrides[0].condition == {}
 
     def test_non_dict_override_entries_skipped(self):
-        raw = _minimal_rule_dict(
+        raw = _full_rule_dict(
             conditional_level={
                 "default": "warn",
                 "overrides": ["invalid", {"condition": {}, "level": "hint"}],
@@ -183,8 +222,8 @@ class TestLoadRulesFromFile:
             f,
             [
                 _minimal_rule_dict(id="S-001"),
-                {"id": "S-002"},  # missing required fields
-                _minimal_rule_dict(id="S-003"),
+                {"name": "no-id"},  # missing required fields
+                _minimal_rule_dict(id="S-003", engine_rule="rule-b"),
             ],
         )
         rules = load_rules_from_file(f)
@@ -227,7 +266,10 @@ class TestLoadAllRules:
 
     def test_ignores_non_matching_files(self, tmp_path: Path):
         _write_yaml(tmp_path / "spectral-rules.yaml", [_minimal_rule_dict()])
-        _write_yaml(tmp_path / "README.yaml", [_minimal_rule_dict(id="X-001")])
+        _write_yaml(
+            tmp_path / "README.yaml",
+            [_minimal_rule_dict(id="X-001", engine_rule="other")],
+        )
         rules = load_all_rules(tmp_path)
         assert len(rules) == 1
         assert rules[0].id == "S-001"
@@ -254,14 +296,9 @@ class TestBuildLookupIndex:
         assert index[("spectral", "rule-a")].id == "S-001"
 
     def test_duplicate_key_first_wins(self):
-        rules = [
-            parse_rule_metadata(
-                _minimal_rule_dict(id="S-001", engine="spectral", engine_rule="rule-a")
-            ),
-            parse_rule_metadata(
-                _minimal_rule_dict(id="S-099", engine="spectral", engine_rule="rule-a")
-            ),
-        ]
+        r1 = _minimal_rule_dict(id="S-001", engine="spectral", engine_rule="rule-a")
+        r2 = _minimal_rule_dict(id="S-099", engine="spectral", engine_rule="rule-a")
+        rules = [parse_rule_metadata(r1), parse_rule_metadata(r2)]
         index = build_lookup_index(rules)
         assert index[("spectral", "rule-a")].id == "S-001"
         assert len(index) == 1

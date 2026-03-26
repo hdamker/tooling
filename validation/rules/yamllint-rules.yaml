@@ -1,0 +1,55 @@
+# yamllint rule metadata.
+# All entries are identity-only initially, can be extended if needed.
+# Pre-bundling YAML syntax and formatting checks.
+
+- id: Y-001
+  engine: yamllint
+  engine_rule: braces
+
+- id: Y-002
+  engine: yamllint
+  engine_rule: brackets
+
+- id: Y-003
+  engine: yamllint
+  engine_rule: colons
+
+- id: Y-004
+  engine: yamllint
+  engine_rule: commas
+
+- id: Y-005
+  engine: yamllint
+  engine_rule: comments
+
+- id: Y-006
+  engine: yamllint
+  engine_rule: comments-indentation
+
+- id: Y-007
+  engine: yamllint
+  engine_rule: empty-lines
+
+- id: Y-008
+  engine: yamllint
+  engine_rule: hyphens
+
+- id: Y-009
+  engine: yamllint
+  engine_rule: indentation
+
+- id: Y-010
+  engine: yamllint
+  engine_rule: key-duplicates
+
+- id: Y-011
+  engine: yamllint
+  engine_rule: new-line-at-end-of-file
+
+- id: Y-012
+  engine: yamllint
+  engine_rule: trailing-spaces
+
+- id: Y-013
+  engine: yamllint
+  engine_rule: truthy
