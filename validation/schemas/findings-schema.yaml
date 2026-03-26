@@ -44,7 +44,7 @@ properties:
     description: >
       Severity as reported by the engine, before post-filter remapping.
       The post-filter may change this based on conditional_level overrides
-      and may suppress the finding entirely (level "off").
+      and may suppress the finding entirely (level "muted").
 
   message:
     type: string

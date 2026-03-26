@@ -45,7 +45,7 @@ def resolve_level(
         api_context: Per-API context, or ``None`` for repo-level findings.
 
     Returns:
-        Resolved level: ``"error"``, ``"warn"``, ``"hint"``, or ``"off"``.
+        Resolved level: ``"error"``, ``"warn"``, ``"hint"``, or ``"muted"``.
     """
     for override in rule.conditional_level.overrides:
         if evaluate_condition(override.condition, context, api_context):

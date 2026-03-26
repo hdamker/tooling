@@ -64,7 +64,7 @@
   engine: python
   engine_rule: check-test-file-version
   conditional_level:
-    default: off
+    default: muted
 
 # P-008: check-test-directory-exists
 - id: P-008

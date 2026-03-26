@@ -137,16 +137,16 @@ class TestResolveLevel:
         ctx = _make_context(branch_type="main")
         assert resolve_level(rule, ctx, None) == "warn"
 
-    def test_override_resolves_to_off(self):
+    def test_override_resolves_to_muted(self):
         rule = _make_rule(
             default="warn",
             overrides=[
-                ({"target_api_status": ["draft"]}, "off"),
+                ({"target_api_status": ["draft"]}, "muted"),
             ],
         )
         ctx = _make_context()
         api = _make_api(target_api_status="draft")
-        assert resolve_level(rule, ctx, api) == "off"
+        assert resolve_level(rule, ctx, api) == "muted"
 
     def test_api_context_used_in_override(self):
         rule = _make_rule(

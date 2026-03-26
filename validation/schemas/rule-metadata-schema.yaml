@@ -119,9 +119,9 @@ properties:
     properties:
       default:
         type: string
-        enum: [error, warn, hint, off]
+        enum: [error, warn, hint, muted]
         description: >
-          Base severity level.  "off" means the rule is suppressed in
+          Base severity level.  "muted" means the rule is suppressed in
           contexts where no override matches.
 
       overrides:
@@ -139,6 +139,6 @@ properties:
                 fields must match; array fields use OR logic.
             level:
               type: string
-              enum: [error, warn, hint, off]
+              enum: [error, warn, hint, muted]
 
 additionalProperties: false

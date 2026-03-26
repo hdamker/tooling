@@ -278,12 +278,12 @@ class TestRunPostFilter:
         assert result.findings == []
         assert result.result == "pass"
 
-    def test_level_off_removes_finding(self, tmp_path: Path):
-        """Level resolved to 'off' removes the finding."""
+    def test_level_muted_removes_finding(self, tmp_path: Path):
+        """Level resolved to 'muted' removes the finding."""
         _write_rules(tmp_path, [
             _minimal_rule(
                 engine_rule="some-rule",
-                default_level="off",
+                default_level="muted",
             )
         ])
         ctx = _make_context()

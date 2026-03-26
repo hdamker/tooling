@@ -176,7 +176,7 @@ def run_post_filter(
        ``had_engine_error``.
     2. Look up ``(engine, engine_rule)`` in the metadata index.
     3. **Mapped rule**: evaluate applicability (remove if not applicable),
-       resolve conditional level (remove if ``"off"``), enrich with
+       resolve conditional level (remove if ``"muted"``), enrich with
        ``rule_id``, optional ``message_override``/``hint``, and
        adjusted ``level``.
     4. **Unmapped rule** (pass-through): keep engine severity and
@@ -230,7 +230,7 @@ def run_post_filter(
             # Conditional level resolution (skip for identity-only entries)
             if rule.conditional_level is not None:
                 resolved_level = resolve_level(rule, context, api_ctx)
-                if resolved_level == "off":
+                if resolved_level == "muted":
                     continue
                 enriched = _enrich_finding(finding, rule, resolved_level)
             else:
