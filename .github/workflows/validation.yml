@@ -1,0 +1,15 @@
+# CAMARA Validation Framework — Stub
+#
+# Minimal stub on main so GitHub recognizes the workflow file on feature
+# branches.  The full implementation lives on the validation-framework branch.
+
+name: CAMARA Validation
+
+on:
+  workflow_call:
+
+jobs:
+  stub:
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Stub — use the validation-framework branch for the full workflow"'
