@@ -13,4 +13,4 @@ fork_owners:
 
 repositories:
   ReleaseTest:
-    stage: advisory
+    stage: standard
