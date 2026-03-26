@@ -1,15 +1,303 @@
-# CAMARA Validation Framework — Stub
+# CAMARA Validation Framework — Reusable Workflow (v1)
 #
-# Minimal stub on main so GitHub recognizes the workflow file on feature
-# branches.  The full implementation lives on the validation-framework branch.
+# Called by the identical per-repo caller workflow.  All validation logic,
+# configuration, and output surfacing are handled here.
+#
+# Architecture: single-job, sequential steps.  The Python orchestrator
+# (validation.orchestrator) chains all modules and writes output files;
+# the workflow reads those files and posts them to GitHub surfaces.
 
 name: CAMARA Validation
 
 on:
   workflow_call:
+    inputs:
+      tooling_ref_override:
+        description: >-
+          40-character SHA to override the automatic tooling checkout ref.
+          Pilot / break-glass only.
+        type: string
+        required: false
+        default: ""
+      profile:
+        description: >-
+          Validation profile override (advisory, standard, strict).
+          Default: framework auto-selects based on context.
+        type: string
+        required: false
+        default: ""
+      mode:
+        description: >-
+          Execution mode.  Set to "pre-snapshot" by release automation
+          for pre-snapshot validation gate.
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  checks: write
+  pull-requests: write
+  issues: write
+  contents: read
+  statuses: write
+  id-token: write
 
 jobs:
-  stub:
+  validate:
+    name: Validate
     runs-on: ubuntu-latest
+
     steps:
-      - run: 'echo "Stub — use the validation-framework branch for the full workflow"'
+      # ── Step 1: Checkout repository content ────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # ── Step 2: Resolve tooling ref (OIDC → override → fallback) ──
+      - name: Resolve tooling ref
+        id: resolve-ref
+        uses: actions/github-script@v8
+        env:
+          TOOLING_REF_OVERRIDE: ${{ inputs.tooling_ref_override }}
+        with:
+          script: |
+            const overrideRef = (process.env.TOOLING_REF_OVERRIDE || '').trim();
+            const shaPattern = /^[0-9a-f]{40}$/i;
+            const workflowRefPattern =
+              /^([^/]+\/[^/]+)\/\.github\/workflows\/validation\.yml@.+$/;
+
+            function decodeJwtPayload(jwt) {
+              const parts = jwt.split('.');
+              if (parts.length !== 3) {
+                throw new Error('OIDC token is not a valid JWT');
+              }
+              const payload = parts[1]
+                .replace(/-/g, '+')
+                .replace(/_/g, '/');
+              const padLength = (4 - (payload.length % 4)) % 4;
+              const padded = payload + '='.repeat(padLength);
+              return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+            }
+
+            // Tier 1: Explicit override (highest priority)
+            if (overrideRef) {
+              if (!shaPattern.test(overrideRef)) {
+                core.setFailed('tooling_ref_override must be a full 40-character SHA');
+                return;
+              }
+              core.setOutput('tooling_checkout_repo', 'camaraproject/tooling');
+              core.setOutput('tooling_checkout_ref', overrideRef.toLowerCase());
+              core.setOutput('tooling_ref_source', 'override');
+              core.info(`Tooling ref: override ${overrideRef.substring(0, 7)}`);
+              return;
+            }
+
+            // Tier 2: OIDC job_workflow_sha
+            try {
+              const oidcToken = await core.getIDToken('camara-validation-tooling-ref');
+              const claims = decodeJwtPayload(oidcToken);
+              const workflowRef = claims.job_workflow_ref || '';
+              const workflowSha = claims.job_workflow_sha || '';
+              const match = workflowRef.match(workflowRefPattern);
+
+              if (match && shaPattern.test(workflowSha)) {
+                const repo = match[1];
+                const ref = workflowSha.toLowerCase();
+                core.setOutput('tooling_checkout_repo', repo);
+                core.setOutput('tooling_checkout_ref', ref);
+                core.setOutput('tooling_ref_source', 'oidc');
+                core.info(`Tooling ref: OIDC ${ref.substring(0, 7)} from ${repo}`);
+                core.info(`job_workflow_ref: ${workflowRef}`);
+                return;
+              }
+              core.info(`OIDC claims unusable: ref=${workflowRef} sha=${workflowSha}`);
+            } catch (e) {
+              core.info(`OIDC token unavailable: ${e.message}`);
+            }
+
+            // Tier 3: Hardcoded fallback tag
+            core.setOutput('tooling_checkout_repo', 'camaraproject/tooling');
+            core.setOutput('tooling_checkout_ref', 'v1-rc');
+            core.setOutput('tooling_ref_source', 'fallback_tag');
+            core.info('Tooling ref: fallback tag v1-rc');
+
+      # ── Step 3: Checkout tooling (sparse) ──────────────────────────
+      - name: Checkout tooling
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.resolve-ref.outputs.tooling_checkout_repo }}
+          ref: ${{ steps.resolve-ref.outputs.tooling_checkout_ref }}
+          sparse-checkout: |
+            linting/config
+            validation
+            shared-actions
+          path: .tooling
+
+      # ── Step 4: Setup Python ───────────────────────────────────────
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # ── Step 5: Setup Node ─────────────────────────────────────────
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # ── Step 6: Install Python dependencies ────────────────────────
+      - name: Install Python dependencies
+        run: pip install --quiet pyyaml jsonschema
+
+      # ── Step 7: Install Node dependencies ──────────────────────────
+      - name: Install Node dependencies
+        run: npm ci --ignore-scripts
+        working-directory: .tooling/validation
+
+      # ── Step 8: Detect release-plan changes (PR only) ──────────────
+      - name: Detect release-plan changes
+        id: detect-changes
+        if: github.event_name == 'pull_request'
+        run: |
+          if git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- release-plan.yaml | grep -q .; then
+            echo "release_plan_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_plan_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Step 9: Run validation orchestrator ────────────────────────
+      - name: Run validation
+        id: orchestrator
+        env:
+          PYTHONPATH: ${{ github.workspace }}/.tooling
+          PATH_NODE_MODULES: ${{ github.workspace }}/.tooling/validation/node_modules/.bin
+          VALIDATION_REPO_PATH: ${{ github.workspace }}
+          VALIDATION_TOOLING_PATH: ${{ github.workspace }}/.tooling
+          VALIDATION_OUTPUT_DIR: ${{ github.workspace }}/validation-output
+          VALIDATION_REPO_NAME: ${{ github.repository }}
+          VALIDATION_REPO_OWNER: ${{ github.repository_owner }}
+          VALIDATION_EVENT_NAME: ${{ github.event_name }}
+          VALIDATION_REF_NAME: ${{ github.ref_name }}
+          VALIDATION_BASE_REF: ${{ github.base_ref }}
+          VALIDATION_MODE: ${{ inputs.mode }}
+          VALIDATION_PROFILE: ${{ inputs.profile }}
+          VALIDATION_PR_NUMBER: ${{ github.event.pull_request.number }}
+          VALIDATION_RELEASE_PLAN_CHANGED: ${{ steps.detect-changes.outputs.release_plan_changed }}
+          VALIDATION_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          VALIDATION_TOOLING_REF: ${{ steps.resolve-ref.outputs.tooling_checkout_ref }}
+          VALIDATION_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          export PATH="${PATH_NODE_MODULES}:${PATH}"
+          python -m validation.orchestrator
+
+      # ── Step 10: Emit annotations ──────────────────────────────────
+      - name: Emit annotations
+        if: always() && steps.orchestrator.outcome == 'success'
+        run: |
+          if [ -f validation-output/annotations.txt ]; then
+            cat validation-output/annotations.txt
+          fi
+
+      # ── Step 11: Write workflow summary ────────────────────────────
+      - name: Write workflow summary
+        if: always() && steps.orchestrator.outcome == 'success'
+        run: |
+          if [ -f validation-output/summary.md ]; then
+            cat validation-output/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ── Step 12: Post PR comment ───────────────────────────────────
+      - name: Post PR comment
+        if: always() && steps.orchestrator.outcome == 'success' && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const commentPath = 'validation-output/pr-comment.md';
+            if (!fs.existsSync(commentPath)) return;
+            const body = fs.readFileSync(commentPath, 'utf8');
+            const marker = '<!-- camara-validation -->';
+            const prNumber = context.payload.pull_request.number;
+
+            // Find existing comment with marker
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              { owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber }
+            );
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body,
+              });
+              core.info(`Updated existing comment ${existing.id}`);
+            } else {
+              const created = await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: body,
+              });
+              core.info(`Created comment ${created.data.id}`);
+            }
+
+      # ── Step 13: Set commit status ─────────────────────────────────
+      - name: Set commit status
+        if: always() && steps.orchestrator.outcome == 'success'
+        continue-on-error: true
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const statusPath = 'validation-output/commit-status.json';
+            if (!fs.existsSync(statusPath)) return;
+            const payload = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
+            const sha = '${{ github.event.pull_request.head.sha || github.sha }}';
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: sha,
+              state: payload.state,
+              description: payload.description,
+              context: payload.context,
+              target_url: payload.target_url,
+            });
+            core.info(`Commit status: ${payload.state}`);
+
+      # ── Step 14: Upload diagnostics ────────────────────────────────
+      - name: Upload diagnostics
+        if: always() && steps.orchestrator.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-diagnostics
+          path: validation-output/diagnostics/
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # ── Step 15: Check result ──────────────────────────────────────
+      - name: Check result
+        if: always() && steps.orchestrator.outcome == 'success'
+        run: |
+          if [ -f validation-output/result.json ]; then
+            SHOULD_FAIL=$(python3 -c "import json; r=json.load(open('validation-output/result.json')); print(r.get('should_fail', False))")
+            if [ "$SHOULD_FAIL" = "True" ]; then
+              echo "::error::Validation failed — see summary and annotations above"
+              exit 1
+            fi
+          fi
+
+      # ── Fallback: orchestrator infrastructure error ────────────────
+      - name: Report orchestrator failure
+        if: always() && steps.orchestrator.outcome == 'failure'
+        run: |
+          echo "## CAMARA Validation" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Error**: The validation orchestrator failed with an infrastructure error." >> "$GITHUB_STEP_SUMMARY"
+          echo "Check the workflow logs for details." >> "$GITHUB_STEP_SUMMARY"
+          exit 1

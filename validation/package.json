@@ -1,0 +1,9 @@
+{
+  "name": "camara-validation-tools",
+  "private": true,
+  "description": "Node.js tool dependencies for CAMARA validation framework",
+  "dependencies": {
+    "@stoplight/spectral-cli": "^6.14.0",
+    "gherkin-lint": "^4.2.4"
+  }
+}
