@@ -16,7 +16,7 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +145,23 @@ class GherkinResult:
     error_message: str = ""
 
 
+def _expand_globs(patterns: Sequence[str], cwd: Path) -> List[str]:
+    """Expand glob patterns relative to *cwd* into concrete file paths.
+
+    ``subprocess.run()`` without ``shell=True`` does not expand globs,
+    and gherkin-lint's internal feature-finder mangles ``**`` patterns
+    (appends ``/**.feature`` to any pattern containing ``/**``).
+    Expanding in Python avoids both issues.
+
+    Returns repo-relative POSIX path strings.
+    """
+    expanded: List[str] = []
+    for pattern in patterns:
+        matches = sorted(cwd.glob(pattern))
+        expanded.extend(str(m.relative_to(cwd)) for m in matches)
+    return expanded
+
+
 def run_gherkin_lint(
     config_path: Path,
     file_patterns: List[str],
@@ -162,11 +179,18 @@ def run_gherkin_lint(
     Returns:
         :class:`GherkinResult` with parsed findings and status.
     """
+    # Expand globs in Python — gherkin-lint's feature-finder mangles
+    # ** patterns (turns "dir/**/*.feature" into "dir/**/*.feature/**.feature").
+    files = _expand_globs(file_patterns, cwd)
+    if not files:
+        logger.info("No files matched patterns: %s", file_patterns)
+        return GherkinResult(findings=[], success=True)
+
     cmd = [
         "npx", "gherkin-lint",
         "--format", "json",
         "--config", str(config_path),
-        *file_patterns,
+        *files,
     ]
 
     try:

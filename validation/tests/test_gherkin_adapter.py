@@ -147,6 +147,11 @@ class TestParseGherkinOutput:
 
 
 class TestRunGherkinLint:
+    @pytest.fixture(autouse=True)
+    def _create_feature_file(self, tmp_path):
+        """Create a dummy .feature so glob patterns match."""
+        (tmp_path / "test.feature").write_text("Feature: dummy\n")
+
     @patch("validation.engines.gherkin_adapter.subprocess.run")
     def test_exit_0_no_findings(self, mock_run, tmp_path):
         mock_run.return_value = subprocess.CompletedProcess(

@@ -25,7 +25,12 @@ logger = logging.getLogger(__name__)
 
 MARKER = "<!-- camara-validation -->"
 
-_RESULT_LABEL = {"pass": "PASS", "fail": "FAIL", "error": "ERROR"}
+_RESULT_LABEL = {
+    "pass": "PASS",
+    "fail": "FAIL",
+    "error": "ERROR",
+    "advisory": "ADVISORY",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -49,11 +54,14 @@ def generate_pr_comment(
     Returns:
         Complete Markdown string ready to post as a PR comment.
     """
-    result_label = _RESULT_LABEL.get(
-        post_filter_result.result,
-        post_filter_result.result.upper(),
-    )
-    counts = count_findings(post_filter_result.findings)
+    result = post_filter_result.result
+    findings = post_filter_result.findings
+    # Advisory profile: show ADVISORY instead of PASS when findings exist
+    if result == "pass" and context.profile == "advisory" and findings:
+        result_label = _RESULT_LABEL["advisory"]
+    else:
+        result_label = _RESULT_LABEL.get(result, result.upper())
+    counts = count_findings(findings)
 
     lines = [
         MARKER,

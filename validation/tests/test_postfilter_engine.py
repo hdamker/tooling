@@ -332,8 +332,9 @@ class TestRunPostFilter:
         ctx = _make_context(profile="advisory")
         findings = [_make_finding(level="error")]
         result = run_post_filter(findings, ctx, tmp_path)
-        assert result.result == "pass"
+        assert result.result == "advisory"
         assert result.findings[0]["blocks"] is False
+        assert "Advisory" in result.summary
 
     def test_strict_profile_warns_block(self, tmp_path: Path):
         ctx = _make_context(profile="strict")

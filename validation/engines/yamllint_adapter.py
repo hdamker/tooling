@@ -20,7 +20,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +148,23 @@ class YamllintResult:
     error_message: str = ""
 
 
+def _expand_globs(patterns: Sequence[str], cwd: Path) -> List[str]:
+    """Expand glob patterns relative to *cwd* into concrete file paths.
+
+    ``subprocess.run()`` without ``shell=True`` does not expand globs,
+    and yamllint does not expand them internally.  This helper bridges
+    the gap so that the adapter receives the same files the orchestrator
+    discovers.
+
+    Returns repo-relative POSIX path strings (matching yamllint output).
+    """
+    expanded: List[str] = []
+    for pattern in patterns:
+        matches = sorted(cwd.glob(pattern))
+        expanded.extend(str(m.relative_to(cwd)) for m in matches)
+    return expanded
+
+
 def run_yamllint(
     config_path: Path,
     file_patterns: List[str],
@@ -166,11 +183,18 @@ def run_yamllint(
     Returns:
         :class:`YamllintResult` with parsed findings and status.
     """
+    # Expand globs in Python — subprocess doesn't expand them and
+    # yamllint doesn't accept glob patterns.
+    files = _expand_globs(file_patterns, cwd)
+    if not files:
+        logger.info("No files matched patterns: %s", file_patterns)
+        return YamllintResult(findings=[], success=True)
+
     cmd = [
         sys.executable, "-m", "yamllint",
         "--format", "parsable",
         "--config-file", str(config_path),
-        *file_patterns,
+        *files,
     ]
 
     try:

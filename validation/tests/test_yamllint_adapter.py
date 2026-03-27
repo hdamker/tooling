@@ -159,6 +159,11 @@ class TestParseYamllintOutput:
 
 
 class TestRunYamllint:
+    @pytest.fixture(autouse=True)
+    def _create_yaml_file(self, tmp_path):
+        """Create a dummy .yaml so glob patterns match."""
+        (tmp_path / "f.yaml").write_text("key: value\n")
+
     @patch("validation.engines.yamllint_adapter.subprocess.run")
     def test_exit_0_no_findings(self, mock_run, tmp_path):
         mock_run.return_value = subprocess.CompletedProcess(
@@ -203,6 +208,14 @@ class TestRunYamllint:
         result = run_yamllint(tmp_path / ".yamllint.yaml", ["*.yaml"], cwd=tmp_path)
         assert result.success is False
         assert "timed out" in result.error_message
+
+    def test_no_matching_files_returns_empty_success(self, tmp_path):
+        """When no files match the glob, return empty success."""
+        result = run_yamllint(
+            tmp_path / ".yamllint.yaml", ["nonexistent/*.yaml"], cwd=tmp_path,
+        )
+        assert result.success is True
+        assert result.findings == []
 
 
 # ---------------------------------------------------------------------------

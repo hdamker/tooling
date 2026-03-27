@@ -111,24 +111,29 @@ def _passthrough_finding(finding: dict) -> dict:
 def compute_overall_result(
     findings: List[dict],
     had_engine_error: bool,
+    profile: str = "",
 ) -> str:
     """Compute the overall result from processed findings.
 
-    Priority: ``"error"`` > ``"fail"`` > ``"pass"``.
+    Priority: ``"error"`` > ``"fail"`` > ``"advisory"`` > ``"pass"``.
 
     Args:
         findings: Post-filtered findings with ``blocks`` field set.
         had_engine_error: Whether any engine execution error occurred.
+        profile: Validation profile (advisory/standard/strict).
 
     Returns:
         ``"error"`` if evaluation was incomplete (engine failure),
         ``"fail"`` if any finding has ``blocks=True``,
+        ``"advisory"`` if profile is advisory and findings exist,
         ``"pass"`` otherwise.
     """
     if had_engine_error:
         return "error"
     if any(f.get("blocks") for f in findings):
         return "fail"
+    if profile == "advisory" and findings:
+        return "advisory"
     return "pass"
 
 
@@ -148,6 +153,11 @@ def _build_summary(result: str, findings: List[dict]) -> str:
     if result == "fail":
         return (
             f"Failed: {blocking} blocking out of {total} findings "
+            f"({errors} errors, {warnings} warnings, {hints} hints)"
+        )
+    if result == "advisory":
+        return (
+            f"Advisory: {total} findings "
             f"({errors} errors, {warnings} warnings, {hints} hints)"
         )
     if total == 0:
@@ -247,7 +257,7 @@ def run_post_filter(
         processed.append(enriched)
 
     # Step 6: Overall result
-    result = compute_overall_result(processed, had_engine_error)
+    result = compute_overall_result(processed, had_engine_error, context.profile)
     summary = _build_summary(result, processed)
 
     logger.info("Post-filter result: %s — %s", result, summary)

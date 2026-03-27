@@ -28,6 +28,7 @@ _DESCRIPTION_MAX_LEN = 140
 
 _RESULT_TO_STATE = {
     "pass": "success",
+    "advisory": "success",
     "fail": "failure",
     "error": "error",
 }

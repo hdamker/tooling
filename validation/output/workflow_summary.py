@@ -35,7 +35,12 @@ logger = logging.getLogger(__name__)
 
 SUMMARY_SIZE_LIMIT = 900 * 1024  # 900 KB (GitHub limit is 1 MB)
 
-_RESULT_LABEL = {"pass": "PASS", "fail": "FAIL", "error": "ERROR"}
+_RESULT_LABEL = {
+    "pass": "PASS",
+    "fail": "FAIL",
+    "error": "ERROR",
+    "advisory": "ADVISORY",
+}
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -63,12 +68,33 @@ class SummaryResult:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_result_label(
+    result: str,
+    context: ValidationContext,
+    findings: List[dict],
+) -> str:
+    """Map result string to display label, with advisory override.
+
+    Advisory profile never blocks, so the post-filter always returns
+    ``"pass"``.  Showing **PASS** when there are errors is misleading;
+    **ADVISORY** signals that findings exist but nothing was blocked.
+    """
+    if (
+        result == "pass"
+        and context.profile == "advisory"
+        and findings
+    ):
+        return _RESULT_LABEL["advisory"]
+    return _RESULT_LABEL.get(result, result.upper())
+
+
 def _render_header(
     result: str,
     context: ValidationContext,
+    findings: List[dict],
 ) -> str:
     """Render the summary header with result and metadata."""
-    label = _RESULT_LABEL.get(result, result.upper())
+    label = _resolve_result_label(result, context, findings)
     return (
         f"## CAMARA Validation — {label}\n\n"
         f"**Profile**: {context.profile} | "
@@ -211,7 +237,7 @@ def generate_workflow_summary(
     hints = [f for f in sorted_all if f.get("level") == "hint"]
 
     # Fixed sections (always rendered)
-    header = _render_header(post_filter_result.result, context)
+    header = _render_header(post_filter_result.result, context, findings)
     api_table = _render_api_table(findings)
     engine_table = _render_engine_table(engine_statuses)
     footer = _render_footer(context, commit_sha)
