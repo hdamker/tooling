@@ -152,7 +152,7 @@ jobs:
 
       # ── Step 6: Install Python dependencies ────────────────────────
       - name: Install Python dependencies
-        run: pip install --quiet pyyaml==6.0.3 jsonschema==4.26.0
+        run: pip install --quiet pyyaml==6.0.3 jsonschema==4.26.0 yamllint==1.38.0
 
       # ── Step 7: Install Node dependencies ──────────────────────────
       - name: Install Node dependencies

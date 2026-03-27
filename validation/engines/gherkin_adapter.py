@@ -187,7 +187,7 @@ def run_gherkin_lint(
         return GherkinResult(findings=[], success=True)
 
     cmd = [
-        "npx", "gherkin-lint",
+        "gherkin-lint",
         "--format", "json",
         "--config", str(config_path),
         *files,
@@ -205,7 +205,7 @@ def run_gherkin_lint(
         return GherkinResult(
             findings=[],
             success=False,
-            error_message="npx/gherkin-lint not found — is Node.js installed?",
+            error_message="gherkin-lint not found — is it installed and on PATH?",
         )
     except subprocess.TimeoutExpired:
         return GherkinResult(
