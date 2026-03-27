@@ -111,8 +111,8 @@ def _render_api_table(findings: List[dict]) -> str:
 
     lines = [
         "\n### Summary\n",
-        "| API | Errors | Warnings | Hints |",
-        "|-----|--------|----------|-------|",
+        "| API / Test | Errors | Warnings | Hints |",
+        "|------------|--------|----------|-------|",
     ]
     for api_name, counts in by_api.items():
         lines.append(
