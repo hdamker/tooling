@@ -215,8 +215,10 @@ def run_gherkin_lint(
         )
 
     # Exit 0 = clean, exit 1 = findings found.  Both produce valid JSON.
+    # gherkin-lint writes JSON to stderr (not stdout).
     if result.returncode in (0, 1):
-        findings = parse_gherkin_output(result.stdout, str(cwd))
+        raw_json = result.stderr or result.stdout
+        findings = parse_gherkin_output(raw_json, str(cwd))
         return GherkinResult(findings=findings, success=True)
 
     # Other exit codes: check for config-not-found or other runtime errors.

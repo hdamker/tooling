@@ -155,7 +155,7 @@ class TestRunGherkinLint:
     @patch("validation.engines.gherkin_adapter.subprocess.run")
     def test_exit_0_no_findings(self, mock_run, tmp_path):
         mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="[]", stderr="",
+            args=[], returncode=0, stdout="", stderr="[]",
         )
         result = run_gherkin_lint(
             tmp_path / ".gherkin-lintrc", ["*.feature"], cwd=tmp_path,
@@ -168,11 +168,11 @@ class TestRunGherkinLint:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=1,
-            stdout=json.dumps([{
+            stdout="",
+            stderr=json.dumps([{
                 "filePath": str(tmp_path / "code/Test_definitions/api.feature"),
                 "errors": [{"message": "m", "rule": "r", "line": 1}],
             }]),
-            stderr="",
         )
         result = run_gherkin_lint(
             tmp_path / ".gherkin-lintrc", ["*.feature"], cwd=tmp_path,
