@@ -18,9 +18,10 @@ Maintained under the supervision of Commonalities Working Group.
 ## Purpose
 
 This repository provides:
-* Reusable GitHub workflows for API repositories (linting, validation)
+* Reusable GitHub workflows for API repositories (linting, validation, release automation)
 * Shared GitHub Actions with cross-repository value
 * Validation scripts and schemas for release planning
+* Release automation for API repository releases
 * Configuration files and documentation for workflows
 
 ## Scope
@@ -82,12 +83,32 @@ Legacy API review validation system (Fall25 meta-release specific).
 * **Status**: Deprecated - not maintained for future releases
 * **Workflow**: `api-review-reusable.yml`
 
+### Release Automation
+
+Automated release workflow for CAMARA API repositories, handling release planning, snapshot creation, review PR generation, changelog updates, and publication.
+
+* **Location**: [release_automation/](release_automation/)
+* **Reusable workflow**: `release-automation-reusable.yml`
+* **Caller template**: [release-automation-caller.yml](release_automation/workflows/release-automation-caller.yml)
+* **User documentation**: [Release Process Guide](https://github.com/camaraproject/ReleaseManagement/blob/main/documentation/README.md) (in ReleaseManagement repository)
+* **Technical documentation**:
+  * [repository-setup.md](release_automation/docs/repository-setup.md) — onboarding guide
+  * [technical-architecture.md](release_automation/docs/technical-architecture.md) — system design
+  * [branching-model.md](release_automation/docs/branching-model.md) — branch and tag conventions
+
 ### Shared Actions
 
 Reusable GitHub Actions for cross-repository use.
 
 * **Location**: [shared-actions/](shared-actions/)
-* **Actions**: `validate-release-plan` — schema and semantic validation for release-plan.yaml
+* **Actions**:
+  * `validate-release-plan` — release-plan.yaml schema and semantic validation
+  * `create-snapshot` — create release snapshot branches
+  * `derive-release-state` — determine release state from repository artifacts
+  * `post-bot-comment` — post formatted bot comments on issues
+  * `sync-release-issue` — synchronize release issue state and body
+  * `update-issue-section` — update marked sections in issue bodies
+  * `update-readme-release-info` — update README release information block
 
 ## Repository Structure
 
@@ -98,7 +119,8 @@ tooling/
 │       ├── api-review-reusable.yml  # Deprecated
 │       ├── pr_validation.yml
 │       ├── release-automation-reusable.yml
-│       └── spectral-oas.yml
+│       ├── spectral-oas.yml
+│       └── update-floating-tag.yml
 ├── api-review/                  # Deprecated
 │   ├── docs/
 │   └── workflows/
@@ -106,12 +128,24 @@ tooling/
 │   ├── config/                  # Spectral and linting configuration
 │   ├── docs/
 │   └── workflows/               # Caller workflow templates
+├── release_automation/
+│   ├── config/                  # Transformation rules
+│   ├── docs/                    # Setup, architecture, branching model
+│   ├── scripts/                 # Python modules
+│   ├── templates/               # Mustache templates
+│   ├── tests/                   # Unit tests (565 tests)
+│   └── workflows/               # Caller workflow template
 ├── scripts/                     # Deprecated
 │   └── api_review_validator_v0_6.py
 ├── shared-actions/
-│   └── validate-release-plan/   # Composite GitHub Action
+│   ├── create-snapshot/
+│   ├── derive-release-state/
+│   ├── post-bot-comment/
+│   ├── sync-release-issue/
+│   ├── update-issue-section/
+│   ├── update-readme-release-info/
+│   └── validate-release-plan/
 └── validation/
-    ├── docs/
     ├── schemas/                 # JSON/YAML schemas
     │   ├── release-plan-schema.yaml
     │   └── release-metadata-schema.yaml
@@ -121,10 +155,10 @@ tooling/
 
 ## Release Information
 
-The latest release is [v0.2.3](https://github.com/camaraproject/tooling/releases/tag/v0.2.3).
+The latest release is [v0.3.0](https://github.com/camaraproject/tooling/releases/tag/v0.3.0).
 
-* API repositories reference the `v0` floating tag, which tracks the latest patch release
-* The release candidate of CAMARA Release Automation is on the [`release-automation`](https://github.com/camaraproject/tooling/tree/release-automation) branch (tag `ra-v1-rc`), to be merged into `main` soon
+* API repositories reference the `v0` floating tag, which tracks the latest stable release
+* CAMARA Release Automation is included since v0.3.0 (see [repository-setup.md](release_automation/docs/repository-setup.md) for onboarding)
 * Tested versions are in the `main` branch
 * Versions under development are in feature branches
 
