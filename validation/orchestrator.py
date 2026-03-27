@@ -26,7 +26,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from validation.config.config_gate import StageGateResult, resolve_stage_from_files
 from validation.context import ValidationContext, build_validation_context
 from validation.engines import (
-    run_gherkin_engine,
     run_python_engine,
     run_spectral_engine,
     run_yamllint_engine,
@@ -246,23 +245,9 @@ def run_engines(
         engine_statuses["python"] = f"error: {exc}"
         logger.error("Python checks failed: %s", exc)
 
-    # --- gherkin-lint ---
-    if not test_files:
-        engine_statuses["gherkin"] = "skipped (no test files)"
-        logger.info("gherkin-lint: skipped (no test files)")
-    else:
-        try:
-            gherkin_config = paths.linting_config_dir / ".gherkin-lintrc"
-            findings = run_gherkin_engine(
-                repo_path=repo_path,
-                config_path=gherkin_config,
-            )
-            all_findings.extend(findings)
-            engine_statuses["gherkin"] = f"{len(findings)} finding(s)"
-            logger.info("gherkin-lint: %d finding(s)", len(findings))
-        except Exception as exc:
-            engine_statuses["gherkin"] = f"error: {exc}"
-            logger.error("gherkin-lint failed: %s", exc)
+    # --- gherkin-lint (excluded from v1 — unmaintained, seeking alternative) ---
+    engine_statuses["gherkin"] = "skipped (excluded from v1)"
+    logger.info("gherkin-lint: skipped (excluded from v1)")
 
     # --- Bundling (placeholder for WP-06.08) ---
     engine_statuses["bundling"] = "not yet implemented"
