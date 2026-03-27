@@ -1,0 +1,131 @@
+name: update-readme-release-info
+description: |
+  Updates the Release Information section in a repository README.
+
+  Replaces content between CAMARA:RELEASE-INFO:START/END delimiters
+  with a rendered template matching the current release state.
+
+inputs:
+  readme_path:
+    description: 'Path to README.md file'
+    required: true
+  repo_name:
+    description: 'Repository name (e.g., "QualityOnDemand")'
+    required: true
+  org:
+    description: 'GitHub organization'
+    required: false
+    default: 'camaraproject'
+  release_state:
+    description: 'One of: no_release, prerelease_only, public_release, public_with_prerelease'
+    required: true
+  latest_public_release:
+    description: 'Latest public release tag (e.g., "r3.2")'
+    required: false
+    default: ''
+  newest_prerelease:
+    description: 'Newest pre-release tag (e.g., "r4.1-rc.1")'
+    required: false
+    default: ''
+  public_apis_json:
+    description: 'JSON array of public release APIs [{file_name, version}]'
+    required: false
+    default: '[]'
+  prerelease_apis_json:
+    description: 'JSON array of pre-release APIs [{file_name, version}]'
+    required: false
+    default: '[]'
+  meta_release:
+    description: 'Meta-release label (e.g., "Spring25")'
+    required: false
+    default: ''
+  prerelease_type:
+    description: 'Pre-release type label (e.g., "release candidate", "pre-release")'
+    required: false
+    default: ''
+
+outputs:
+  changed:
+    description: 'Whether README was modified (true/false)'
+    value: ${{ steps.update.outputs.changed }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install --quiet pystache
+
+    - name: Update README
+      id: update
+      shell: python
+      env:
+        README_PATH: ${{ inputs.readme_path }}
+        REPO_NAME: ${{ inputs.repo_name }}
+        ORG: ${{ inputs.org }}
+        RELEASE_STATE: ${{ inputs.release_state }}
+        LATEST_PUBLIC_RELEASE: ${{ inputs.latest_public_release }}
+        NEWEST_PRERELEASE: ${{ inputs.newest_prerelease }}
+        PUBLIC_APIS_JSON: ${{ inputs.public_apis_json }}
+        PRERELEASE_APIS_JSON: ${{ inputs.prerelease_apis_json }}
+        META_RELEASE: ${{ inputs.meta_release }}
+        PRERELEASE_TYPE: ${{ inputs.prerelease_type }}
+        SCRIPTS_PATH: ${{ github.action_path }}/../../release_automation/scripts
+      run: |
+        import os
+        import sys
+        import json
+
+        # Add tooling root to module search path
+        # SCRIPTS_PATH = .../release_automation/scripts → need parent of release_automation
+        scripts_path = os.environ['SCRIPTS_PATH']
+        sys.path.insert(0, os.path.dirname(os.path.dirname(scripts_path)))
+
+        from release_automation.scripts.readme_updater import ReadmeUpdater
+
+        readme_path = os.environ['README_PATH']
+        repo_name = os.environ['REPO_NAME']
+        org = os.environ['ORG']
+        release_state = os.environ['RELEASE_STATE']
+        release_tag = os.environ.get('LATEST_PUBLIC_RELEASE', '') or os.environ.get('NEWEST_PRERELEASE', '')
+
+        # Format API links from JSON inputs
+        public_apis = json.loads(os.environ['PUBLIC_APIS_JSON'])
+        prerelease_apis = json.loads(os.environ['PRERELEASE_APIS_JSON'])
+
+        formatted_apis = ReadmeUpdater.format_api_links(
+            public_apis, repo_name, os.environ.get('LATEST_PUBLIC_RELEASE', ''), org
+        ) if public_apis else ""
+
+        formatted_prerelease_apis = ReadmeUpdater.format_api_links(
+            prerelease_apis, repo_name, os.environ.get('NEWEST_PRERELEASE', ''), org
+        ) if prerelease_apis else ""
+
+        # Build data dict
+        data = {
+            "repo_name": repo_name,
+            "latest_public_release": os.environ.get('LATEST_PUBLIC_RELEASE', ''),
+            "newest_prerelease": os.environ.get('NEWEST_PRERELEASE', ''),
+            "github_url": f"https://github.com/{org}/{repo_name}/releases/tag/{os.environ.get('LATEST_PUBLIC_RELEASE', '')}",
+            "prerelease_github_url": f"https://github.com/{org}/{repo_name}/releases/tag/{os.environ.get('NEWEST_PRERELEASE', '')}",
+            "meta_release": os.environ.get('META_RELEASE', ''),
+            "prerelease_type": os.environ.get('PRERELEASE_TYPE', ''),
+            "formatted_apis": formatted_apis,
+            "formatted_prerelease_apis": formatted_prerelease_apis,
+        }
+
+        updater = ReadmeUpdater()
+        try:
+            changed = updater.update_release_info(readme_path, release_state, data)
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                f.write(f"changed={'true' if changed else 'false'}\n")
+        except Exception as e:
+            print(f"::error::README update failed: {e}")
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                f.write("changed=false\n")
+            sys.exit(1)

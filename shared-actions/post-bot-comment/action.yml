@@ -1,0 +1,220 @@
+name: post-bot-comment
+description: |
+  Posts or updates a bot comment on a GitHub issue.
+  Uses Mustache templates for message rendering and adds a release-specific
+  marker to identify bot comments for later updates.
+
+inputs:
+  issue_number:
+    description: "Issue number to comment on"
+    required: true
+  release_tag:
+    description: 'Release tag for marker identification (e.g., "r4.1")'
+    required: true
+  template:
+    description: 'Template name (e.g., "snapshot_created", "command_rejected")'
+    required: true
+  context:
+    description: "JSON string with template variables"
+    required: true
+  base_context:
+    description: "JSON string with base context (e.g. from assemble-context)"
+    required: false
+    default: "{}"
+  comment_id:
+    description: "Existing comment ID to update (optional - will search by marker if not provided)"
+    required: false
+    default: ""
+  run_id:
+    description: "Workflow run ID for marker uniqueness (preserves comment history across runs)"
+    required: true
+  github_token:
+    description: "GitHub token for API authentication (defaults to github.token)"
+    required: false
+    default: ""
+
+outputs:
+  comment_id:
+    description: "ID of the created or updated comment"
+    value: ${{ steps.post.outputs.comment_id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: "3.11"
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install --quiet pystache
+
+    - name: Render Template
+      id: render
+      shell: python
+      env:
+        TEMPLATE_NAME: ${{ inputs.template }}
+        CONTEXT_JSON: ${{ inputs.context }}
+        BASE_CONTEXT_JSON: ${{ inputs.base_context }}
+        RELEASE_TAG: ${{ inputs.release_tag }}
+        RUN_ID: ${{ inputs.run_id }}
+        SCRIPTS_PATH: ${{ github.action_path }}/../../release_automation/scripts
+      run: |
+        import json
+        import os
+        import sys
+
+        # Add scripts path to module search path
+        # SCRIPTS_PATH is like _tooling/release_automation/scripts
+        # We need _tooling in sys.path so 'release_automation.scripts' is importable
+        scripts_path = os.environ['SCRIPTS_PATH']
+        # Go up two levels: scripts -> release_automation -> _tooling
+        tooling_root = os.path.dirname(os.path.dirname(scripts_path))
+        sys.path.insert(0, tooling_root)
+        print(f"Added to sys.path: {tooling_root}")
+
+        from release_automation.scripts.bot_responder import BotResponder
+        from release_automation.scripts.context_builder import build_context
+
+        # Parse context
+        base_context_json = os.environ.get('BASE_CONTEXT_JSON', '{}')
+        context_json = os.environ['CONTEXT_JSON']
+
+        base_context = {}
+        if base_context_json:
+            try:
+                base_context = json.loads(base_context_json)
+                if not isinstance(base_context, dict):
+                    base_context = {}
+            except json.JSONDecodeError:
+                print("::warning::Invalid base_context JSON, ignoring")
+
+        try:
+            raw_context_delta = json.loads(context_json)
+        except json.JSONDecodeError as e:
+            print(f"::error::Invalid JSON context: {e}")
+            sys.exit(1)
+
+        # Merge delta into base
+        raw_context = base_context.copy()
+        raw_context.update(raw_context_delta)
+
+        # Convert apis_json to apis list if present
+        # Handle both cases: string (from shell) or list (from jq JSON parsing)
+        if 'apis_json' in raw_context:
+            apis_val = raw_context['apis_json']
+            if isinstance(apis_val, str):
+                try:
+                    raw_context['apis'] = json.loads(apis_val)
+                except (json.JSONDecodeError, TypeError):
+                    raw_context['apis'] = []
+            elif isinstance(apis_val, list):
+                raw_context['apis'] = apis_val
+            else:
+                raw_context['apis'] = []
+            del raw_context['apis_json']
+
+        # Guarantee schema completeness via build_context()
+        # - Fills missing keys with type-appropriate defaults
+        # - Derives boolean flags from string fields (e.g., is_missing_file from error_type)
+        # - Ignores unknown keys silently
+        context = build_context(**raw_context)
+
+        # Render template
+        template_name = os.environ['TEMPLATE_NAME']
+        release_tag = os.environ['RELEASE_TAG']
+        run_id = os.environ['RUN_ID']
+
+        responder = BotResponder()
+
+        try:
+            content = responder.render_with_marker(template_name, context, release_tag)
+        except Exception as e:
+            print(f"::error::Failed to render template '{template_name}': {e}")
+            sys.exit(1)
+
+        # Write rendered content to output file for next step
+        # Using multiline output format
+        output_file = os.environ['GITHUB_OUTPUT']
+        delimiter = 'RENDERED_CONTENT_EOF'
+
+        with open(output_file, 'a') as f:
+            f.write(f"content<<{delimiter}\n")
+            f.write(content)
+            f.write(f"\n{delimiter}\n")
+            f.write(f"marker=<!-- release-bot:{release_tag}:{run_id} -->\n")
+
+        print(f"Rendered template: {template_name}")
+        print(f"Content length: {len(content)} chars")
+
+    - name: Post or Update Comment
+      id: post
+      uses: actions/github-script@v8
+      env:
+        ISSUE_NUMBER: ${{ inputs.issue_number }}
+        EXISTING_COMMENT_ID: ${{ inputs.comment_id }}
+        RENDERED_CONTENT: ${{ steps.render.outputs.content }}
+        MARKER: ${{ steps.render.outputs.marker }}
+      with:
+        github-token: ${{ inputs.github_token || github.token }}
+        script: |
+          const issueNumber = parseInt(process.env.ISSUE_NUMBER);
+          const existingCommentId = process.env.EXISTING_COMMENT_ID;
+          const content = process.env.RENDERED_CONTENT;
+          const marker = process.env.MARKER;
+
+          // If comment_id provided, update that specific comment
+          if (existingCommentId) {
+            const commentId = parseInt(existingCommentId);
+            console.log(`Updating existing comment: ${commentId}`);
+
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: commentId,
+              body: content
+            });
+
+            core.setOutput('comment_id', commentId.toString());
+            return;
+          }
+
+          // Otherwise, search for existing comment with matching marker
+          console.log(`Searching for comment with marker: ${marker}`);
+
+          const comments = await github.paginate(
+            github.rest.issues.listComments,
+            {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber
+            }
+          );
+
+          const existingComment = comments.find(c => c.body && c.body.includes(marker));
+
+          if (existingComment) {
+            console.log(`Found existing comment: ${existingComment.id}`);
+
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existingComment.id,
+              body: content
+            });
+
+            core.setOutput('comment_id', existingComment.id.toString());
+          } else {
+            console.log('No existing comment found, creating new one');
+
+            const result = await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: content
+            });
+
+            console.log(`Created comment: ${result.data.id}`);
+            core.setOutput('comment_id', result.data.id.toString());
+          }

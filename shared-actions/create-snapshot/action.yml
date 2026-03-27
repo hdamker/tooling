@@ -1,0 +1,255 @@
+name: create-snapshot
+description: |
+  Creates a release snapshot for a CAMARA API repository.
+
+  This action:
+  1. Validates state is PLANNED
+  2. Clones repository and creates snapshot branch
+  3. Calculates API versions with proper extensions
+  4. Applies mechanical transformations (server URLs, references)
+  5. Generates release-metadata.yaml
+  6. Creates Release PR for review
+
+inputs:
+  release_tag:
+    description: 'Target release tag (e.g., "r4.1")'
+    required: true
+  base_branch:
+    description: 'Base branch for snapshot (default: main)'
+    required: false
+    default: 'main'
+  dry_run:
+    description: 'If true, validate only without creating branches'
+    required: false
+    default: 'false'
+  github_token:
+    description: 'GitHub token with repo and PR write permissions'
+    required: true
+  bot_name:
+    description: 'Git committer name for snapshot commits'
+    required: false
+    default: 'github-actions[bot]'
+  bot_email:
+    description: 'Git committer email for snapshot commits'
+    required: false
+    default: '41898282+github-actions[bot]@users.noreply.github.com'
+
+outputs:
+  success:
+    description: 'Whether snapshot creation succeeded'
+    value: ${{ steps.create.outputs.success }}
+  snapshot_id:
+    description: 'Generated snapshot ID (e.g., r4.1-abc1234)'
+    value: ${{ steps.create.outputs.snapshot_id }}
+  snapshot_branch:
+    description: 'Snapshot branch name (e.g., release-snapshot/r4.1-abc1234)'
+    value: ${{ steps.create.outputs.snapshot_branch }}
+  release_review_branch:
+    description: 'Release review branch name'
+    value: ${{ steps.create.outputs.release_review_branch }}
+  release_pr_number:
+    description: 'Release PR number'
+    value: ${{ steps.create.outputs.release_pr_number }}
+  release_pr_url:
+    description: 'Release PR URL'
+    value: ${{ steps.create.outputs.release_pr_url }}
+  error_message:
+    description: 'Error message if creation failed'
+    value: ${{ steps.create.outputs.error_message }}
+  apis_json:
+    description: 'JSON array of {api_name, api_version} objects for calculated versions'
+    value: ${{ steps.create.outputs.apis_json }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install --quiet pyyaml pystache
+
+    - name: Create Snapshot
+      id: create
+      shell: python
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        RELEASE_TAG: ${{ inputs.release_tag }}
+        BASE_BRANCH: ${{ inputs.base_branch }}
+        DRY_RUN: ${{ inputs.dry_run }}
+        REPO: ${{ github.repository }}
+        SCRIPTS_PATH: ${{ github.action_path }}/../../release_automation/scripts
+        BOT_NAME: ${{ inputs.bot_name }}
+        BOT_EMAIL: ${{ inputs.bot_email }}
+      run: |
+        import os
+        import sys
+        import json
+
+        # Add scripts path to module search path
+        scripts_path = os.path.realpath(os.environ['SCRIPTS_PATH'])
+        # Go up two levels: scripts -> release_automation -> tooling root
+        tooling_root = os.path.dirname(os.path.dirname(scripts_path))
+        sys.path.insert(0, tooling_root)
+        print(f"Added to sys.path: {tooling_root}")
+
+        from release_automation.scripts.github_client import GitHubClient
+        from release_automation.scripts.state_manager import ReleaseStateManager
+        from release_automation.scripts.version_calculator import VersionCalculator
+        from release_automation.scripts.mechanical_transformer import MechanicalTransformer
+        from release_automation.scripts.metadata_generator import MetadataGenerator
+        from release_automation.scripts.snapshot_creator import SnapshotCreator, SnapshotConfig
+
+        # Get inputs
+        repo = os.environ['REPO']
+        token = os.environ['GITHUB_TOKEN']
+        release_tag = os.environ.get('RELEASE_TAG', '').strip()
+        base_branch = os.environ.get('BASE_BRANCH', 'main').strip()
+        dry_run = os.environ.get('DRY_RUN', 'false').lower() == 'true'
+
+        output_file = os.environ['GITHUB_OUTPUT']
+
+        def write_outputs(success='false', snapshot_id='', snapshot_branch='',
+                          release_review_branch='', release_pr_number='',
+                          release_pr_url='', error_message='', apis_json=''):
+            """Write outputs to GITHUB_OUTPUT file."""
+            with open(output_file, 'a') as f:
+                f.write(f"success={success}\n")
+                f.write(f"snapshot_id={snapshot_id}\n")
+                f.write(f"snapshot_branch={snapshot_branch}\n")
+                f.write(f"release_review_branch={release_review_branch}\n")
+                f.write(f"release_pr_number={release_pr_number}\n")
+                f.write(f"release_pr_url={release_pr_url}\n")
+                f.write(f"error_message={error_message}\n")
+                f.write(f"apis_json={apis_json}\n")
+
+        # Validate release_tag provided
+        if not release_tag:
+            print("::error::No release_tag provided")
+            write_outputs(error_message="No release_tag provided")
+            sys.exit(1)
+
+        print(f"Creating snapshot for {release_tag}")
+        print(f"  Repository: {repo}")
+        print(f"  Base branch: {base_branch}")
+        print(f"  Dry run: {dry_run}")
+
+        # Initialize clients and components
+        try:
+            gh = GitHubClient(repo=repo, token=token)
+            state_manager = ReleaseStateManager(github_client=gh)
+            version_calc = VersionCalculator(github_client=gh)
+            config_path = os.path.join(tooling_root, 'release_automation', 'config', 'transformations.yaml')
+            transformer = MechanicalTransformer(config_path=config_path)
+            metadata_gen = MetadataGenerator()
+
+            creator = SnapshotCreator(
+                github_client=gh,
+                version_calculator=version_calc,
+                transformer=transformer,
+                metadata_generator=metadata_gen,
+                state_manager=state_manager,
+                bot_name=os.environ.get('BOT_NAME', 'github-actions[bot]'),
+                bot_email=os.environ.get('BOT_EMAIL', '41898282+github-actions[bot]@users.noreply.github.com'),
+            )
+        except Exception as e:
+            print(f"::error::Failed to initialize components: {e}")
+            write_outputs(error_message=f"Initialization failed: {e}")
+            sys.exit(1)
+
+        # Read release-plan.yaml
+        print("Reading release-plan.yaml...")
+        release_plan_content = gh.get_file_content('release-plan.yaml', ref=base_branch)
+
+        if release_plan_content is None:
+            print("::error::release-plan.yaml not found on base branch")
+            write_outputs(error_message="release-plan.yaml not found")
+            sys.exit(1)
+
+        import yaml
+        try:
+            release_plan = yaml.safe_load(release_plan_content)
+        except yaml.YAMLError as e:
+            print(f"::error::Failed to parse release-plan.yaml: {e}")
+            write_outputs(error_message=f"Invalid YAML: {e}")
+            sys.exit(1)
+
+        if not isinstance(release_plan, dict):
+            print("::error::release-plan.yaml is not a valid YAML mapping")
+            write_outputs(error_message="Invalid release-plan.yaml structure")
+            sys.exit(1)
+
+        # Verify release tag matches
+        plan_tag = release_plan.get('repository', {}).get('target_release_tag', '')
+        if plan_tag != release_tag:
+            print(f"::warning::release-plan.yaml tag '{plan_tag}' doesn't match input '{release_tag}'")
+            # Continue - use input release_tag as authoritative
+
+        # Create snapshot configuration
+        config = SnapshotConfig(
+            release_tag=release_tag,
+            base_branch=base_branch,
+            dry_run=dry_run,
+        )
+
+        # Create snapshot
+        print("Creating snapshot...")
+        try:
+            result = creator.create_snapshot(release_plan, config)
+        except Exception as e:
+            print(f"::error::Snapshot creation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            write_outputs(error_message=str(e))
+            sys.exit(1)
+
+        # Process result
+        if result.success:
+            print("Snapshot created successfully!")
+            print(f"  Snapshot ID: {result.snapshot_id}")
+            print(f"  Snapshot branch: {result.snapshot_branch}")
+            print(f"  Release PR: #{result.release_pr_number}")
+            print(f"  PR URL: {result.release_pr_url}")
+
+            for api_name, version in result.api_versions.items():
+                print(f"  {api_name}: {version}")
+
+            if result.warnings:
+                for warning in result.warnings:
+                    print(f"::warning::{warning}")
+
+            # Build apis_json for bot comment context
+            apis_list = [
+                {"api_name": name, "api_version": version}
+                for name, version in result.api_versions.items()
+            ]
+            apis_json_str = json.dumps(apis_list)
+
+            write_outputs(
+                success='true',
+                snapshot_id=result.snapshot_id or '',
+                snapshot_branch=result.snapshot_branch or '',
+                release_review_branch=result.release_review_branch or '',
+                release_pr_number=str(result.release_pr_number) if result.release_pr_number else '',
+                release_pr_url=result.release_pr_url or '',
+                apis_json=apis_json_str,
+            )
+        else:
+            error_msg = '; '.join(result.errors) if result.errors else 'Unknown error'
+            print(f"::error::Snapshot creation failed: {error_msg}")
+
+            for warning in result.warnings:
+                print(f"::warning::{warning}")
+
+            write_outputs(
+                success='false',
+                snapshot_id=result.snapshot_id or '',
+                snapshot_branch=result.snapshot_branch or '',
+                error_message=error_msg,
+            )
+            sys.exit(1)
+
+        print("create-snapshot action completed")
