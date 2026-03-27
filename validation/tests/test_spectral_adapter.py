@@ -13,6 +13,7 @@ from validation.engines.spectral_adapter import (
     DEFAULT_RULESET,
     ENGINE_NAME,
     SpectralResult,
+    _normalize_path,
     derive_api_name,
     map_severity,
     normalize_finding,
@@ -123,6 +124,45 @@ class TestDeriveApiName:
 
 
 # ---------------------------------------------------------------------------
+# TestNormalizePath
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizePath:
+    def test_absolute_path_stripped(self):
+        source = "/home/runner/work/Repo/Repo/code/API_definitions/api.yaml"
+        result = _normalize_path(source, "/home/runner/work/Repo/Repo")
+        assert result == "code/API_definitions/api.yaml"
+
+    def test_absolute_path_with_trailing_slash(self):
+        source = "/home/runner/work/Repo/Repo/code/API_definitions/api.yaml"
+        result = _normalize_path(source, "/home/runner/work/Repo/Repo/")
+        assert result == "code/API_definitions/api.yaml"
+
+    def test_already_relative_unchanged(self):
+        source = "code/API_definitions/api.yaml"
+        result = _normalize_path(source, "/home/runner/work/Repo/Repo")
+        assert result == "code/API_definitions/api.yaml"
+
+    def test_no_repo_root_unchanged(self):
+        source = "/absolute/path/to/file.yaml"
+        assert _normalize_path(source, None) == source
+
+    def test_empty_source(self):
+        assert _normalize_path("", "/some/root") == ""
+
+    def test_empty_repo_root(self):
+        source = "/absolute/path/to/file.yaml"
+        assert _normalize_path(source, "") == source
+
+    def test_partial_prefix_not_stripped(self):
+        """A path that starts with a substring of repo_root is not stripped."""
+        source = "/home/runner/work/RepoExtra/code/api.yaml"
+        result = _normalize_path(source, "/home/runner/work/Repo")
+        assert result == source
+
+
+# ---------------------------------------------------------------------------
 # TestSelectRulesetPath
 # ---------------------------------------------------------------------------
 
@@ -204,6 +244,22 @@ class TestNormalizeFinding:
         assert "rule_id" not in finding
         assert "hint" not in finding
 
+    def test_absolute_path_normalised_with_repo_root(self):
+        raw = {
+            **SAMPLE_SPECTRAL_FINDING,
+            "source": "/home/runner/work/R/R/code/API_definitions/quality-on-demand.yaml",
+        }
+        finding = normalize_finding(raw, repo_root="/home/runner/work/R/R")
+        assert finding["path"] == "code/API_definitions/quality-on-demand.yaml"
+        assert finding["api_name"] == "quality-on-demand"
+
+    def test_relative_path_unchanged_with_repo_root(self):
+        finding = normalize_finding(
+            SAMPLE_SPECTRAL_FINDING,
+            repo_root="/home/runner/work/R/R",
+        )
+        assert finding["path"] == "code/API_definitions/quality-on-demand.yaml"
+
 
 # ---------------------------------------------------------------------------
 # TestParseSpectralOutput
@@ -251,6 +307,15 @@ class TestParseSpectralOutput:
         findings = parse_spectral_output(raw)
         levels = [f["level"] for f in findings]
         assert levels == ["error", "warn", "hint"]
+
+    def test_repo_root_normalises_paths(self):
+        abs_finding = {
+            **SAMPLE_SPECTRAL_FINDING,
+            "source": "/runner/work/code/API_definitions/quality-on-demand.yaml",
+        }
+        raw = json.dumps([abs_finding])
+        findings = parse_spectral_output(raw, repo_root="/runner/work")
+        assert findings[0]["path"] == "code/API_definitions/quality-on-demand.yaml"
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +379,23 @@ class TestRunSpectral:
         )
         assert result.success is False
         assert "timed out" in result.error_message
+
+    @patch("validation.engines.spectral_adapter.subprocess.run")
+    def test_findings_paths_normalised_by_cwd(self, mock_run, tmp_path):
+        """run_spectral passes cwd as repo_root to normalise absolute paths."""
+        abs_finding = {
+            **SAMPLE_SPECTRAL_FINDING,
+            "source": f"{tmp_path}/code/API_definitions/quality-on-demand.yaml",
+        }
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1,
+            stdout=json.dumps([abs_finding]), stderr="",
+        )
+        result = run_spectral(
+            tmp_path / ".spectral.yaml", ["*.yaml"], cwd=tmp_path,
+        )
+        assert result.success is True
+        assert result.findings[0]["path"] == "code/API_definitions/quality-on-demand.yaml"
 
     @patch("validation.engines.spectral_adapter.subprocess.run")
     def test_command_includes_ruleset_and_patterns(self, mock_run, tmp_path):

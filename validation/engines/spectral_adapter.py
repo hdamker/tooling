@@ -140,7 +140,24 @@ def select_ruleset_path(
     return fallback
 
 
-def normalize_finding(raw: dict) -> dict:
+def _normalize_path(source: str, repo_root: Optional[str] = None) -> str:
+    """Strip repo-root prefix from an absolute path to make it repo-relative.
+
+    Spectral may emit absolute runner paths (e.g.
+    ``/home/runner/work/Repo/Repo/code/API_definitions/api.yaml``) depending
+    on how the shell resolves the glob.  Normalising at finding-creation time
+    ensures every downstream consumer (annotations, diagnostics, PR comment)
+    sees clean repo-relative paths.
+    """
+    if not source or not repo_root:
+        return source
+    root = repo_root.rstrip("/") + "/"
+    if source.startswith(root):
+        return source[len(root):]
+    return source
+
+
+def normalize_finding(raw: dict, repo_root: Optional[str] = None) -> dict:
     """Convert one Spectral JSON finding to the common findings model.
 
     Critical field mapping:
@@ -148,8 +165,13 @@ def normalize_finding(raw: dict) -> dict:
       which is the JSONPath within the document).
     - ``raw["range"]["start"]["line"]`` is 0-indexed; add 1 for the framework.
     - ``raw["range"]["start"]["character"]`` is 0-indexed; add 1.
+
+    Args:
+        raw: Single finding dict from Spectral JSON output.
+        repo_root: Absolute path to the repository root.  When provided,
+            absolute ``source`` paths are normalised to repo-relative.
     """
-    source = raw.get("source", "")
+    source = _normalize_path(raw.get("source", ""), repo_root)
     start = raw.get("range", {}).get("start", {})
 
     line = start.get("line", 0) + 1
@@ -172,11 +194,16 @@ def normalize_finding(raw: dict) -> dict:
     return finding
 
 
-def parse_spectral_output(raw_json: str) -> List[dict]:
+def parse_spectral_output(
+    raw_json: str,
+    repo_root: Optional[str] = None,
+) -> List[dict]:
     """Parse Spectral ``--format json`` stdout into normalised findings.
 
     Args:
         raw_json: Raw JSON string from Spectral stdout.
+        repo_root: Repository root path passed to :func:`normalize_finding`
+            for path normalisation.
 
     Returns:
         List of findings conforming to the common findings model.
@@ -198,7 +225,7 @@ def parse_spectral_output(raw_json: str) -> List[dict]:
     findings = []
     for item in data:
         try:
-            findings.append(normalize_finding(item))
+            findings.append(normalize_finding(item, repo_root=repo_root))
         except (KeyError, TypeError) as exc:
             logger.warning("Skipping malformed Spectral finding: %s", exc)
     return findings
@@ -272,7 +299,7 @@ def run_spectral(
 
     # Exit 0 or 1: normal operation (findings may or may not exist).
     if result.returncode in (0, 1):
-        findings = parse_spectral_output(result.stdout)
+        findings = parse_spectral_output(result.stdout, repo_root=str(cwd))
         return SpectralResult(findings=findings, success=True)
 
     # Exit 2+: Spectral runtime error.

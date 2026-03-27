@@ -12,11 +12,12 @@ from __future__ import annotations
 
 from typing import Optional
 
-from validation.context import ApiContext, ValidationContext
-from validation.context.context_builder import (
+from validation.context import (
     PROFILE_ADVISORY,
     PROFILE_STANDARD,
     PROFILE_STRICT,
+    ApiContext,
+    ValidationContext,
 )
 
 from .condition_evaluator import evaluate_condition
