@@ -244,6 +244,7 @@ def run_spectral(
         "spectral",
         "lint",
         "--format", "json",
+        "--quiet",
         "--ruleset", str(ruleset_path),
         *spec_patterns,
     ]

@@ -227,6 +227,13 @@ class TestParseSpectralOutput:
     def test_whitespace_only(self):
         assert parse_spectral_output("   \n  ") == []
 
+    def test_json_with_trailing_diagnostic(self):
+        """Spectral appends diagnostic text after JSON when not using --quiet."""
+        findings = parse_spectral_output(
+            "[]No results with a severity of 'error' found!"
+        )
+        assert findings == []
+
     def test_invalid_json_returns_empty(self):
         findings = parse_spectral_output("not json at all")
         assert findings == []
@@ -318,6 +325,7 @@ class TestRunSpectral:
         call_args = mock_run.call_args
         cmd = call_args[0][0]
         assert "--ruleset" in cmd
+        assert "--quiet" in cmd
         assert str(ruleset) in cmd
         assert "code/API_definitions/*.yaml" in cmd
         assert call_args[1]["cwd"] == str(tmp_path)
