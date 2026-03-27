@@ -1,17 +1,2430 @@
-# Release Automation Reusable Workflow (placeholder)
+# Release Automation Reusable Workflow
 #
-# This placeholder enables GitHub Actions to resolve workflow_call references
-# to this file. The full implementation lives on the 'release-automation' branch.
+# This reusable workflow orchestrates the CAMARA release automation process.
+# It handles:
+# - Slash commands: /create-snapshot, /discard-snapshot, /delete-draft, /sync-issue
+# - Issue events: close (with auto-reopen if needed), reopen
+# - PR merge events: on release-snapshot branches (draft creation)
+# - Manual dispatch: for testing and recovery
 #
-# This file will be replaced when the release-automation branch merges to main.
+# Called by: release-automation-caller.yml in API repositories
 
 name: Release Automation
 
 on:
   workflow_call:
+    inputs:
+      # Passed from caller for workflow_dispatch
+      command:
+        description: "Command to execute (for workflow_dispatch)"
+        type: string
+        required: false
+        default: ""
+      reason:
+        description: "Reason for discard/delete commands"
+        type: string
+        required: false
+        default: ""
+      tooling_ref_override:
+        description: "Optional tooling checkout ref override (40-char SHA)"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
 
 jobs:
-  placeholder:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 1: Detect and classify trigger
+  # ─────────────────────────────────────────────────────────────────────────────
+  check-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      trigger_type: ${{ steps.detect.outputs.trigger_type }}
+      command: ${{ steps.detect.outputs.command }}
+      command_args: ${{ steps.detect.outputs.command_args }}
+      issue_number: ${{ steps.detect.outputs.issue_number }}
+      user: ${{ steps.detect.outputs.user }}
+      should_continue: ${{ steps.detect.outputs.should_continue }}
+      confirm_tag: ${{ steps.detect.outputs.confirm_tag }}
+      trigger_pr_number: ${{ steps.detect.outputs.trigger_pr_number }}
+      trigger_pr_url: ${{ steps.detect.outputs.trigger_pr_url }}
+      tooling_checkout_repo: ${{ steps.resolve-tooling-ref.outputs.tooling_checkout_repo }}
+      tooling_checkout_ref: ${{ steps.resolve-tooling-ref.outputs.tooling_checkout_ref }}
+      tooling_checkout_ref_source: ${{ steps.resolve-tooling-ref.outputs.tooling_checkout_ref_source }}
+      tooling_workflow_ref: ${{ steps.resolve-tooling-ref.outputs.tooling_workflow_ref }}
+      tooling_workflow_sha: ${{ steps.resolve-tooling-ref.outputs.tooling_workflow_sha }}
+      comment_id: ${{ steps.ack.outputs.comment_id }}
+      # Note: release_tag is NOT output here - it comes from derive-state job
+      # which reads from authoritative sources (release-plan.yaml or release-metadata.yaml)
+    steps:
+      - name: Detect Trigger Type
+        id: detect
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const eventName = context.eventName;
+            let triggerType = 'unknown';
+            let command = '';
+            let commandArgs = '';
+            let issueNumber = '';
+            let user = '';
+            let shouldContinue = 'false';
+            let confirmTag = '';
+
+            console.log(`Event: ${eventName}`);
+            console.log(`Action: ${context.payload.action || 'N/A'}`);
+
+            // Helper: Check if issue has release-issue label
+            function isReleaseIssue(labels) {
+              if (!labels) return false;
+              return labels.some(l => l.name === 'release-issue');
+            }
+
+            // NOTE: release_tag is NOT extracted here - it comes from derive-state job
+            // which reads from authoritative sources (release-plan.yaml or release-metadata.yaml)
+
+            // ─────────────────────────────────────────────────────────────────
+            // Event: issue_comment
+            // ─────────────────────────────────────────────────────────────────
+            if (eventName === 'issue_comment') {
+              const comment = context.payload.comment;
+              const issue = context.payload.issue;
+              const body = comment.body ? comment.body.trim() : '';
+
+              user = comment.user.login;
+              issueNumber = issue.number.toString();
+
+              // Check if this is a Release Issue
+              if (!isReleaseIssue(issue.labels)) {
+                console.log('Not a release issue, skipping');
+                core.setOutput('should_continue', 'false');
+                return;
+              }
+
+              // Parse slash commands
+              if (body.startsWith('/create-snapshot')) {
+                triggerType = 'slash_command';
+                command = 'create-snapshot';
+                commandArgs = body.replace('/create-snapshot', '').trim();
+                shouldContinue = 'true';
+              } else if (body.startsWith('/discard-snapshot')) {
+                triggerType = 'slash_command';
+                command = 'discard-snapshot';
+                commandArgs = body.replace('/discard-snapshot', '').trim();
+                shouldContinue = 'true';
+              } else if (body.startsWith('/delete-draft')) {
+                triggerType = 'slash_command';
+                command = 'delete-draft';
+                commandArgs = body.replace('/delete-draft', '').trim();
+                shouldContinue = 'true';
+              } else if (body.startsWith('/sync-issue')) {
+                triggerType = 'slash_command';
+                command = 'sync-issue';
+                commandArgs = body.replace('/sync-issue', '').trim();
+                shouldContinue = 'true';
+              } else if (body.startsWith('/publish-release')) {
+                triggerType = 'slash_command';
+                command = 'publish-release';
+                commandArgs = body.replace('/publish-release', '').trim();
+                // Parse --confirm <tag> argument
+                const confirmMatch = commandArgs.match(/--confirm\s+(\S+)/);
+                confirmTag = confirmMatch ? confirmMatch[1] : '';
+                shouldContinue = 'true';
+              } else {
+                console.log('Comment is not a recognized slash command');
+              }
+            }
+
+            // ─────────────────────────────────────────────────────────────────
+            // Event: issues
+            // ─────────────────────────────────────────────────────────────────
+            else if (eventName === 'issues') {
+              const issue = context.payload.issue;
+              const action = context.payload.action;
+
+              user = issue.user.login;
+              issueNumber = issue.number.toString();
+
+              // Check if this is a Release Issue
+              if (!isReleaseIssue(issue.labels)) {
+                console.log('Not a release issue, skipping');
+                core.setOutput('should_continue', 'false');
+                return;
+              }
+
+              if (action === 'closed') {
+                triggerType = 'issue_close';
+                shouldContinue = 'true';
+              } else if (action === 'reopened') {
+                triggerType = 'issue_reopen';
+                shouldContinue = 'true';
+              }
+            }
+
+            // ─────────────────────────────────────────────────────────────────
+            // Event: pull_request
+            // ─────────────────────────────────────────────────────────────────
+            else if (eventName === 'pull_request') {
+              const pr = context.payload.pull_request;
+              const action = context.payload.action;
+
+              // Only handle merged PRs to release-snapshot branches
+              if (action === 'closed' && pr.merged) {
+                const baseBranch = pr.base.ref;
+
+                if (baseBranch.startsWith('release-snapshot/')) {
+                  triggerType = 'pr_merge';
+                  user = pr.merged_by ? pr.merged_by.login : pr.user.login;
+                  shouldContinue = 'true';
+                }
+              }
+            }
+
+            // ─────────────────────────────────────────────────────────────────
+            // Event: workflow_dispatch (sync-issue only)
+            // ─────────────────────────────────────────────────────────────────
+            else if (eventName === 'workflow_dispatch') {
+              triggerType = 'workflow_dispatch';
+              command = 'sync-issue';  // hardcode to sync-issue only
+              commandArgs = '';  // No args needed for sync-issue
+              user = context.actor;
+
+              // For workflow_dispatch, release_tag will be populated by derive-state
+              shouldContinue = 'true';
+            }
+
+            // ─────────────────────────────────────────────────────────────────
+            // Event: push (release-plan.yaml change on main)
+            // ─────────────────────────────────────────────────────────────────
+            else if (eventName === 'push') {
+              triggerType = 'release_plan_change';
+              command = 'sync-issue';
+              user = context.actor;
+              shouldContinue = 'true';
+
+              // Look up the merged PR via commit SHA
+              const headSha = context.payload.head_commit?.id || context.sha;
+              try {
+                const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  commit_sha: headSha,
+                });
+                const mergedPr = prs.find(pr => pr.merged_at);
+                if (mergedPr) {
+                  core.setOutput('trigger_pr_number', mergedPr.number.toString());
+                  core.setOutput('trigger_pr_url', mergedPr.html_url);
+                  console.log(`Found merged PR: #${mergedPr.number}`);
+                }
+              } catch (e) {
+                console.log(`Warning: Could not look up PR: ${e.message}`);
+              }
+            }
+
+            // Set defaults for trigger_pr outputs (push handler sets them above if found)
+            if (eventName !== 'push') {
+              core.setOutput('trigger_pr_number', '');
+              core.setOutput('trigger_pr_url', '');
+            }
+
+            // Output results
+            console.log(`Trigger type: ${triggerType}`);
+            console.log(`Command: ${command}`);
+            console.log(`Command args: ${commandArgs}`);
+            console.log(`Issue number: ${issueNumber}`);
+            console.log(`User: ${user}`);
+            console.log(`Should continue: ${shouldContinue}`);
+            console.log(`Confirm tag: ${confirmTag}`);
+            console.log('Note: release_tag will come from derive-state job');
+
+            core.setOutput('trigger_type', triggerType);
+            core.setOutput('command', command);
+            core.setOutput('command_args', commandArgs);
+            core.setOutput('issue_number', issueNumber);
+            core.setOutput('user', user);
+            core.setOutput('should_continue', shouldContinue);
+            core.setOutput('confirm_tag', confirmTag);
+
+      - name: Resolve Tooling Checkout Ref
+        id: resolve-tooling-ref
+        if: steps.detect.outputs.should_continue == 'true'
+        uses: actions/github-script@v8
+        env:
+          TOOLING_REF_OVERRIDE: ${{ inputs.tooling_ref_override }}
+        with:
+          script: |
+            const overrideRef = (process.env.TOOLING_REF_OVERRIDE || '').trim();
+            const shaPattern = /^[0-9a-f]{40}$/i;
+            const workflowRefPattern =
+              /^([^/]+\/[^/]+)\/\.github\/workflows\/release-automation-reusable\.yml@.+$/;
+
+            function decodeJwtPayload(jwt) {
+              const parts = jwt.split('.');
+              if (parts.length !== 3) {
+                throw new Error('OIDC token is not a valid JWT');
+              }
+
+              const payload = parts[1]
+                .replace(/-/g, '+')
+                .replace(/_/g, '/');
+              const padLength = (4 - (payload.length % 4)) % 4;
+              const padded = payload + '='.repeat(padLength);
+              return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+            }
+
+            const oidcToken = await core.getIDToken('release-automation-tooling-ref');
+            const claims = decodeJwtPayload(oidcToken);
+            const workflowRef = claims.job_workflow_ref || '';
+            const workflowSha = claims.job_workflow_sha || '';
+            const workflowRefMatch = workflowRef.match(workflowRefPattern);
+
+            if (!workflowRefMatch) {
+              core.setFailed(`Unexpected job_workflow_ref claim: ${workflowRef}`);
+              return;
+            }
+
+            if (!shaPattern.test(workflowSha)) {
+              core.setFailed(`Invalid job_workflow_sha claim: ${workflowSha}`);
+              return;
+            }
+
+            const checkoutRepo = workflowRefMatch[1];
+            let checkoutRef = workflowSha.toLowerCase();
+            let checkoutRefSource = 'oidc_job_workflow_sha';
+
+            if (overrideRef !== '') {
+              if (!shaPattern.test(overrideRef)) {
+                core.setFailed('tooling_ref_override must be a full 40-character SHA');
+                return;
+              }
+              checkoutRef = overrideRef.toLowerCase();
+              checkoutRefSource = 'override';
+            }
+
+            core.info(`tooling_checkout_repo=${checkoutRepo}`);
+            core.info(`tooling_checkout_ref=${checkoutRef} source=${checkoutRefSource}`);
+            core.info(`job_workflow_ref=${workflowRef}`);
+            core.info(`job_workflow_sha=${workflowSha}`);
+
+            core.setOutput('tooling_checkout_repo', checkoutRepo);
+            core.setOutput('tooling_checkout_ref', checkoutRef);
+            core.setOutput('tooling_checkout_ref_source', checkoutRefSource);
+            core.setOutput('tooling_workflow_ref', workflowRef);
+            core.setOutput('tooling_workflow_sha', workflowSha);
+
+      # Post early acknowledgment for slash commands (within check-trigger to avoid runner cold-start)
+      # This comment is later updated by post-interim (valid) or post-rejection (rejected).
+      # Uses GITHUB_TOKEN (not App token) to avoid triggering extra workflow runs.
+      - name: Post Acknowledgment
+        id: ack
+        if: steps.detect.outputs.trigger_type == 'slash_command'
+        continue-on-error: true
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const command = '${{ steps.detect.outputs.command }}';
+            const user = '${{ steps.detect.outputs.user }}';
+            const issueNumber = parseInt('${{ steps.detect.outputs.issue_number }}');
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const marker = `<!-- release-bot:ack:${context.runId} -->`;
+
+            const body = [
+              marker,
+              `**\u23F3 Validating \`/${command}\`...**`,
+              `**Requested by:** @${user} \u00B7 [View workflow run](${runUrl})`,
+              '',
+              'This comment will be updated with the result. If this stays visible unusually long, open the workflow run above.'
+            ].join('\n');
+
+            const result = await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: body
+            });
+
+            console.log(`Ack comment created: ${result.data.id}`);
+            core.setOutput('comment_id', result.data.id.toString());
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 2: Derive current state (runs first to get release_tag from artifacts)
+  # ─────────────────────────────────────────────────────────────────────────────
+  derive-state:
+    needs: check-trigger
+    if: needs.check-trigger.outputs.should_continue == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.state.outputs.release_tag }}
+      state: ${{ steps.state.outputs.state }}
+      snapshot_id: ${{ steps.state.outputs.snapshot_id }}
+      snapshot_branch: ${{ steps.state.outputs.snapshot_branch }}
+      release_review_branch: ${{ steps.state.outputs.release_review_branch }}
+      release_pr_number: ${{ steps.state.outputs.release_pr_number }}
+      release_issue_number: ${{ steps.state.outputs.release_issue_number }}
+      src_commit_sha: ${{ steps.state.outputs.src_commit_sha }}
+      release_type: ${{ steps.state.outputs.release_type }}
+      apis_json: ${{ steps.state.outputs.apis_json }}
+      commonalities_release: ${{ steps.state.outputs.commonalities_release }}
+      identity_consent_management_release: ${{ steps.state.outputs.identity_consent_management_release }}
+      source: ${{ steps.state.outputs.source }}
+      config_error: ${{ steps.state.outputs.config_error }}
+      config_error_type: ${{ steps.state.outputs.config_error_type }}
+      release_plan_url: ${{ steps.state.outputs.release_plan_url }}
+      src_commit_sha_short: ${{ steps.state.outputs.src_commit_sha_short }}
+      meta_release: ${{ steps.state.outputs.meta_release }}
+    steps:
+      - name: Checkout tooling
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            shared-actions/derive-release-state
+
+      - name: Derive Release State
+        id: state
+        uses: ./_tooling/shared-actions/derive-release-state
+        # No release_tag input - derived from repository artifacts (release-plan.yaml or release-metadata.yaml)
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 2b: Handle configuration errors (if derive-state detected any)
+  # ─────────────────────────────────────────────────────────────────────────────
+  handle-config-error:
+    needs: [check-trigger, derive-state]
+    if: |
+      always() &&
+      needs.derive-state.result == 'success' &&
+      needs.check-trigger.outputs.should_continue == 'true' &&
+      needs.derive-state.outputs.config_error != ''
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Placeholder. Full implementation on the release-automation branch."
+      - name: Determine Error Response
+        id: decide
+        run: |
+          TRIGGER_TYPE="${{ needs.check-trigger.outputs.trigger_type }}"
+          echo "Trigger type: $TRIGGER_TYPE"
+          echo "Config error: ${{ needs.derive-state.outputs.config_error }}"
+          echo "Error type: ${{ needs.derive-state.outputs.config_error_type }}"
+
+          if [[ "$TRIGGER_TYPE" == "slash_command" ]]; then
+            echo "action=post_comment" >> $GITHUB_OUTPUT
+          else
+            echo "action=fail_workflow" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate App Token
+        id: app-token
+        if: steps.decide.outputs.action == 'post_comment' && vars.RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Checkout tooling (for slash command)
+        if: steps.decide.outputs.action == 'post_comment'
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+            shared-actions/post-bot-comment
+
+      - name: Post Config Error Comment
+        if: steps.decide.outputs.action == 'post_comment'
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          github_token: ${{ steps.app-token.outputs.token || github.token }}
+          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
+          release_tag: "unknown"
+          run_id: ${{ github.run_id }}
+          template: config_error
+          context: |
+            {
+              "error_type": "${{ needs.derive-state.outputs.config_error_type }}",
+              "error_message": "${{ needs.derive-state.outputs.config_error }}",
+              "command": "${{ needs.check-trigger.outputs.command }}",
+              "user": "${{ needs.check-trigger.outputs.user }}",
+              "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+          comment_id: ${{ needs.check-trigger.outputs.comment_id }}
+
+      - name: Fail workflow (for non-slash-command triggers)
+        if: steps.decide.outputs.action == 'fail_workflow'
+        run: |
+          echo "::error::Configuration Error: ${{ needs.derive-state.outputs.config_error }}"
+          echo ""
+          echo "Error type: ${{ needs.derive-state.outputs.config_error_type }}"
+          echo ""
+          echo "How to fix:"
+          ERROR_TYPE="${{ needs.derive-state.outputs.config_error_type }}"
+          case "$ERROR_TYPE" in
+            missing_file)
+              echo "  1. Create release-plan.yaml in repository root"
+              echo "  2. Use the template from ReleaseManagement documentation"
+              echo "  3. Commit and push to main branch"
+              ;;
+            malformed_yaml)
+              echo "  1. Fix YAML syntax in release-plan.yaml"
+              echo "  2. Validate with an online YAML validator"
+              echo "  3. Commit and push the fix"
+              ;;
+            missing_field)
+              echo "  1. Add the missing field to release-plan.yaml"
+              echo "  2. Required: repository.target_release_tag"
+              echo "  3. Commit and push the fix"
+              ;;
+          esac
+          exit 1
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 3: Assemble Golden Context
+  # ─────────────────────────────────────────────────────────────────────────────
+  assemble-context:
+    needs: [check-trigger, derive-state]
+    if: |
+      needs.check-trigger.outputs.should_continue == 'true' &&
+      needs.derive-state.outputs.config_error == ''
+    runs-on: ubuntu-latest
+    outputs:
+      base_context: ${{ steps.assemble.outputs.base_context }}
+    steps:
+      - name: Checkout tooling
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+
+      - name: Assemble Context
+        id: assemble
+        run: |
+          python3 _tooling/release_automation/scripts/workflow_context.py
+        env:
+          CTX_COMMAND: ${{ needs.check-trigger.outputs.command }}
+          CTX_COMMAND_ARGS: ${{ needs.check-trigger.outputs.command_args }}
+          CTX_USER: ${{ needs.check-trigger.outputs.user }}
+          CTX_TRIGGER_TYPE: ${{ needs.check-trigger.outputs.trigger_type }}
+          CTX_RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
+          CTX_STATE: ${{ needs.derive-state.outputs.state }}
+          CTX_RELEASE_TYPE: ${{ needs.derive-state.outputs.release_type }}
+          CTX_META_RELEASE: ${{ needs.derive-state.outputs.meta_release }}
+          CTX_SNAPSHOT_ID: ${{ needs.derive-state.outputs.snapshot_id }}
+          CTX_SNAPSHOT_BRANCH: ${{ needs.derive-state.outputs.snapshot_branch }}
+          CTX_RELEASE_REVIEW_BRANCH: ${{ needs.derive-state.outputs.release_review_branch }}
+          CTX_RELEASE_PR_NUMBER: ${{ needs.derive-state.outputs.release_pr_number }}
+          CTX_SRC_COMMIT_SHA: ${{ needs.derive-state.outputs.src_commit_sha }}
+          CTX_APIS_JSON: ${{ needs.derive-state.outputs.apis_json }}
+          CTX_COMMONALITIES_RELEASE: ${{ needs.derive-state.outputs.commonalities_release }}
+          CTX_IDENTITY_CONSENT_MANAGEMENT_RELEASE: ${{ needs.derive-state.outputs.identity_consent_management_release }}
+          CTX_TRIGGER_PR_NUMBER: ${{ needs.check-trigger.outputs.trigger_pr_number }}
+          CTX_TRIGGER_PR_URL: ${{ needs.check-trigger.outputs.trigger_pr_url }}
+          GITHUB_TOKEN: ${{ github.token }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 3: Post interim comment (for slash commands only)
+  # ─────────────────────────────────────────────────────────────────────────────
+  post-interim:
+    needs: [check-trigger, derive-state, assemble-context, validate-command]
+    if: |
+      needs.check-trigger.outputs.should_continue == 'true' &&
+      needs.check-trigger.outputs.trigger_type == 'slash_command' &&
+      needs.derive-state.outputs.config_error == '' &&
+      needs.validate-command.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      comment_id: ${{ steps.post.outputs.comment_id }}
+    steps:
+      # No App token needed — interim updates the ack comment using GITHUB_TOKEN
+      # to avoid triggering extra workflow runs from issue_comment events.
+      - name: Checkout tooling
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+            shared-actions/post-bot-comment
+
+      - name: Post Processing Comment
+        id: post
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          github_token: ${{ github.token }}
+          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
+          template: interim_processing
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
+          context: "{}"
+          comment_id: ${{ needs.check-trigger.outputs.comment_id }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 4: Validate command (for slash commands only, skip on config error)
+  # ─────────────────────────────────────────────────────────────────────────────
+  validate-command:
+    needs: [check-trigger, derive-state]
+    if: |
+      needs.check-trigger.outputs.should_continue == 'true' &&
+      needs.check-trigger.outputs.trigger_type == 'slash_command' &&
+      needs.derive-state.outputs.config_error == ''
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.validate.outputs.allowed }}
+      error_message: ${{ steps.validate.outputs.error_message }}
+    steps:
+      - name: Validate Command
+        id: validate
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const user = '${{ needs.check-trigger.outputs.user }}';
+            const command = '${{ needs.check-trigger.outputs.command }}';
+            const currentState = '${{ needs.derive-state.outputs.state }}';
+
+            console.log(`Validating command: /${command}`);
+            console.log(`Current state: ${currentState}`);
+            console.log(`User: ${user}`);
+
+            // Define allowed commands per state
+            const allowedCommands = {
+              'planned': ['create-snapshot', 'sync-issue'],
+              'snapshot-active': ['discard-snapshot', 'sync-issue'],
+              'draft-ready': ['delete-draft', 'publish-release', 'sync-issue'],
+              'published': ['sync-issue'],
+              'not-planned': ['sync-issue']
+            };
+
+            // Check if command is allowed in current state
+            const allowed = allowedCommands[currentState] || [];
+            if (!allowed.includes(command)) {
+              const validCommands = allowed.length > 0
+                ? `Valid commands: ${allowed.map(c => '/' + c).join(', ')}`
+                : 'No commands available in this state';
+
+              core.setOutput('allowed', 'false');
+              core.setOutput('error_message', `Command /${command} is not allowed in state '${currentState}'. ${validCommands}`);
+              return;
+            }
+
+            // Check user permission (must be write or higher)
+            console.log('Checking user permission...');
+            let userPermission;
+
+            try {
+              const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: user
+              });
+
+              userPermission = permission.permission;
+              console.log(`User permission: ${userPermission}`);
+
+              const hasPermission = ['admin', 'maintain', 'write'].includes(userPermission);
+
+              if (!hasPermission) {
+                core.setOutput('allowed', 'false');
+                core.setOutput('error_message', `You must have write access or higher to run release commands. Your current permission: ${userPermission}`);
+                return;
+              }
+            } catch (error) {
+              console.log(`Permission check failed: ${error.message}`);
+              // If we can't check permission, deny by default
+              core.setOutput('allowed', 'false');
+              core.setOutput('error_message', `Failed to verify permissions: ${error.message}`);
+              return;
+            }
+
+            // For /publish-release, additionally check CODEOWNERS membership
+            // Break glass: maintain and admin users bypass CODEOWNERS check
+            if (command === 'publish-release' && userPermission === 'write') {
+              console.log('Checking CODEOWNERS membership for publish-release (write-level user)...');
+
+              try {
+                // Fetch CODEOWNERS file from main branch
+                const { data: codeownersFile } = await github.rest.repos.getContent({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  path: 'CODEOWNERS',
+                  ref: 'main'
+                });
+
+                const codeownersContent = Buffer.from(codeownersFile.content, 'base64').toString('utf-8');
+                console.log('CODEOWNERS content fetched');
+
+                // Parse * pattern line to get codeowners
+                // Example: "* @hdamker @rartych"
+                const lines = codeownersContent.split('\n');
+                const codeowners = [];
+                for (const line of lines) {
+                  const trimmed = line.trim();
+                  // Skip comments and empty lines
+                  if (trimmed.startsWith('#') || !trimmed) continue;
+                  // Look for * pattern (applies to all files)
+                  if (trimmed.startsWith('* ') || trimmed === '*') {
+                    // Extract usernames (@user1 @user2)
+                    const matches = trimmed.match(/@(\S+)/g);
+                    if (matches) {
+                      for (const match of matches) {
+                        codeowners.push(match.substring(1).toLowerCase()); // Remove @ prefix
+                      }
+                    }
+                    break; // Only use first * pattern found
+                  }
+                }
+
+                console.log(`Codeowners: ${codeowners.join(', ')}`);
+
+                // Check if user is in codeowners list
+                if (codeowners.length > 0 && !codeowners.includes(user.toLowerCase())) {
+                  core.setOutput('allowed', 'false');
+                  core.setOutput('error_message', `Only codeowners or admins can publish releases. @${user} is not listed in CODEOWNERS.`);
+                  return;
+                }
+
+                console.log(`User ${user} is a codeowner`);
+              } catch (error) {
+                // CODEOWNERS file not found or other error
+                console.log(`Could not check CODEOWNERS: ${error.message}`);
+                if (error.status === 404) {
+                  // No CODEOWNERS file - fall back to permission-only check (already passed)
+                  console.log('No CODEOWNERS file found, skipping codeowner check');
+                } else {
+                  // For other errors, deny by default
+                  core.setOutput('allowed', 'false');
+                  core.setOutput('error_message', `Failed to verify codeowner status: ${error.message}`);
+                  return;
+                }
+              }
+            } else if (command === 'publish-release') {
+              // Maintain/admin user - bypass CODEOWNERS check (break glass)
+              console.log(`User ${user} has ${userPermission} permission - bypassing CODEOWNERS check`);
+            }
+
+            // For publish-release with --confirm, validate the tag matches
+            const confirmTag = '${{ needs.check-trigger.outputs.confirm_tag }}';
+            const releaseTag = '${{ needs.derive-state.outputs.release_tag }}';
+            if (command === 'publish-release' && confirmTag) {
+              if (confirmTag !== releaseTag) {
+                core.setOutput('allowed', 'false');
+                core.setOutput('error_message', `Confirm tag \`${confirmTag}\` does not match expected release tag \`${releaseTag}\`. Use: /publish-release --confirm ${releaseTag}`);
+                return;
+              }
+            }
+
+            // All checks passed
+            console.log('Command validated successfully');
+            core.setOutput('allowed', 'true');
+            core.setOutput('error_message', '');
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5a: Handle rejected command
+  # ─────────────────────────────────────────────────────────────────────────────
+  post-rejection:
+    needs:
+      [
+        check-trigger,
+        derive-state,
+        validate-command,
+        assemble-context,
+      ]
+    if: |
+      needs.check-trigger.outputs.trigger_type == 'slash_command' &&
+      needs.validate-command.outputs.allowed == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      # No App token needed — rejection updates the ack comment using GITHUB_TOKEN
+      # to avoid triggering extra workflow runs from issue_comment events.
+      - name: Checkout tooling
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+            shared-actions/post-bot-comment
+
+      - name: Post Rejection Comment
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          github_token: ${{ github.token }}
+          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
+          template: command_rejected
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
+          context: |
+            {
+              "error_message": "${{ needs.validate-command.outputs.error_message }}"
+            }
+          comment_id: ${{ needs.check-trigger.outputs.comment_id }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5b: Execute create-snapshot command
+  # ─────────────────────────────────────────────────────────────────────────────
+  create-snapshot:
+    needs: [check-trigger, derive-state, validate-command]
+    if: |
+      needs.check-trigger.outputs.command == 'create-snapshot' &&
+      needs.validate-command.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      success: ${{ steps.create.outputs.success }}
+      snapshot_id: ${{ steps.create.outputs.snapshot_id }}
+      snapshot_branch: ${{ steps.create.outputs.snapshot_branch }}
+      release_review_branch: ${{ steps.create.outputs.release_review_branch }}
+      release_pr_number: ${{ steps.create.outputs.release_pr_number }}
+      release_pr_url: ${{ steps.create.outputs.release_pr_url }}
+      error_message: ${{ steps.create.outputs.error_message }}
+      apis_json: ${{ steps.create.outputs.apis_json }}
+    steps:
+      - name: Generate App Token
+        id: app-token
+        if: vars.RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Checkout tooling
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+            release_automation/config
+            shared-actions/create-snapshot
+
+      - name: Resolve Bot Identity
+        id: bot-identity
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+        run: |
+          if [ -n "${{ vars.RELEASE_APP_SLUG }}" ] && [ -n "${{ steps.app-token.outputs.token }}" ]; then
+            BOT_LOGIN="${{ vars.RELEASE_APP_SLUG }}[bot]"
+          else
+            BOT_LOGIN="github-actions[bot]"
+          fi
+          BOT_INFO=$(gh api "/users/$BOT_LOGIN" --jq '{id: .id, login: .login}')
+          BOT_NAME=$(echo "$BOT_INFO" | jq -r '.login')
+          BOT_ID=$(echo "$BOT_INFO" | jq -r '.id')
+          echo "Committing as: $BOT_NAME <${BOT_ID}+${BOT_NAME}@users.noreply.github.com>"
+          echo "bot_name=$BOT_NAME" >> $GITHUB_OUTPUT
+          echo "bot_email=${BOT_ID}+${BOT_NAME}@users.noreply.github.com" >> $GITHUB_OUTPUT
+
+      - name: Create Snapshot
+        id: create
+        uses: ./_tooling/shared-actions/create-snapshot
+        with:
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          base_branch: main
+          github_token: ${{ steps.app-token.outputs.token || github.token }}
+          bot_name: ${{ steps.bot-identity.outputs.bot_name }}
+          bot_email: ${{ steps.bot-identity.outputs.bot_email }}
+
+      - name: Log Result
+        if: always()
+        run: |
+          echo "Create snapshot result:"
+          echo "  Success: ${{ steps.create.outputs.success }}"
+          echo "  Snapshot ID: ${{ steps.create.outputs.snapshot_id }}"
+          echo "  Snapshot branch: ${{ steps.create.outputs.snapshot_branch }}"
+          echo "  Release PR: #${{ steps.create.outputs.release_pr_number }}"
+          if [ -n "${{ steps.create.outputs.error_message }}" ]; then
+            echo "  Error: ${{ steps.create.outputs.error_message }}"
+          fi
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5c: Execute discard-snapshot command
+  # ─────────────────────────────────────────────────────────────────────────────
+  discard-snapshot:
+    needs: [check-trigger, derive-state, validate-command]
+    if: |
+      needs.check-trigger.outputs.command == 'discard-snapshot' &&
+      needs.validate-command.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      success: ${{ steps.discard.outputs.success }}
+      error_message: ${{ steps.discard.outputs.error_message }}
+      renamed_review_branch: ${{ steps.cleanup.outputs.renamed_review_branch }}
+    steps:
+      - name: Generate App Token
+        id: app-token
+        if: vars.RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Discard Snapshot
+        id: discard
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
+          script: |
+            const snapshotBranch = '${{ needs.derive-state.outputs.snapshot_branch }}';
+            const prNumber = '${{ needs.derive-state.outputs.release_pr_number }}';
+            const releaseTag = '${{ needs.derive-state.outputs.release_tag }}';
+
+            console.log(`Discarding snapshot for ${releaseTag}`);
+            console.log(`  Snapshot branch: ${snapshotBranch}`);
+            console.log(`  Release PR: #${prNumber}`);
+
+            try {
+              // Step 1: Close Release PR (without merging)
+              if (prNumber) {
+                console.log(`Closing Release PR #${prNumber}...`);
+                await github.rest.pulls.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: parseInt(prNumber),
+                  state: 'closed'
+                });
+                console.log('Release PR closed');
+              }
+
+              // Step 2: Delete snapshot branch
+              if (snapshotBranch) {
+                console.log(`Deleting snapshot branch: ${snapshotBranch}...`);
+                await github.rest.git.deleteRef({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: `heads/${snapshotBranch}`
+                });
+                console.log('Snapshot branch deleted');
+              }
+
+              core.setOutput('success', 'true');
+              core.setOutput('error_message', '');
+            } catch (error) {
+              console.log(`::error::Discard failed: ${error.message}`);
+              core.setOutput('success', 'false');
+              core.setOutput('error_message', error.message);
+            }
+
+      # Step 3: Rename review branch to free name for next create-snapshot
+      - name: Cleanup review branch
+        id: cleanup
+        if: steps.discard.outputs.success == 'true'
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
+          script: |
+            const reviewBranch = '${{ needs.derive-state.outputs.release_review_branch }}';
+            if (!reviewBranch) return;
+
+            const newName = `${reviewBranch}-preserved`;
+            try {
+              const ref = await github.rest.git.getRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `heads/${reviewBranch}`
+              });
+
+              // Delete old -preserved branch if it exists (repeated cycles)
+              try {
+                await github.rest.git.deleteRef({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  ref: `heads/${newName}`
+                });
+                console.log(`Deleted previous ${newName}`);
+              } catch (_) { /* doesn't exist */ }
+
+              await github.rest.git.createRef({
+                owner: context.repo.owner, repo: context.repo.repo,
+                ref: `refs/heads/${newName}`, sha: ref.data.object.sha
+              });
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner, repo: context.repo.repo,
+                ref: `heads/${reviewBranch}`
+              });
+              console.log(`Renamed: ${reviewBranch} → ${newName}`);
+              core.setOutput('renamed_review_branch', newName);
+            } catch (e) {
+              console.log(`Could not rename review branch: ${e.message}`);
+            }
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5d: Execute delete-draft command
+  # ─────────────────────────────────────────────────────────────────────────────
+  delete-draft:
+    needs: [check-trigger, derive-state, validate-command]
+    if: |
+      needs.check-trigger.outputs.command == 'delete-draft' &&
+      needs.validate-command.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      success: ${{ steps.delete.outputs.success }}
+      error_message: ${{ steps.delete.outputs.error_message }}
+      renamed_review_branch: ${{ steps.cleanup.outputs.renamed_review_branch }}
+    steps:
+      - name: Generate App Token
+        id: app-token
+        if: vars.RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Delete Draft Release
+        id: delete
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
+          script: |
+            const releaseTag = '${{ needs.derive-state.outputs.release_tag }}';
+            const snapshotBranch = '${{ needs.derive-state.outputs.snapshot_branch }}';
+
+            console.log(`Deleting draft release for ${releaseTag}`);
+            console.log(`  Snapshot branch: ${snapshotBranch}`);
+
+            try {
+              // Step 1: Find and delete the draft release
+              const releases = await github.rest.repos.listReleases({
+                owner: context.repo.owner,
+                repo: context.repo.repo
+              });
+
+              const draftRelease = releases.data.find(
+                r => r.tag_name === releaseTag && r.draft === true
+              );
+
+              if (draftRelease) {
+                console.log(`Deleting draft release: ${draftRelease.name} (ID: ${draftRelease.id})`);
+                await github.rest.repos.deleteRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: draftRelease.id
+                });
+                console.log('Draft release deleted');
+              } else {
+                console.log(`Warning: No draft release found for tag ${releaseTag}`);
+              }
+
+              // Step 2: Delete the release tag (created by draft release)
+              try {
+                await github.rest.git.deleteRef({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: `tags/${releaseTag}`
+                });
+                console.log(`Deleted tag: ${releaseTag}`);
+              } catch (e) {
+                // Tag may not exist (draft may not have created it)
+                console.log(`Tag ${releaseTag} not found or already deleted`);
+              }
+
+              // Step 3: Delete snapshot branch
+              if (snapshotBranch) {
+                console.log(`Deleting snapshot branch: ${snapshotBranch}...`);
+                await github.rest.git.deleteRef({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: `heads/${snapshotBranch}`
+                });
+                console.log('Snapshot branch deleted');
+              }
+
+              core.setOutput('success', 'true');
+              core.setOutput('error_message', '');
+            } catch (error) {
+              console.log(`::error::Delete draft failed: ${error.message}`);
+              core.setOutput('success', 'false');
+              core.setOutput('error_message', error.message);
+            }
+
+      # Step 4: Rename review branch to free name for next create-snapshot
+      - name: Cleanup review branch
+        id: cleanup
+        if: steps.delete.outputs.success == 'true'
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
+          script: |
+            const reviewBranch = '${{ needs.derive-state.outputs.release_review_branch }}';
+            if (!reviewBranch) return;
+
+            const newName = `${reviewBranch}-preserved`;
+            try {
+              const ref = await github.rest.git.getRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `heads/${reviewBranch}`
+              });
+
+              // Delete old -preserved branch if it exists (repeated cycles)
+              try {
+                await github.rest.git.deleteRef({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  ref: `heads/${newName}`
+                });
+                console.log(`Deleted previous ${newName}`);
+              } catch (_) { /* doesn't exist */ }
+
+              await github.rest.git.createRef({
+                owner: context.repo.owner, repo: context.repo.repo,
+                ref: `refs/heads/${newName}`, sha: ref.data.object.sha
+              });
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner, repo: context.repo.repo,
+                ref: `heads/${reviewBranch}`
+              });
+              console.log(`Renamed: ${reviewBranch} → ${newName}`);
+              core.setOutput('renamed_review_branch', newName);
+            } catch (e) {
+              console.log(`Could not rename review branch: ${e.message}`);
+            }
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5e: Handle publish-release confirmation (no --confirm flag)
+  # ─────────────────────────────────────────────────────────────────────────────
+  publish-confirmation:
+    needs: [check-trigger, derive-state, assemble-context, post-interim, validate-command]
+    if: |
+      needs.check-trigger.outputs.command == 'publish-release' &&
+      needs.validate-command.outputs.allowed == 'true' &&
+      needs.check-trigger.outputs.confirm_tag == ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate App Token
+        id: app-token
+        if: vars.RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Checkout tooling
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          path: _tooling
+          sparse-checkout: |
+            release_automation
+            shared-actions
+
+      - name: Derive context values
+        id: context
+        run: |
+          # Get short SHA (first 7 chars)
+          SRC_SHA="${{ needs.derive-state.outputs.src_commit_sha }}"
+          echo "src_commit_sha_short=${SRC_SHA:0:7}" >> $GITHUB_OUTPUT
+          # Construct releases page URL (draft releases don't have direct URLs)
+          echo "draft_release_url=https://github.com/${{ github.repository }}/releases" >> $GITHUB_OUTPUT
+
+      - name: Post confirmation message
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          github_token: ${{ steps.app-token.outputs.token || github.token }}
+          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
+          template: publish_confirmation
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
+          context: |
+            {
+              "draft_release_url": "${{ steps.context.outputs.draft_release_url }}",
+              "src_commit_sha_short": "${{ steps.context.outputs.src_commit_sha_short }}"
+            }
+          comment_id: ${{ needs.post-interim.outputs.comment_id }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5f: Handle publish-release (with --confirm flag)
+  # ─────────────────────────────────────────────────────────────────────────────
+  publish-release:
+    name: "Publish Release"
+    needs: [check-trigger, derive-state, validate-command]
+    if: |
+      needs.check-trigger.outputs.command == 'publish-release' &&
+      needs.check-trigger.outputs.confirm_tag != '' &&
+      needs.validate-command.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      success: ${{ steps.publish.outputs.success }}
+      release_url: ${{ steps.publish.outputs.release_url }}
+      reference_tag: ${{ steps.publish.outputs.reference_tag }}
+      pointer_branch: ${{ steps.publish.outputs.pointer_branch }}
+      error_message: ${{ steps.publish.outputs.error_message }}
+    steps:
+      - name: Checkout tooling
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          path: _tooling
+          sparse-checkout: |
+            release_automation
+            shared-actions
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pyyaml pystache requests
+
+      - name: Generate App Token
+        id: app-token
+        if: vars.RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Execute Publish Flow
+        id: publish
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+          RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
+          SNAPSHOT_BRANCH: ${{ needs.derive-state.outputs.snapshot_branch }}
+          RELEASE_REVIEW_BRANCH: ${{ needs.derive-state.outputs.release_review_branch }}
+          SRC_COMMIT_SHA: ${{ needs.derive-state.outputs.src_commit_sha }}
+          RELEASE_ISSUE_NUMBER: ${{ needs.derive-state.outputs.release_issue_number }}
+        run: |
+          cd _tooling
+          python3 -u - <<'PYTHON_SCRIPT'
+          import os
+          import sys
+          import json
+
+          sys.path.insert(0, '.')
+          from release_automation.scripts.github_client import GitHubClient
+          from release_automation.scripts.release_publisher import ReleasePublisher
+
+          def set_output(name, value):
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  # Handle multi-line values
+                  if '\n' in str(value):
+                      import uuid
+                      delimiter = uuid.uuid4().hex
+                      f.write(f'{name}<<{delimiter}\n{value}\n{delimiter}\n')
+                  else:
+                      f.write(f'{name}={value}\n')
+
+          # Initialize clients
+          token = os.environ['GITHUB_TOKEN']
+          owner = os.environ['OWNER']
+          repo = os.environ['REPO']
+          release_tag = os.environ['RELEASE_TAG']
+          snapshot_branch = os.environ['SNAPSHOT_BRANCH']
+          release_review_branch = os.environ['RELEASE_REVIEW_BRANCH']
+          src_commit_sha = os.environ['SRC_COMMIT_SHA']
+
+          gh = GitHubClient(f'{owner}/{repo}', token)
+          publisher = ReleasePublisher(gh)
+          # Note: issue close moved to post-result job (after success message)
+          # Note: sync PR creation moved to create-sync-pr job
+
+          warnings = []
+          release_url = ''
+          reference_tag = ''
+          pointer_branch = ''
+
+          # Step 1: Publish the release (CRITICAL)
+          print('Step 1: Publishing release...')
+          publish_result = publisher.publish_release(release_tag, snapshot_branch)
+          if not publish_result.success:
+              set_output('success', 'false')
+              set_output('error_message', publish_result.error_message or 'Unknown error')
+              set_output('release_url', '')
+              set_output('reference_tag', '')
+              set_output('pointer_branch', '')
+              print(f'::error::Publication failed: {publish_result.error_message}')
+              sys.exit(0)  # Exit cleanly to allow post-result to run
+
+          release_url = publish_result.release_url or ''
+          is_prerelease = publish_result.is_prerelease
+          print(f'Release published: {release_url}')
+
+          # Step 2: Create reference tag (non-critical)
+          print('Step 2: Creating reference tag...')
+          ref_tag = publisher.create_reference_tag(release_tag, src_commit_sha)
+          if ref_tag:
+              reference_tag = ref_tag
+              print(f'Reference tag created: {reference_tag}')
+          else:
+              warnings.append('Failed to create reference tag')
+              print('::warning::Failed to create reference tag')
+
+          # Step 3: Create pointer branch (non-critical)
+          print('Step 3: Creating pointer branch...')
+          ptr_branch = publisher.create_pointer_branch(release_tag, is_prerelease)
+          if ptr_branch:
+              pointer_branch = ptr_branch
+              print(f'Pointer branch created: {pointer_branch}')
+          else:
+              warnings.append('Failed to create pointer branch')
+              print('::warning::Failed to create pointer branch')
+
+          # Step 4: Cleanup branches (non-critical)
+          print('Step 4: Cleaning up branches...')
+          cleanup_result = publisher.cleanup_branches(snapshot_branch, release_review_branch)
+          for op, status in cleanup_result.items():
+              if status == 'error':
+                  warnings.append(f'Branch cleanup issue: {op}')
+              print(f'  {op}: {status}')
+
+          # Note: Issue close is done in post-result job AFTER success message
+
+          # Set outputs
+          set_output('success', 'true')
+          set_output('release_url', release_url)
+          set_output('reference_tag', reference_tag)
+          set_output('pointer_branch', pointer_branch)
+          if warnings:
+              set_output('error_message', '; '.join(warnings))
+          else:
+              set_output('error_message', '')
+
+          print('Publish flow completed successfully')
+          PYTHON_SCRIPT
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5f.2: Create post-release sync PR
+  # ─────────────────────────────────────────────────────────────────────────────
+  create-sync-pr:
+    name: "Create Post-Release Sync PR"
+    needs: [check-trigger, derive-state, validate-command, publish-release]
+    if: |
+      needs.publish-release.outputs.success == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      sync_pr_url: ${{ steps.sync.outputs.sync_pr_url }}
+      sync_pr_number: ${{ steps.sync.outputs.sync_pr_number }}
+      sync_status: ${{ steps.sync.outputs.sync_status }}
+    steps:
+      - name: Checkout API repo (main branch)
+        uses: actions/checkout@v6
+        with:
+          path: api-repo
+          fetch-depth: 1
+
+      - name: Generate App Token
+        id: app-token
+        if: vars.RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Copy README release info from tag
+        id: readme
+        env:
+          RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
+          script: |
+            const fs = require('fs');
+            const tag = process.env.RELEASE_TAG;
+
+            // Read README from release tag
+            let tagReadme;
+            try {
+              const { data } = await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: 'README.md',
+                ref: tag
+              });
+              tagReadme = Buffer.from(data.content, 'base64').toString('utf8');
+            } catch (e) {
+              core.warning(`Could not read README.md from tag ${tag}: ${e.message}`);
+              core.setOutput('changed', 'false');
+              return;
+            }
+
+            const START = '<!-- CAMARA:RELEASE-INFO:START -->';
+            const END = '<!-- CAMARA:RELEASE-INFO:END -->';
+
+            // Extract release info block from tag README
+            const tagStart = tagReadme.indexOf(START);
+            const tagEnd = tagReadme.indexOf(END);
+            if (tagStart === -1 || tagEnd === -1) {
+              core.warning('Tag README missing release info delimiters');
+              core.setOutput('changed', 'false');
+              return;
+            }
+            const tagBlock = tagReadme.substring(tagStart, tagEnd + END.length);
+
+            // Read local README (main branch checkout)
+            const localPath = 'api-repo/README.md';
+            if (!fs.existsSync(localPath)) {
+              core.warning('README.md not found in API repo checkout');
+              core.setOutput('changed', 'false');
+              return;
+            }
+            const localReadme = fs.readFileSync(localPath, 'utf8');
+            const localStart = localReadme.indexOf(START);
+            const localEnd = localReadme.indexOf(END);
+            if (localStart === -1 || localEnd === -1) {
+              core.warning('Main README missing release info delimiters');
+              core.setOutput('changed', 'false');
+              return;
+            }
+
+            // Replace local block with tag block
+            const newReadme = localReadme.substring(0, localStart) +
+                              tagBlock +
+                              localReadme.substring(localEnd + END.length);
+
+            if (newReadme === localReadme) {
+              console.log('README release info already up to date');
+              core.setOutput('changed', 'false');
+              return;
+            }
+
+            fs.writeFileSync(localPath, newReadme);
+            core.setOutput('changed', 'true');
+            console.log('README release info synced from tag');
+
+      - name: Copy CHANGELOG from release tag
+        id: changelog
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const tag = process.env.RELEASE_TAG;
+
+            // Extract cycle number from tag (r4.1 → 4)
+            const match = tag.match(/^r(\d+)\.\d+/);
+            if (!match) {
+              core.warning(`Cannot extract cycle from tag: ${tag}`);
+              core.setOutput('synced', 'false');
+              return;
+            }
+
+            const cycle = match[1];
+            const changelogPath = `CHANGELOG/CHANGELOG-r${cycle}.md`;
+
+            try {
+              const { data } = await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: changelogPath,
+                ref: tag
+              });
+              const content = Buffer.from(data.content, 'base64').toString('utf8');
+
+              // Write to local api-repo checkout
+              const localDir = path.join('api-repo', 'CHANGELOG');
+              if (!fs.existsSync(localDir)) {
+                fs.mkdirSync(localDir, { recursive: true });
+              }
+              fs.writeFileSync(path.join('api-repo', changelogPath), content);
+              core.setOutput('synced', 'true');
+              core.setOutput('changelog_path', changelogPath);
+              console.log(`Synced ${changelogPath} from tag ${tag}`);
+            } catch (e) {
+              core.warning(`CHANGELOG not found at ${changelogPath} on tag ${tag}: ${e.message}`);
+              core.setOutput('synced', 'false');
+            }
+
+      - name: Resolve Bot Identity
+        id: bot-identity
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+        run: |
+          if [ -n "${{ vars.RELEASE_APP_SLUG }}" ] && [ -n "${{ steps.app-token.outputs.token }}" ]; then
+            BOT_LOGIN="${{ vars.RELEASE_APP_SLUG }}[bot]"
+          else
+            BOT_LOGIN="github-actions[bot]"
+          fi
+          BOT_INFO=$(gh api "/users/$BOT_LOGIN" --jq '{id: .id, login: .login}')
+          BOT_NAME=$(echo "$BOT_INFO" | jq -r '.login')
+          BOT_ID=$(echo "$BOT_INFO" | jq -r '.id')
+          echo "bot_name=$BOT_NAME" >> $GITHUB_OUTPUT
+          echo "bot_email=${BOT_ID}+${BOT_NAME}@users.noreply.github.com" >> $GITHUB_OUTPUT
+
+      - name: Create sync PR
+        id: sync
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
+          README_CHANGED: ${{ steps.readme.outputs.changed }}
+          CHANGELOG_SYNCED: ${{ steps.changelog.outputs.synced }}
+        run: |
+          cd api-repo
+
+          # Check if there are any changes to commit
+          if [ "$README_CHANGED" != "true" ] && [ "$CHANGELOG_SYNCED" != "true" ]; then
+            echo "::warning::No content changes to sync"
+            echo "sync_status=no_changes" >> $GITHUB_OUTPUT
+            echo "sync_pr_url=" >> $GITHUB_OUTPUT
+            echo "sync_pr_number=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          SYNC_BRANCH="pr-to-main/${RELEASE_TAG}"
+
+          # Create branch, stage, commit, push
+          git checkout -b "$SYNC_BRANCH"
+          git add -A
+          git diff --cached --quiet && {
+            echo "::warning::No actual file changes detected"
+            echo "sync_status=no_changes" >> $GITHUB_OUTPUT
+            echo "sync_pr_url=" >> $GITHUB_OUTPUT
+            echo "sync_pr_number=" >> $GITHUB_OUTPUT
+            exit 0
+          }
+
+          git config user.name "${{ steps.bot-identity.outputs.bot_name }}"
+          git config user.email "${{ steps.bot-identity.outputs.bot_email }}"
+          git commit -m "chore: post-release sync for ${RELEASE_TAG}"
+          git push origin "$SYNC_BRANCH"
+
+          # Create PR — capture failure as sync_status=failed
+          if PR_URL=$(gh pr create \
+            --title "Release Automation: Post-release sync (${RELEASE_TAG})" \
+            --body "Automated post-release sync PR for ${RELEASE_TAG}.
+
+          This PR updates:
+          - README.md Release Information section (copied from release tag)
+          - CHANGELOG for the release cycle
+
+          Created by release automation workflow." \
+            --head "$SYNC_BRANCH" \
+            --base main); then
+
+            PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+
+            # Add labels
+            gh pr edit "$PR_NUMBER" --add-label "post-release" --add-label "automated" 2>/dev/null || true
+
+            echo "sync_pr_url=$PR_URL" >> $GITHUB_OUTPUT
+            echo "sync_pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+            echo "sync_status=created" >> $GITHUB_OUTPUT
+            echo "Sync PR created: $PR_URL"
+          else
+            echo "::error::Failed to create post-release sync PR"
+            echo "sync_status=failed" >> $GITHUB_OUTPUT
+            echo "sync_pr_url=" >> $GITHUB_OUTPUT
+            echo "sync_pr_number=" >> $GITHUB_OUTPUT
+          fi
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5g: Handle PR merge (draft release creation)
+  # ─────────────────────────────────────────────────────────────────────────────
+  handle-pr-merge:
+    needs: [check-trigger, derive-state, assemble-context]
+    if: needs.check-trigger.outputs.trigger_type == 'pr_merge'
+    runs-on: ubuntu-latest
+    outputs:
+      success: ${{ steps.create-draft.outputs.success }}
+      draft_release_url: ${{ steps.create-draft.outputs.draft_release_url }}
+      error_message: ${{ steps.create-draft.outputs.error_message }}
+    steps:
+      - name: Generate App Token
+        id: app-token
+        if: vars.RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Extract CHANGELOG release notes
+        id: changelog
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
+          script: |
+            const snapshotBranch = '${{ needs.derive-state.outputs.snapshot_branch }}';
+            const releaseTag = '${{ needs.derive-state.outputs.release_tag }}';
+
+            // Derive meta-release from tag: r4.1 → r4, r3.2 → r3
+            const metaRelease = releaseTag.match(/^(r\d+)/)?.[1] || '';
+
+            // Try CHANGELOG/CHANGELOG-rX.md first (new convention), fall back to CHANGELOG.md
+            const candidates = [];
+            if (metaRelease) {
+              candidates.push(`CHANGELOG/CHANGELOG-${metaRelease}.md`);
+            }
+            candidates.push('CHANGELOG.md');
+
+            let changelogContent = '';
+            let changelogPath = '';
+            let changelogSha = '';
+            for (const path of candidates) {
+              try {
+                const response = await github.rest.repos.getContent({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  path: path,
+                  ref: snapshotBranch
+                });
+                changelogContent = Buffer.from(response.data.content, 'base64').toString('utf-8');
+                changelogPath = path;
+                changelogSha = response.data.sha;
+                console.log(`Fetched ${path} (${changelogContent.length} chars)`);
+                break;
+              } catch (error) {
+                console.log(`${path} not found, trying next...`);
+              }
+            }
+
+            if (!changelogContent) {
+              console.log('::warning::No CHANGELOG file found on snapshot branch');
+              core.setOutput('release_notes', '');
+              core.setOutput('candidate_block_stripped', '');
+              return;
+            }
+
+            // --- Strip AUTOGENERATED:CANDIDATE_CHANGES block if present ---
+            const START_MARKER = '<!-- BEGIN:AUTOGENERATED:CANDIDATE_CHANGES -->';
+            const END_MARKER = '<!-- END:AUTOGENERATED:CANDIDATE_CHANGES -->';
+
+            const startPos = changelogContent.indexOf(START_MARKER);
+            const endPos = changelogContent.indexOf(END_MARKER);
+            let candidateBlockStripped = false;
+
+            if (startPos !== -1 && endPos !== -1 && endPos > startPos) {
+              // Both markers present — strip the entire block (inclusive)
+              changelogContent = (
+                changelogContent.substring(0, startPos) +
+                changelogContent.substring(endPos + END_MARKER.length)
+              ).replace(/\n{3,}/g, '\n\n');
+              candidateBlockStripped = true;
+              console.log('Stripped full candidate changes block');
+            } else if (startPos !== -1 || endPos !== -1) {
+              // Orphan marker — codeowner partially deleted the block.
+              // Strip just the orphan marker line (HTML comment, always safe to remove).
+              const orphanMarker = startPos !== -1 ? START_MARKER : END_MARKER;
+              changelogContent = changelogContent
+                .split('\n')
+                .filter(line => line.trim() !== orphanMarker)
+                .join('\n');
+              candidateBlockStripped = true;
+              console.log(`Stripped orphan marker: ${orphanMarker}`);
+            }
+            // If neither marker found: codeowner already removed the block — no action needed
+
+            if (candidateBlockStripped) {
+              await github.rest.repos.createOrUpdateFileContents({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: changelogPath,
+                message: 'chore: auto-remove candidate changes block from CHANGELOG',
+                content: Buffer.from(changelogContent).toString('base64'),
+                sha: changelogSha,
+                branch: snapshotBranch
+              });
+              console.log(`Committed cleaned CHANGELOG to ${snapshotBranch}`);
+            }
+
+            core.setOutput('candidate_block_stripped', candidateBlockStripped ? 'true' : '');
+
+            // Extract section from "## Release Notes" to next "# rX.Y" heading or EOF
+            const lines = changelogContent.split('\n');
+            let startIdx = -1;
+            let endIdx = lines.length;
+
+            // Find "## Release Notes" line
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].match(/^## Release Notes/i)) {
+                startIdx = i;
+                break;
+              }
+            }
+
+            if (startIdx === -1) {
+              console.log(`::warning::No "## Release Notes" section found in ${changelogPath}`);
+              core.setOutput('release_notes', '');
+              return;
+            }
+
+            // Find end: next "# rX.Y" heading (top-level release heading)
+            for (let i = startIdx + 1; i < lines.length; i++) {
+              if (lines[i].match(/^# r\d+/)) {
+                endIdx = i;
+                break;
+              }
+            }
+
+            // Trim trailing blank lines
+            while (endIdx > startIdx && lines[endIdx - 1].trim() === '') {
+              endIdx--;
+            }
+
+            const releaseNotes = lines.slice(startIdx, endIdx).join('\n');
+            console.log(`Extracted release notes: ${releaseNotes.length} chars (lines ${startIdx + 1}-${endIdx})`);
+
+            // Write to output using delimiter for multiline
+            const outputFile = process.env.GITHUB_OUTPUT;
+            const fs = require('fs');
+            const delimiter = 'RELEASE_NOTES_EOF';
+            fs.appendFileSync(outputFile, `release_notes<<${delimiter}\n${releaseNotes}\n${delimiter}\n`);
+
+      - name: Create Draft Release
+        id: create-draft
+        uses: actions/github-script@v8
+        env:
+          RELEASE_NOTES: ${{ steps.changelog.outputs.release_notes }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
+          script: |
+            const releaseTag = '${{ needs.derive-state.outputs.release_tag }}';
+            const snapshotBranch = '${{ needs.derive-state.outputs.snapshot_branch }}';
+            const releaseType = '${{ needs.derive-state.outputs.release_type }}';
+            const releaseNotes = process.env.RELEASE_NOTES || '';
+
+            console.log(`Creating draft release for ${releaseTag}`);
+            console.log(`  Snapshot branch: ${snapshotBranch}`);
+            console.log(`  Release type: ${releaseType}`);
+
+            try {
+              // Determine if this is a pre-release
+              const isPrerelease = releaseType.startsWith('pre-release');
+
+              // Build release body from CHANGELOG content or fallback
+              let body = '';
+              if (releaseNotes) {
+                body = releaseNotes;
+              } else {
+                body = `## Release ${releaseTag}\n\n`;
+                body += `**Release type:** ${releaseType}\n\n`;
+                body += `---\n\n`;
+                body += `_CHANGELOG.md content was not available — please add release notes manually._\n`;
+              }
+
+              // Create draft release
+              const release = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: releaseTag,
+                target_commitish: snapshotBranch,
+                name: releaseTag,
+                body: body,
+                draft: true,
+                prerelease: isPrerelease
+              });
+
+              console.log(`Draft release created: ${release.data.html_url}`);
+              core.setOutput('success', 'true');
+              core.setOutput('draft_release_url', release.data.html_url);
+              core.setOutput('error_message', '');
+            } catch (error) {
+              console.log(`::error::Draft release creation failed: ${error.message}`);
+              core.setOutput('success', 'false');
+              core.setOutput('draft_release_url', '');
+              core.setOutput('error_message', error.message);
+            }
+
+      # release_date is set during /publish-release (finalize_metadata), not at draft creation
+
+      - name: Checkout tooling for bot comment
+        if: steps.create-draft.outputs.success == 'true' && needs.derive-state.outputs.release_issue_number != ''
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+            shared-actions/post-bot-comment
+
+      - name: Post draft_created comment
+        if: steps.create-draft.outputs.success == 'true' && needs.derive-state.outputs.release_issue_number != ''
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ needs.derive-state.outputs.release_issue_number }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
+          template: draft_created
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
+          github_token: ${{ steps.app-token.outputs.token || github.token }}
+          context: |
+            {
+              "draft_release_url": "${{ steps.create-draft.outputs.draft_release_url }}",
+              "release_pr_number": "${{ github.event.pull_request.number }}",
+              "release_pr_url": "${{ github.event.pull_request.html_url }}",
+              "candidate_block_stripped": "${{ steps.changelog.outputs.candidate_block_stripped }}"
+            }
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 5f: Handle issue close/reopen events
+  # ─────────────────────────────────────────────────────────────────────────────
+  handle-issue-event:
+    needs: [check-trigger, derive-state, assemble-context]
+    if: |
+      always() &&
+      needs.assemble-context.result == 'success' &&
+      (needs.check-trigger.outputs.trigger_type == 'issue_close' ||
+      needs.check-trigger.outputs.trigger_type == 'issue_reopen')
+    runs-on: ubuntu-latest
+    outputs:
+      action_taken: ${{ steps.handle.outputs.action_taken }}
+    steps:
+      - name: Generate App Token
+        id: app-token
+        if: vars.RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Checkout tooling
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+            shared-actions/post-bot-comment
+
+      - name: Handle Issue Event
+        id: handle
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
+          script: |
+            const triggerType = '${{ needs.check-trigger.outputs.trigger_type }}';
+            const currentState = '${{ needs.derive-state.outputs.state }}';
+            const issueNumber = parseInt('${{ needs.check-trigger.outputs.issue_number }}');
+
+            console.log(`Handling ${triggerType} event`);
+            console.log(`Current state: ${currentState}`);
+
+            // States that block issue closure
+            const blockClosureStates = ['snapshot-active', 'draft-ready'];
+
+            if (triggerType === 'issue_close') {
+              // Check if we need to auto-reopen
+              if (blockClosureStates.includes(currentState)) {
+                console.log(`Auto-reopening issue - cannot close in state '${currentState}'`);
+
+                // Reopen the issue
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  state: 'open'
+                });
+
+                core.setOutput('action_taken', 'reopened');
+                console.log('Issue reopened successfully');
+              } else {
+                console.log(`Issue closure allowed in state '${currentState}'`);
+                core.setOutput('action_taken', 'allowed_close');
+              }
+            } else if (triggerType === 'issue_reopen') {
+              // Just log for now - no special handling needed
+              console.log('Issue was reopened');
+              core.setOutput('action_taken', 'noted_reopen');
+            }
+
+      - name: Post Auto-Reopen Comment
+        if: steps.handle.outputs.action_taken == 'reopened'
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
+          template: issue_reopened
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
+          github_token: ${{ steps.app-token.outputs.token || github.token }}
+          context: |
+            {
+              "reason": "Cannot close Release Issue while release is in progress"
+            }
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 6: Update Release Issue state (after command execution)
+  # ─────────────────────────────────────────────────────────────────────────────
+  update-issue:
+    name: "sync-issue"
+    needs:
+      [
+        check-trigger,
+        derive-state,
+        assemble-context,
+        create-snapshot,
+        discard-snapshot,
+        delete-draft,
+        handle-pr-merge,
+        handle-issue-event,
+      ]
+    if: |
+      always() &&
+      needs.derive-state.outputs.config_error == '' &&
+      needs.derive-state.outputs.state != '' &&
+      (
+        (needs.create-snapshot.result == 'success' && needs.create-snapshot.outputs.success == 'true') ||
+        (needs.discard-snapshot.result == 'success' && needs.discard-snapshot.outputs.success == 'true') ||
+        (needs.delete-draft.result == 'success' && needs.delete-draft.outputs.success == 'true') ||
+        (needs.handle-pr-merge.result == 'success' && needs.handle-pr-merge.outputs.success == 'true') ||
+        (needs.handle-issue-event.result == 'success') ||
+        (needs.check-trigger.outputs.command == 'sync-issue')
+      )
+    runs-on: ubuntu-latest
+    outputs:
+      issue_number: ${{ steps.sync.outputs.issue_number }}
+      issue_action: ${{ steps.sync.outputs.issue_action }}
+      issue_url: ${{ steps.sync.outputs.issue_url }}
+    steps:
+      - name: Generate App Token
+        id: app-token
+        if: vars.RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Checkout tooling
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+            shared-actions/sync-release-issue
+            shared-actions/post-bot-comment
+
+      - name: Resolve Sync Context
+        id: sync-context
+        shell: bash
+        run: |
+          state_override=""
+          snapshot_branch_override=""
+          release_pr_number_override=""
+          draft_release_url_override=""
+          force_update="false"
+
+          if [ "${{ needs.create-snapshot.result }}" = "success" ] && [ "${{ needs.create-snapshot.outputs.success }}" = "true" ]; then
+            state_override="snapshot-active"
+            snapshot_branch_override="${{ needs.create-snapshot.outputs.snapshot_branch }}"
+            release_pr_number_override="${{ needs.create-snapshot.outputs.release_pr_number }}"
+            force_update="true"
+          elif [ "${{ needs.handle-pr-merge.result }}" = "success" ] && [ "${{ needs.handle-pr-merge.outputs.success }}" = "true" ]; then
+            state_override="draft-ready"
+            snapshot_branch_override="${{ needs.derive-state.outputs.snapshot_branch }}"
+            release_pr_number_override="${{ github.event.pull_request.number }}"
+            draft_release_url_override="${{ needs.handle-pr-merge.outputs.draft_release_url }}"
+            force_update="true"
+          elif [ "${{ needs.discard-snapshot.result }}" = "success" ] && [ "${{ needs.discard-snapshot.outputs.success }}" = "true" ]; then
+            state_override="planned"
+            force_update="true"
+          elif [ "${{ needs.delete-draft.result }}" = "success" ] && [ "${{ needs.delete-draft.outputs.success }}" = "true" ]; then
+            state_override="planned"
+            force_update="true"
+          elif [ "${{ needs.check-trigger.outputs.command }}" = "sync-issue" ]; then
+            force_update="true"
+          fi
+
+          {
+            echo "state_override=$state_override"
+            echo "snapshot_branch_override=$snapshot_branch_override"
+            echo "release_pr_number_override=$release_pr_number_override"
+            echo "draft_release_url_override=$draft_release_url_override"
+            echo "force_update=$force_update"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Sync Release Issue
+        id: sync
+        uses: ./_tooling/shared-actions/sync-release-issue
+        with:
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          state: ${{ needs.derive-state.outputs.state }}
+          snapshot_branch: ${{ needs.derive-state.outputs.snapshot_branch }}
+          release_pr_number: ${{ needs.derive-state.outputs.release_pr_number }}
+          state_override: ${{ steps.sync-context.outputs.state_override }}
+          snapshot_branch_override: ${{ steps.sync-context.outputs.snapshot_branch_override }}
+          release_pr_number_override: ${{ steps.sync-context.outputs.release_pr_number_override }}
+          draft_release_url_override: ${{ steps.sync-context.outputs.draft_release_url_override }}
+          force_update: ${{ steps.sync-context.outputs.force_update }}
+          trigger_type: ${{ needs.check-trigger.outputs.trigger_type }}
+          github_token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Log Result
+        run: |
+          echo "Issue sync result:"
+          echo "  Action: ${{ steps.sync.outputs.issue_action }}"
+          echo "  Issue: #${{ steps.sync.outputs.issue_number }}"
+          echo "  URL: ${{ steps.sync.outputs.issue_url }}"
+
+      - name: Post Not-Planned Notification
+        if: |
+          steps.sync.outputs.issue_action == 'updated' &&
+          needs.derive-state.outputs.state == 'not_planned' &&
+          steps.sync.outputs.issue_number != ''
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ steps.sync.outputs.issue_number }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
+          template: state_not_planned
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
+          github_token: ${{ steps.app-token.outputs.token || github.token }}
+          context: |
+            {
+              "state": "not-planned"
+            }
+
+      - name: Post Issue Created Notification
+        if: |
+          steps.sync.outputs.issue_action == 'created' &&
+          steps.sync.outputs.issue_number != ''
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ steps.sync.outputs.issue_number }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
+          template: issue_created
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
+          github_token: ${{ steps.app-token.outputs.token || github.token }}
+          context: |
+            {
+              "state": "planned",
+              "trigger_type": "${{ needs.check-trigger.outputs.trigger_type }}",
+              "trigger_pr_number": "${{ needs.check-trigger.outputs.trigger_pr_number }}",
+              "trigger_pr_url": "${{ needs.check-trigger.outputs.trigger_pr_url }}",
+              "release_plan_url": "${{ github.server_url }}/${{ github.repository }}/blob/main/release-plan.yaml",
+              "closed_issue_number": "${{ github.event.issue.number }}",
+              "closed_issue_url": "${{ github.event.issue.html_url }}"
+            }
+
+      - name: Post Config Drift Warning
+        if: |
+          needs.check-trigger.outputs.trigger_type == 'release_plan_change' &&
+          needs.derive-state.outputs.release_issue_number != '' &&
+          (needs.derive-state.outputs.state == 'snapshot-active' ||
+           needs.derive-state.outputs.state == 'draft-ready')
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ needs.derive-state.outputs.release_issue_number }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
+          template: config_drift_warning
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
+          github_token: ${{ steps.app-token.outputs.token || github.token }}
+          context: |
+            {
+              "trigger_type": "release_plan_change",
+              "trigger_pr_number": "${{ needs.check-trigger.outputs.trigger_pr_number }}",
+              "trigger_pr_url": "${{ needs.check-trigger.outputs.trigger_pr_url }}",
+              "release_plan_url": "${{ github.server_url }}/${{ github.repository }}/blob/main/release-plan.yaml"
+            }
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 7: Post final result comment
+  # ─────────────────────────────────────────────────────────────────────────────
+  post-result:
+    needs:
+      [
+        check-trigger,
+        post-interim,
+        derive-state,
+        validate-command,
+        create-snapshot,
+        discard-snapshot,
+        delete-draft,
+        publish-release,
+        create-sync-pr,
+        publish-confirmation,
+        assemble-context,
+      ]
+    if: |
+      always() &&
+      needs.check-trigger.outputs.trigger_type == 'slash_command' &&
+      needs.validate-command.outputs.allowed == 'true' &&
+      needs.post-interim.result == 'success' &&
+      needs.publish-confirmation.result != 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate App Token
+        id: app-token
+        if: vars.RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Checkout tooling
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
+          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          path: _tooling
+          sparse-checkout: |
+            release_automation/scripts
+            release_automation/templates
+            shared-actions/post-bot-comment
+
+      - name: Determine Result Template
+        id: template
+        run: |
+          COMMAND="${{ needs.check-trigger.outputs.command }}"
+
+          # Map command to success/failure templates
+          case "$COMMAND" in
+            create-snapshot)
+              if [ "${{ needs.create-snapshot.outputs.success }}" == "true" ]; then
+                echo "template=snapshot_created" >> $GITHUB_OUTPUT
+              else
+                echo "template=snapshot_failed" >> $GITHUB_OUTPUT
+              fi
+              ;;
+            discard-snapshot)
+              if [ "${{ needs.discard-snapshot.outputs.success }}" == "true" ]; then
+                echo "template=snapshot_discarded" >> $GITHUB_OUTPUT
+              else
+                echo "template=snapshot_failed" >> $GITHUB_OUTPUT
+              fi
+              ;;
+            delete-draft)
+              if [ "${{ needs.delete-draft.outputs.success }}" == "true" ]; then
+                echo "template=draft_revoked" >> $GITHUB_OUTPUT
+              else
+                echo "template=snapshot_failed" >> $GITHUB_OUTPUT
+              fi
+              ;;
+            sync-issue)
+              echo "template=interim_processing" >> $GITHUB_OUTPUT
+              ;;
+            publish-release)
+              if [ "${{ needs.publish-release.outputs.success }}" == "true" ]; then
+                echo "template=release_published" >> $GITHUB_OUTPUT
+              else
+                echo "template=publish_failed" >> $GITHUB_OUTPUT
+              fi
+              ;;
+            *)
+              # No handler matched - this is a workflow bug
+              echo "template=internal_error" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+      - name: Resolve Reason
+        id: reason
+        run: |
+          COMMAND="${{ needs.check-trigger.outputs.command }}"
+          ARGS="${{ needs.check-trigger.outputs.command_args }}"
+
+          # Default reason for discard/delete commands when none provided
+          if [ -z "$ARGS" ] && { [ "$COMMAND" = "discard-snapshot" ] || [ "$COMMAND" = "delete-draft" ]; }; then
+            ARGS="No reason provided"
+          fi
+
+          echo "reason=$ARGS" >> $GITHUB_OUTPUT
+
+      - name: Build Result Context
+        id: context
+        run: |
+          # Build delta context
+          CONTEXT=$(jq -n \
+            --arg reason "${{ steps.reason.outputs.reason }}" \
+            '{
+              reason: $reason
+            }')
+
+          # Override release_review_branch with renamed name for discard/delete
+          if [ "${{ needs.discard-snapshot.outputs.success }}" == "true" ]; then
+            RRB="${{ needs.discard-snapshot.outputs.renamed_review_branch }}"
+            if [ -n "$RRB" ]; then
+              RRB_URL="${{ github.server_url }}/${{ github.repository }}/tree/${RRB}"
+              CONTEXT=$(echo "$CONTEXT" | jq \
+                --arg rrb "$RRB" \
+                --arg rrb_url "$RRB_URL" \
+                '. + {release_review_branch: $rrb, release_review_branch_url: $rrb_url}')
+            fi
+          fi
+
+          if [ "${{ needs.delete-draft.outputs.success }}" == "true" ]; then
+            RRB="${{ needs.delete-draft.outputs.renamed_review_branch }}"
+            if [ -n "$RRB" ]; then
+              RRB_URL="${{ github.server_url }}/${{ github.repository }}/tree/${RRB}"
+              CONTEXT=$(echo "$CONTEXT" | jq \
+                --arg rrb "$RRB" \
+                --arg rrb_url "$RRB_URL" \
+                '. + {release_review_branch: $rrb, release_review_branch_url: $rrb_url}')
+            fi
+          fi
+
+          # Add create-snapshot outputs if that job ran successfully
+          if [ "${{ needs.create-snapshot.outputs.success }}" == "true" ]; then
+            # Use env var for apis_json to avoid shell quote issues with embedded JSON
+            CREATE_APIS_JSON='${{ needs.create-snapshot.outputs.apis_json }}'
+            # Construct branch URLs
+            SB="${{ needs.create-snapshot.outputs.snapshot_branch }}"
+            RRB="${{ needs.create-snapshot.outputs.release_review_branch }}"
+            SB_URL="${{ github.server_url }}/${{ github.repository }}/tree/${SB}"
+            RRB_URL="${{ github.server_url }}/${{ github.repository }}/tree/${RRB}"
+            CONTEXT=$(echo "$CONTEXT" | jq \
+              --arg sid "${{ needs.create-snapshot.outputs.snapshot_id }}" \
+              --arg sb "$SB" \
+              --arg sb_url "$SB_URL" \
+              --arg rrb "$RRB" \
+              --arg rrb_url "$RRB_URL" \
+              --arg prn "${{ needs.create-snapshot.outputs.release_pr_number }}" \
+              --arg pru "${{ needs.create-snapshot.outputs.release_pr_url }}" \
+              --arg apis "$CREATE_APIS_JSON" \
+              '. + {snapshot_id: $sid, snapshot_branch: $sb, snapshot_branch_url: $sb_url, release_review_branch: $rrb, release_review_branch_url: $rrb_url, release_pr_number: $prn, release_pr_url: $pru, apis_json: $apis}')
+          fi
+
+          # Add publish-release outputs if that job ran
+          if [ "${{ needs.publish-release.outputs.success }}" == "true" ]; then
+            # Construct reference tag URL
+            REF_TAG="${{ needs.publish-release.outputs.reference_tag }}"
+            REF_TAG_URL=""
+            if [ -n "$REF_TAG" ]; then
+              REF_TAG_URL="${{ github.server_url }}/${{ github.repository }}/tree/${REF_TAG}"
+            fi
+            # Get short SHA for display
+            SRC_SHA="${{ needs.derive-state.outputs.src_commit_sha }}"
+            SRC_SHA_SHORT="${SRC_SHA:0:7}"
+            CONTEXT=$(echo "$CONTEXT" | jq \
+              --arg release_url "${{ needs.publish-release.outputs.release_url }}" \
+              --arg reference_tag "$REF_TAG" \
+              --arg reference_tag_url "$REF_TAG_URL" \
+              --arg sync_pr_url "${{ needs.create-sync-pr.outputs.sync_pr_url }}" \
+              --arg sync_pr_number "${{ needs.create-sync-pr.outputs.sync_pr_number }}" \
+              --arg src_commit_sha_short "$SRC_SHA_SHORT" \
+              '. + {release_url: $release_url, reference_tag: $reference_tag, reference_tag_url: $reference_tag_url, sync_pr_url: $sync_pr_url, sync_pr_number: $sync_pr_number, src_commit_sha_short: $src_commit_sha_short}')
+
+            # Collect post-publish warnings (ref tag, pointer branch, cleanup, sync PR)
+            PUBLISH_WARNINGS=""
+
+            # Warnings from publish job (non-critical steps 2-4)
+            PUBLISH_ERR="${{ needs.publish-release.outputs.error_message }}"
+            if [ -n "$PUBLISH_ERR" ]; then
+              PUBLISH_WARNINGS="$PUBLISH_ERR"
+            fi
+
+            # Warning for sync PR anomaly (differentiated by status)
+            SYNC_STATUS="${{ needs.create-sync-pr.outputs.sync_status }}"
+            SYNC_WARNING=""
+            if [ "$SYNC_STATUS" = "failed" ]; then
+              SYNC_WARNING="Post-release sync PR creation failed — create manually"
+            elif [ "$SYNC_STATUS" = "no_changes" ]; then
+              SYNC_WARNING="Post-release sync skipped (no changes detected) — verify README/CHANGELOG"
+            elif [ "$SYNC_STATUS" != "created" ]; then
+              SYNC_WARNING="Post-release sync status unknown — verify README/CHANGELOG"
+            fi
+            if [ -n "$SYNC_WARNING" ]; then
+              if [ -n "$PUBLISH_WARNINGS" ]; then
+                PUBLISH_WARNINGS="$PUBLISH_WARNINGS; $SYNC_WARNING"
+              else
+                PUBLISH_WARNINGS="$SYNC_WARNING"
+              fi
+            fi
+
+            if [ -n "$PUBLISH_WARNINGS" ]; then
+              CONTEXT=$(echo "$CONTEXT" | jq \
+                --arg pw "$PUBLISH_WARNINGS" \
+                '. + {publish_warnings: $pw}')
+            fi
+          fi
+
+          # Add error message for command failure cases
+          if [ "${{ needs.create-snapshot.outputs.success }}" == "false" ]; then
+            CONTEXT=$(echo "$CONTEXT" | jq \
+              --arg err "${{ needs.create-snapshot.outputs.error_message }}" \
+              '. + {error_message: $err}')
+          elif [ "${{ needs.discard-snapshot.outputs.success }}" == "false" ]; then
+            CONTEXT=$(echo "$CONTEXT" | jq \
+              --arg err "${{ needs.discard-snapshot.outputs.error_message }}" \
+              '. + {error_message: $err}')
+          elif [ "${{ needs.delete-draft.outputs.success }}" == "false" ]; then
+            CONTEXT=$(echo "$CONTEXT" | jq \
+              --arg err "${{ needs.delete-draft.outputs.error_message }}" \
+              '. + {error_message: $err}')
+          elif [ "${{ needs.publish-release.outputs.success }}" == "false" ]; then
+            CONTEXT=$(echo "$CONTEXT" | jq \
+              --arg err "${{ needs.publish-release.outputs.error_message }}" \
+              '. + {error_message: $err}')
+          fi
+
+
+
+          echo "context<<EOF" >> $GITHUB_OUTPUT
+          echo "$CONTEXT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Post Result Comment
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
+          template: ${{ steps.template.outputs.template }}
+          # Use base_context + delta
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
+          github_token: ${{ steps.app-token.outputs.token || github.token }}
+          context: ${{ steps.context.outputs.context }}
+          comment_id: ${{ needs.post-interim.outputs.comment_id }}
+
+      # Update issue state and conditionally close (not in publish-release job)
+      - name: Update and Close Release Issue
+        if: |
+          needs.publish-release.outputs.success == 'true' &&
+          needs.derive-state.outputs.release_issue_number != ''
+        env:
+          ISSUE_NUMBER: ${{ needs.derive-state.outputs.release_issue_number }}
+          RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
+          RELEASE_URL: ${{ needs.publish-release.outputs.release_url }}
+          REFERENCE_TAG: ${{ needs.publish-release.outputs.reference_tag }}
+          SYNC_PR_URL: ${{ needs.create-sync-pr.outputs.sync_pr_url }}
+          PUBLISH_WARNINGS: ${{ needs.publish-release.outputs.error_message }}
+          SYNC_STATUS: ${{ needs.create-sync-pr.outputs.sync_status }}
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
+          script: |
+            const issueNumber = parseInt(process.env.ISSUE_NUMBER);
+            const releaseTag = process.env.RELEASE_TAG;
+            const releaseUrl = process.env.RELEASE_URL;
+            const referenceTag = process.env.REFERENCE_TAG;
+            const syncPrUrl = process.env.SYNC_PR_URL;
+            const publishWarnings = process.env.PUBLISH_WARNINGS;
+            const syncStatus = process.env.SYNC_STATUS;
+            const repoUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}`;
+
+            console.log(`Updating release issue #${issueNumber} after publish (sync status: ${syncStatus})`);
+
+            try {
+              // Get current issue
+              const { data: issue } = await github.rest.issues.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber
+              });
+
+              let body = issue.body || '';
+
+              // Build STATE section content
+              let stateLines = [];
+              stateLines.push('**State:** `published`');
+              stateLines.push('');
+              stateLines.push(`✅ **Release published:** [${releaseTag}](${releaseUrl})`);
+              stateLines.push(`📌 **Reference tag:** [\`${referenceTag}\`](${repoUrl}/tree/${referenceTag})`);
+              if (syncPrUrl) {
+                stateLines.push(`🔄 **Sync PR:** [View PR](${syncPrUrl})`);
+              }
+
+              // Collect warnings from non-critical post-publish steps
+              let warnings = [];
+              if (publishWarnings) {
+                warnings.push(publishWarnings);
+              }
+              if (syncStatus === 'failed') {
+                warnings.push('Post-release sync PR creation failed — create manually');
+              } else if (syncStatus === 'no_changes') {
+                warnings.push('Post-release sync skipped (no changes detected) — verify README/CHANGELOG');
+              } else if (syncStatus !== 'created') {
+                warnings.push('Post-release sync status unknown — verify README/CHANGELOG');
+              }
+              if (warnings.length > 0) {
+                stateLines.push(`⚠️ **Warnings:** ${warnings.join('; ')}`);
+              }
+              const stateContent = stateLines.join('\n');
+
+              // Replace STATE section
+              const stateStartMarker = '<!-- BEGIN:STATE -->';
+              const stateEndMarker = '<!-- END:STATE -->';
+              const stateStartIdx = body.indexOf(stateStartMarker);
+              const stateEndIdx = body.indexOf(stateEndMarker);
+              if (stateStartIdx !== -1 && stateEndIdx !== -1) {
+                body = body.substring(0, stateStartIdx + stateStartMarker.length) +
+                       '\n' + stateContent + '\n' +
+                       body.substring(stateEndIdx);
+              }
+
+              // Update ACTIONS section — conditional on sync status
+              let actionsContent;
+              if (syncStatus === 'created') {
+                actionsContent = '_No actions available - release is published._';
+              } else if (syncStatus === 'failed') {
+                actionsContent = '**Manual action required:** Create post-release sync PR manually (update README and CHANGELOG on main), then close this issue.';
+              } else if (syncStatus === 'no_changes') {
+                actionsContent = '**Manual action required:** Verify README and CHANGELOG on main are correct, then close this issue.';
+              } else {
+                actionsContent = '**Manual action required:** Verify post-release sync status, then close this issue.';
+              }
+              const actionsStartMarker = '<!-- BEGIN:ACTIONS -->';
+              const actionsEndMarker = '<!-- END:ACTIONS -->';
+              const actionsStartIdx = body.indexOf(actionsStartMarker);
+              const actionsEndIdx = body.indexOf(actionsEndMarker);
+              if (actionsStartIdx !== -1 && actionsEndIdx !== -1) {
+                body = body.substring(0, actionsStartIdx + actionsStartMarker.length) +
+                       '\n' + actionsContent + '\n' +
+                       body.substring(actionsEndIdx);
+              }
+
+              // Update issue body
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: body
+              });
+
+              // Update labels - remove old state labels, add published
+              const currentLabels = issue.labels.map(l => l.name);
+              const oldStateLabels = currentLabels.filter(l => l.startsWith('release-state:'));
+              for (const label of oldStateLabels) {
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    name: label
+                  });
+                } catch (e) { /* ignore */ }
+              }
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: ['release-state:published']
+              });
+
+              // Close the issue only if sync PR was created successfully
+              if (syncStatus === 'created') {
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  state: 'closed',
+                  state_reason: 'completed'
+                });
+                console.log(`Issue #${issueNumber} closed successfully`);
+              } else {
+                console.log(`Issue #${issueNumber} left open — sync status: ${syncStatus}`);
+              }
+            } catch (error) {
+              console.log(`::warning::Failed to close issue: ${error.message}`);
+              // Non-fatal - the release was already published
+            }

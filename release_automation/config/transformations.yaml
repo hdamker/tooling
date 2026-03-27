@@ -1,0 +1,196 @@
+# CAMARA Release Automation - Mechanical Transformations
+#
+# This file defines the automated placeholder replacements applied during
+# release branch preparation. Each transformation specifies:
+#   - type: yaml_path | regex | mustache_section
+#   - file_pattern: glob pattern for target files
+#   - path/pattern: location of the placeholder
+#   - replacement: template string with context variables
+#
+# Context variables available:
+#   - {release_tag}: e.g., "r4.2"
+#   - {api_version}: calculated version for current API (e.g., "3.2.0-rc.2")
+#   - {url_version}: URL path version per CAMARA API Design Guide (e.g., "v3rc2")
+#   - {major_version}: major version number (e.g., "3" from "3.2.0-rc.2")
+#   - {repo_name}: repository name (e.g., "QualityOnDemand")
+#   - {commonalities_release}: commonalities release tag from dependencies (e.g., "r3.4")
+#   - {commonalities_version}: commonalities semantic version from VERSION.yaml (e.g., "0.7.0-rc.1")
+#   - {icm_release}: ICM release tag from dependencies (e.g., "r3.3")
+#   - {api_name}: current API name
+#
+# Available elsewhere in release automation, but not currently used by any
+# transformation rule in this file:
+#   - {icm_version}: ICM documentation version
+
+transformations:
+  # T1: API version in info.version field
+  - name: info_version
+    description: Replace version in OpenAPI info.version
+    type: yaml_path
+    file_pattern: "code/API_definitions/*.yaml"
+    path: info.version
+    # No match_value - replace any value (could be "wip" or existing version)
+    replacement: "{api_version}"
+
+  # T2: Server URL version path
+  - name: server_url
+    description: Replace /vwip in server URLs per CAMARA API Design Guide
+    type: regex
+    file_pattern: "code/API_definitions/*.yaml"
+    pattern: "/vwip"
+    replacement: "/{url_version}"
+
+  # T2b: Test definition URL version path
+  - name: test_def_server_url
+    description: Replace /vwip in test definition resource paths
+    type: regex
+    file_pattern: "code/Test_definitions/*.feature"
+    pattern: "/vwip"
+    replacement: "/{url_version}"
+
+  # T1b: Test definition API version in Feature line
+  # Replaces "vwip" with full api_version (e.g., "1.1.0") in Feature declarations
+  # Handles variations: "CAMARA/Camara", "Operation/Operation:", comments before Feature
+  - name: test_def_api_version
+    description: Replace vwip in test definition Feature line
+    type: regex
+    file_pattern: "code/Test_definitions/*.feature"
+    pattern: "(Feature: [^,]+, )vwip"
+    replacement: "\\g<1>{api_version}"
+
+  # T3: Commonalities reference in x-camara-commonalities
+  - name: commonalities_ref
+    description: Replace version in x-camara-commonalities
+    type: yaml_path
+    file_pattern: "code/API_definitions/*.yaml"
+    path: info.x-camara-commonalities
+    # No match_value - replace any value (could be "wip", "0.6", etc.)
+    replacement: "{commonalities_version}"
+
+  # T4: REMOVED - x-camara-icm field does not (yet?) exist in CAMARA specs
+
+  # T5: GitHub blob links - split by target repository
+  # File patterns: documentation/**/*.md and code/API_definitions/*.yaml (NOT README.md at root)
+  # Order: specific repos first (Commonalities, ICM), then own repo
+
+  # T5a: Commonalities blob links
+  - name: github_commonalities_blob_links
+    description: Replace Commonalities blob/main/ with blob/{commonalities_release}/
+    type: regex
+    file_pattern: "documentation/**/*.md"
+    pattern: "(camaraproject/Commonalities/)blob/main/"
+    replacement: "\\1blob/{commonalities_release}/"
+
+  # T5b: ICM blob links
+  - name: github_icm_blob_links
+    description: Replace ICM blob/main/ with blob/{icm_release}/
+    type: regex
+    file_pattern: "documentation/**/*.md"
+    pattern: "(camaraproject/IdentityAndConsentManagement/)blob/main/"
+    replacement: "\\1blob/{icm_release}/"
+
+  # T5c: Own repo blob links
+  - name: github_own_repo_blob_links
+    description: Replace own repo blob/main/ with blob/{release_tag}/
+    type: regex
+    file_pattern: "documentation/**/*.md"
+    pattern: "(camaraproject/{repo_name}/)blob/main/"
+    replacement: "\\1blob/{release_tag}/"
+
+  # T5d: API definition blob links (own repo)
+  - name: github_api_def_blob_links
+    description: Replace blob/main/ in API definitions with blob/{release_tag}/
+    type: regex
+    file_pattern: "code/API_definitions/*.yaml"
+    pattern: "(camaraproject/{repo_name}/)blob/main/"
+    replacement: "\\1blob/{release_tag}/"
+
+  # T6: GitHub raw content links - split by target repository
+
+  # T6a: Commonalities raw links
+  - name: github_commonalities_raw_links
+    description: Replace Commonalities raw/main/ with raw/{commonalities_release}/
+    type: regex
+    file_pattern: "documentation/**/*.md"
+    pattern: "(camaraproject/Commonalities/)raw/main/"
+    replacement: "\\1raw/{commonalities_release}/"
+
+  # T6b: ICM raw links
+  - name: github_icm_raw_links
+    description: Replace ICM raw/main/ with raw/{icm_release}/
+    type: regex
+    file_pattern: "documentation/**/*.md"
+    pattern: "(camaraproject/IdentityAndConsentManagement/)raw/main/"
+    replacement: "\\1raw/{icm_release}/"
+
+  # T6c: Own repo raw links
+  - name: github_own_repo_raw_links
+    description: Replace own repo raw/main/ with raw/{release_tag}/
+    type: regex
+    file_pattern: "documentation/**/*.md"
+    pattern: "(camaraproject/{repo_name}/)raw/main/"
+    replacement: "\\1raw/{release_tag}/"
+
+  # T6d: API definition raw links (own repo)
+  - name: github_api_def_raw_links
+    description: Replace raw/main/ in API definitions with raw/{release_tag}/
+    type: regex
+    file_pattern: "code/API_definitions/*.yaml"
+    pattern: "(camaraproject/{repo_name}/)raw/main/"
+    replacement: "\\1raw/{release_tag}/"
+
+  # T6e-T6h: raw.githubusercontent.com links
+  # URL format: raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}
+  # (no raw/ segment in path — unlike github.com/{owner}/{repo}/raw/{branch}/{path})
+
+  # T6e: Commonalities raw.githubusercontent.com links
+  - name: rawgit_commonalities_links
+    description: Replace Commonalities main/ with {commonalities_release}/ on raw.githubusercontent.com
+    type: regex
+    file_pattern: "documentation/**/*.md"
+    pattern: "(raw.githubusercontent.com/camaraproject/Commonalities/)main/"
+    replacement: "\\1{commonalities_release}/"
+
+  # T6f: ICM raw.githubusercontent.com links
+  - name: rawgit_icm_links
+    description: Replace ICM main/ with {icm_release}/ on raw.githubusercontent.com
+    type: regex
+    file_pattern: "documentation/**/*.md"
+    pattern: "(raw.githubusercontent.com/camaraproject/IdentityAndConsentManagement/)main/"
+    replacement: "\\1{icm_release}/"
+
+  # T6g: Own repo raw.githubusercontent.com links (documentation)
+  - name: rawgit_own_repo_doc_links
+    description: Replace own repo main/ with {release_tag}/ on raw.githubusercontent.com (docs)
+    type: regex
+    file_pattern: "documentation/**/*.md"
+    pattern: "(raw.githubusercontent.com/camaraproject/{repo_name}/)main/"
+    replacement: "\\1{release_tag}/"
+
+  # T6h: Own repo raw.githubusercontent.com links (API definitions)
+  - name: rawgit_own_repo_api_links
+    description: Replace own repo main/ with {release_tag}/ on raw.githubusercontent.com (API defs)
+    type: regex
+    file_pattern: "code/API_definitions/*.yaml"
+    pattern: "(raw.githubusercontent.com/camaraproject/{repo_name}/)main/"
+    replacement: "\\1{release_tag}/"
+
+  # T7: CHANGELOG API version sections (stub - future implementation)
+  - name: changelog_api_versions
+    description: Insert API version entries in CHANGELOG
+    type: mustache_section
+    file_pattern: "CHANGELOG.md"
+    section: api_versions
+    template: |
+      ## {api_name} {api_version}
+      - Release {release_tag}
+    enabled: false  # Stub for future implementation
+
+  # T8: Reserved for future transformations
+  - name: reserved
+    description: Reserved for future use
+    type: regex
+    file_pattern: ""
+    pattern: ""
+    replacement: ""
+    enabled: false

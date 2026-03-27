@@ -1,0 +1,276 @@
+name: sync-release-issue
+description: |
+  Synchronizes the Release Issue with the current release state.
+  Creates a new Release Issue if none exists and state is PLANNED,
+  or updates an existing workflow-owned issue when state changes.
+
+  Only manages issues containing the workflow marker. Manually created
+  issues are ignored.
+
+inputs:
+  release_tag:
+    description: 'Target release tag (e.g., "r4.1")'
+    required: true
+  state:
+    description: 'Current release state from derive-state'
+    required: true
+  snapshot_branch:
+    description: 'Snapshot branch name if active'
+    required: false
+    default: ''
+  release_pr_number:
+    description: 'Release PR number if exists'
+    required: false
+    default: ''
+  state_override:
+    description: 'Authoritative state override for same-run transitions'
+    required: false
+    default: ''
+  snapshot_branch_override:
+    description: 'Authoritative snapshot branch override for same-run transitions'
+    required: false
+    default: ''
+  release_pr_number_override:
+    description: 'Authoritative release PR number override for same-run transitions'
+    required: false
+    default: ''
+  draft_release_url_override:
+    description: 'Authoritative draft release URL override for same-run transitions'
+    required: false
+    default: ''
+  force_update:
+    description: 'Force a Release Issue refresh even if state appears unchanged'
+    required: false
+    default: 'false'
+  trigger_type:
+    description: 'What triggered the workflow (slash_command, pr_merge, issue_event, workflow_dispatch)'
+    required: false
+    default: 'workflow_dispatch'
+  github_token:
+    description: 'GitHub token with issue write permissions'
+    required: true
+
+outputs:
+  issue_number:
+    description: 'Release Issue number (created or updated)'
+    value: ${{ steps.sync.outputs.issue_number }}
+  issue_action:
+    description: 'What happened: created, updated, unchanged, skipped'
+    value: ${{ steps.sync.outputs.issue_action }}
+  issue_url:
+    description: 'URL to the Release Issue'
+    value: ${{ steps.sync.outputs.issue_url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install --quiet pyyaml pystache
+
+    - name: Sync Release Issue
+      id: sync
+      shell: python
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        RELEASE_TAG: ${{ inputs.release_tag }}
+        CURRENT_STATE: ${{ inputs.state }}
+        SNAPSHOT_BRANCH: ${{ inputs.snapshot_branch }}
+        RELEASE_PR_NUMBER: ${{ inputs.release_pr_number }}
+        STATE_OVERRIDE: ${{ inputs.state_override }}
+        SNAPSHOT_BRANCH_OVERRIDE: ${{ inputs.snapshot_branch_override }}
+        RELEASE_PR_NUMBER_OVERRIDE: ${{ inputs.release_pr_number_override }}
+        DRAFT_RELEASE_URL_OVERRIDE: ${{ inputs.draft_release_url_override }}
+        FORCE_UPDATE: ${{ inputs.force_update }}
+        TRIGGER_TYPE: ${{ inputs.trigger_type }}
+        REPO: ${{ github.repository }}
+        SCRIPTS_PATH: ${{ github.action_path }}/../../release_automation/scripts
+      run: |
+        import os
+        import sys
+        # Add scripts path to module search path
+        scripts_path = os.environ['SCRIPTS_PATH']
+        # Go up two levels: scripts -> release_automation -> tooling root
+        tooling_root = os.path.dirname(os.path.dirname(scripts_path))
+        sys.path.insert(0, tooling_root)
+        print(f"Added to sys.path: {tooling_root}")
+
+        from release_automation.scripts.github_client import GitHubClient
+        from release_automation.scripts.state_manager import ReleaseStateManager, ReleaseState
+        from release_automation.scripts.issue_manager import IssueManager
+        from release_automation.scripts.bot_responder import BotResponder
+        from release_automation.scripts.issue_sync import IssueSyncManager
+
+        # Get inputs
+        repo = os.environ['REPO']
+        token = os.environ['GITHUB_TOKEN']
+        release_tag = os.environ.get('RELEASE_TAG', '').strip()
+        current_state = os.environ.get('CURRENT_STATE', '').strip()
+        state_override_raw = os.environ.get('STATE_OVERRIDE', '').strip()
+        snapshot_branch_override = os.environ.get('SNAPSHOT_BRANCH_OVERRIDE', '').strip()
+        release_pr_number_override = os.environ.get('RELEASE_PR_NUMBER_OVERRIDE', '').strip()
+        draft_release_url_override = os.environ.get('DRAFT_RELEASE_URL_OVERRIDE', '').strip()
+        force_update = os.environ.get('FORCE_UPDATE', 'false').strip().lower() == 'true'
+        trigger_type = os.environ.get('TRIGGER_TYPE', 'workflow_dispatch')
+
+        output_file = os.environ['GITHUB_OUTPUT']
+
+        def parse_state(value):
+            normalized = value.strip().lower().replace('-', '_')
+            if not normalized:
+                return None
+
+            for state in ReleaseState:
+                state_value = state.value.lower().replace('-', '_')
+                if normalized in {state_value, state.name.lower()}:
+                    return state
+
+            raise ValueError(f"Unknown release state override: {value}")
+
+        def write_outputs(issue_number='', issue_action='skipped', issue_url=''):
+            """Write outputs to GITHUB_OUTPUT file."""
+            with open(output_file, 'a') as f:
+                f.write(f"issue_number={issue_number}\n")
+                f.write(f"issue_action={issue_action}\n")
+                f.write(f"issue_url={issue_url}\n")
+
+        try:
+            state_override = parse_state(state_override_raw)
+        except ValueError as e:
+            print(f"::error::{e}")
+            write_outputs(issue_action='error')
+            sys.exit(1)
+
+        requested_state = state_override_raw or current_state
+        context_source = 'override' if state_override else 're-derived'
+
+        print("Effective sync context:")
+        print(f"  Source: {context_source}")
+        print(f"  Requested state: {requested_state or '(none)'}")
+        print(f"  Snapshot branch override: {snapshot_branch_override or '(none)'}")
+        print(f"  Release PR override: {release_pr_number_override or '(none)'}")
+        print(f"  Draft release URL override present: {'yes' if draft_release_url_override else 'no'}")
+        print(f"  Force update: {force_update}")
+
+        # Skip if no release tag or state indicates no action needed
+        if not release_tag:
+            print("No release tag provided - skipping issue sync")
+            write_outputs(issue_action='skipped')
+            sys.exit(0)
+
+        # Skip for states where no issue management is needed
+        skip_states = ['published', '']
+        if requested_state.lower() in skip_states:
+            print(f"State '{requested_state}' does not require issue sync - skipping")
+            # Write workflow summary for visibility
+            summary_file = os.environ.get('GITHUB_STEP_SUMMARY', '')
+            if summary_file:
+                with open(summary_file, 'a') as f:
+                    if requested_state.lower() == 'published':
+                        f.write(f"## Release Status: Published\n\n")
+                        f.write(f"Release `{release_tag}` has already been published. No further actions needed.\n")
+                    else:
+                        f.write(f"## Release Status\n\n")
+                        f.write(f"No release state detected for `{release_tag}`. Check release-plan.yaml configuration.\n")
+            write_outputs(issue_action='skipped')
+            sys.exit(0)
+
+        # Initialize clients
+        print(f"Initializing clients for {repo}")
+        gh = GitHubClient(repo=repo, token=token)
+        state_manager = ReleaseStateManager(github_client=gh)
+        issue_manager = IssueManager()
+        bot_responder = BotResponder()
+
+        # Create IssueSyncManager
+        sync_manager = IssueSyncManager(
+            github_client=gh,
+            state_manager=state_manager,
+            issue_manager=issue_manager,
+            bot_responder=bot_responder
+        )
+
+        # Read release-plan.yaml to get full configuration
+        print(f"Reading release-plan.yaml for {release_tag}")
+        release_plan = gh.get_file_content('release-plan.yaml', ref='main')
+
+        if release_plan is None:
+            print("::warning::Could not read release-plan.yaml - skipping issue sync")
+            write_outputs(issue_action='skipped')
+            sys.exit(0)
+
+        # Parse YAML
+        import yaml
+        try:
+            release_plan_data = yaml.safe_load(release_plan)
+        except yaml.YAMLError as e:
+            print(f"::warning::Could not parse release-plan.yaml: {e}")
+            write_outputs(issue_action='skipped')
+            sys.exit(0)
+
+        if not isinstance(release_plan_data, dict):
+            print("::warning::release-plan.yaml is not a valid YAML mapping")
+            write_outputs(issue_action='skipped')
+            sys.exit(0)
+
+        # Verify release tag matches
+        plan_tag = release_plan_data.get('repository', {}).get('target_release_tag', '')
+        if plan_tag != release_tag:
+            print(f"::warning::release-plan.yaml tag '{plan_tag}' doesn't match input '{release_tag}'")
+            # Continue anyway - use the input release_tag as authoritative
+
+        # Call sync_release_issue
+        print(f"Syncing Release Issue for {release_tag} (state: {requested_state or current_state})")
+        try:
+            result = sync_manager.sync_release_issue(
+                release_plan_data,
+                state_override=state_override,
+                snapshot_branch_override=snapshot_branch_override or None,
+                release_pr_number_override=release_pr_number_override or None,
+                draft_release_url_override=draft_release_url_override or None,
+                force_update=force_update,
+            )
+
+            # Extract results
+            action = result.action  # 'created', 'updated', 'none'
+            issue = result.issue
+            reason = result.reason
+
+            if action == 'none':
+                print(f"No action taken: {reason}")
+                # Write workflow summary when no issue exists for not-planned state
+                if reason == 'no_planned_release':
+                    summary_file = os.environ.get('GITHUB_STEP_SUMMARY', '')
+                    if summary_file:
+                        with open(summary_file, 'a') as f:
+                            f.write(f"## Release Status: Not Planned\n\n")
+                            f.write(f"No release is currently planned for `{release_tag}` (`target_release_type: none`).\n")
+                            f.write(f"No open Release Issue exists.\n")
+                write_outputs(issue_action='unchanged')
+            elif issue:
+                issue_number = issue.get('number', '')
+                issue_url = issue.get('html_url', '')
+                print(f"Issue {action}: #{issue_number}")
+                print(f"  URL: {issue_url}")
+                write_outputs(
+                    issue_number=str(issue_number),
+                    issue_action=action,
+                    issue_url=issue_url
+                )
+            else:
+                print(f"Action {action} but no issue returned")
+                write_outputs(issue_action=action)
+
+        except Exception as e:
+            print(f"::error::Issue sync failed: {e}")
+            import traceback
+            traceback.print_exc()
+            write_outputs(issue_action='error')
+            sys.exit(1)
+
+        print("Issue sync completed successfully")
