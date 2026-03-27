@@ -253,37 +253,42 @@ class TestDiscoverFiles:
 class TestRunEngines:
     """Tests for engine orchestration."""
 
+    @patch("validation.orchestrator.run_gherkin_engine")
     @patch("validation.orchestrator.run_python_engine")
     @patch("validation.orchestrator.run_spectral_engine")
     @patch("validation.orchestrator.run_yamllint_engine")
     def test_all_engines_called(
-        self, mock_yamllint, mock_spectral, mock_python, paths
+        self, mock_yamllint, mock_spectral, mock_python, mock_gherkin, paths
     ):
         mock_yamllint.return_value = [_make_finding(engine="yamllint")]
         mock_spectral.return_value = [_make_finding(engine="spectral")]
         mock_python.return_value = [_make_finding(engine="python")]
+        mock_gherkin.return_value = [_make_finding(engine="gherkin")]
         context = _make_context()
         test_files = [Path("/repo/code/Test_definitions/test.feature")]
 
         findings, statuses = run_engines(Path("/repo"), paths, context, test_files)
 
-        assert len(findings) == 3
+        assert len(findings) == 4
         assert mock_yamllint.called
         assert mock_spectral.called
         assert mock_python.called
+        assert mock_gherkin.called
         assert "finding(s)" in statuses["yamllint"]
         assert "finding(s)" in statuses["spectral"]
         assert "finding(s)" in statuses["python"]
-        assert "skipped" in statuses["gherkin"]
+        assert "finding(s)" in statuses["gherkin"]
         assert statuses["bundling"] == "not yet implemented"
 
+    @patch("validation.orchestrator.run_gherkin_engine")
     @patch("validation.orchestrator.run_python_engine")
     @patch("validation.orchestrator.run_spectral_engine")
     @patch("validation.orchestrator.run_yamllint_engine")
     def test_release_review_skips_yamllint_and_spectral(
-        self, mock_yamllint, mock_spectral, mock_python, paths
+        self, mock_yamllint, mock_spectral, mock_python, mock_gherkin, paths
     ):
         mock_python.return_value = []
+        mock_gherkin.return_value = []
         context = _make_context(is_release_review_pr=True)
         test_files = [Path("/repo/code/Test_definitions/test.feature")]
 
@@ -293,15 +298,14 @@ class TestRunEngines:
         assert not mock_spectral.called
         assert "skipped" in statuses["yamllint"]
         assert "skipped" in statuses["spectral"]
-        assert "skipped" in statuses["gherkin"]
 
+    @patch("validation.orchestrator.run_gherkin_engine")
     @patch("validation.orchestrator.run_python_engine")
     @patch("validation.orchestrator.run_spectral_engine")
     @patch("validation.orchestrator.run_yamllint_engine")
-    def test_gherkin_always_skipped_v1(
-        self, mock_yamllint, mock_spectral, mock_python, paths
+    def test_no_test_files_skips_gherkin(
+        self, mock_yamllint, mock_spectral, mock_python, mock_gherkin, paths
     ):
-        """gherkin-lint is excluded from v1 — always shows skipped."""
         mock_yamllint.return_value = []
         mock_spectral.return_value = []
         mock_python.return_value = []
@@ -309,8 +313,8 @@ class TestRunEngines:
 
         findings, statuses = run_engines(Path("/repo"), paths, context, test_files=[])
 
+        assert not mock_gherkin.called
         assert "skipped" in statuses["gherkin"]
-        assert "excluded" in statuses["gherkin"]
 
     @patch("validation.orchestrator.run_python_engine")
     @patch("validation.orchestrator.run_spectral_engine")
@@ -633,7 +637,7 @@ class TestMainPipeline:
             "yamllint": "2 finding(s)",
             "spectral": "3 finding(s)",
             "python": "0 finding(s)",
-            "gherkin": "skipped (excluded from v1)",
+            "gherkin": "skipped (no test files)",
             "bundling": "not yet implemented",
         }
         mock_engines.return_value = ([], statuses)
