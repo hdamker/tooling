@@ -195,9 +195,9 @@ jobs:
           export PATH="${PATH_NODE_MODULES}:${PATH}"
           python -m validation.orchestrator
 
-      # ── Step 10: Emit annotations ──────────────────────────────────
+      # ── Step 10: Emit annotations (PR only) ────────────────────────
       - name: Emit annotations
-        if: always() && steps.orchestrator.outcome == 'success'
+        if: always() && steps.orchestrator.outcome == 'success' && github.event_name == 'pull_request'
         run: |
           if [ -f validation-output/annotations.txt ]; then
             cat validation-output/annotations.txt
@@ -211,68 +211,120 @@ jobs:
             cat validation-output/summary.md >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # ── Step 12: Post PR comment ───────────────────────────────────
-      - name: Post PR comment
-        if: always() && steps.orchestrator.outcome == 'success' && github.event_name == 'pull_request'
+      # ── Step 12: Mint validation app token (PR only) ─────────────
+      - name: Mint validation app token
+        id: mint-token
+        if: >-
+          always() && steps.orchestrator.outcome == 'success'
+          && github.event_name == 'pull_request'
+          && vars.VALIDATION_APP_ID != ''
         continue-on-error: true
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.VALIDATION_APP_ID }}
+          private-key: ${{ secrets.VALIDATION_APP_PRIVATE_KEY }}
+
+      # ── Step 13: Post findings to PR ───────────────────────────────
+      #
+      # Token resolution (design doc section 5.1), PR comment, and commit
+      # status in a single step.  Skipped entirely for non-PR events.
+      #
+      # Tier 1 (snapshot context): placeholder — RA handoff is via
+      # artifacts (DEC-014).  Reconsidered in WP-06.13.
+      - name: Post findings to PR
+        if: >-
+          always() && steps.orchestrator.outcome == 'success'
+          && github.event_name == 'pull_request'
         uses: actions/github-script@v8
         with:
+          github-token: ${{ steps.mint-token.outputs.token || github.token }}
           script: |
             const fs = require('fs');
-            const commentPath = 'validation-output/pr-comment.md';
-            if (!fs.existsSync(commentPath)) return;
-            const body = fs.readFileSync(commentPath, 'utf8');
-            const marker = '<!-- camara-validation -->';
-            const prNumber = context.payload.pull_request.number;
 
-            // Find existing comment with marker
-            const comments = await github.paginate(
-              github.rest.issues.listComments,
-              { owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber }
-            );
-            const existing = comments.find(c => c.body && c.body.includes(marker));
+            // ── Token source detection ────────────────────────────
+            // The github-token input already resolved via || :
+            //   tier 2 (app token) when mint succeeded, else GITHUB_TOKEN.
+            // For fork PRs GITHUB_TOKEN lacks write access → early exit.
+            const mintOutcome = '${{ steps.mint-token.outcome }}';
+            const appToken = '${{ steps.mint-token.outputs.token }}';
+            let tokenSource;
 
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body: body,
-              });
-              core.info(`Updated existing comment ${existing.id}`);
+            if (mintOutcome === 'success' && appToken) {
+              tokenSource = 'validation_app';
             } else {
-              const created = await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                body: body,
-              });
-              core.info(`Created comment ${created.data.id}`);
+              if (mintOutcome === 'failure') {
+                core.info('Validation app token minting failed — falling back');
+              } else {
+                core.info('Validation app not configured — falling back');
+              }
+              const pr = context.payload.pull_request;
+              const isForkPR = pr.head.repo.full_name !== pr.base.repo.full_name;
+              if (isForkPR) {
+                core.info('Fork PR — GITHUB_TOKEN write access restricted');
+                const notice = [
+                  '',
+                  '> **Note**: No write permissions available (expected for fork PRs',
+                  '> without validation app) — PR comment and commit status skipped.',
+                  '> Showing findings in workflow summary only.',
+                ].join('\n');
+                fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, notice);
+                return;
+              }
+              tokenSource = 'github_token';
             }
 
-      # ── Step 13: Set commit status ─────────────────────────────────
-      - name: Set commit status
-        if: always() && steps.orchestrator.outcome == 'success'
-        continue-on-error: true
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const fs = require('fs');
-            const statusPath = 'validation-output/commit-status.json';
-            if (!fs.existsSync(statusPath)) return;
-            const payload = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
-            const sha = '${{ github.event.pull_request.head.sha || github.sha }}';
+            core.info(`Token source: ${tokenSource}`);
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
 
-            await github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha: sha,
-              state: payload.state,
-              description: payload.description,
-              context: payload.context,
-              target_url: payload.target_url,
-            });
-            core.info(`Commit status: ${payload.state}`);
+            // ── PR comment (create-or-update) ─────────────────────
+            const commentPath = 'validation-output/pr-comment.md';
+            if (fs.existsSync(commentPath)) {
+              try {
+                const body = fs.readFileSync(commentPath, 'utf8');
+                const marker = '<!-- camara-validation -->';
+                const prNumber = context.payload.pull_request.number;
+
+                const comments = await github.paginate(
+                  github.rest.issues.listComments,
+                  { owner, repo, issue_number: prNumber }
+                );
+                const existing = comments.find(c => c.body && c.body.includes(marker));
+
+                if (existing) {
+                  await github.rest.issues.updateComment({
+                    owner, repo, comment_id: existing.id, body,
+                  });
+                  core.info(`Updated existing comment ${existing.id}`);
+                } else {
+                  const created = await github.rest.issues.createComment({
+                    owner, repo, issue_number: prNumber, body,
+                  });
+                  core.info(`Created comment ${created.data.id}`);
+                }
+              } catch (e) {
+                core.warning(`PR comment failed: ${e.message}`);
+              }
+            }
+
+            // ── Commit status ─────────────────────────────────────
+            const statusPath = 'validation-output/commit-status.json';
+            if (fs.existsSync(statusPath)) {
+              try {
+                const payload = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
+                const sha = '${{ github.event.pull_request.head.sha || github.sha }}';
+                await github.rest.repos.createCommitStatus({
+                  owner, repo, sha,
+                  state: payload.state,
+                  description: payload.description,
+                  context: payload.context,
+                  target_url: payload.target_url,
+                });
+                core.info(`Commit status: ${payload.state}`);
+              } catch (e) {
+                core.warning(`Commit status failed: ${e.message}`);
+              }
+            }
 
       # ── Step 14: Upload diagnostics ────────────────────────────────
       - name: Upload diagnostics
