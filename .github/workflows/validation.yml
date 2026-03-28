@@ -343,7 +343,10 @@ jobs:
       # natively (DEC-021), so this is an output step, not validation.
       - name: Bundle API specs
         if: always() && steps.orchestrator.outcome == 'success'
+        env:
+          PATH_NODE_MODULES: ${{ github.workspace }}/.tooling/validation/node_modules/.bin
         run: |
+          export PATH="${PATH_NODE_MODULES}:${PATH}"
           mkdir -p validation-output/bundled
           BUNDLED=0
           for spec in code/API_definitions/*.yaml; do
