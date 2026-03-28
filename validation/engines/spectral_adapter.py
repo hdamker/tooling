@@ -166,22 +166,34 @@ def normalize_finding(raw: dict, repo_root: Optional[str] = None) -> dict:
     - ``raw["range"]["start"]["line"]`` is 0-indexed; add 1 for the framework.
     - ``raw["range"]["start"]["character"]`` is 0-indexed; add 1.
 
+    Findings on external files (e.g. ``code/common/CAMARA_common.yaml``)
+    that Spectral followed via ``$ref`` are downgraded to ``hint`` level
+    since they are not directly actionable by the API developer.
+
     Args:
         raw: Single finding dict from Spectral JSON output.
         repo_root: Absolute path to the repository root.  When provided,
             absolute ``source`` paths are normalised to repo-relative.
     """
     source = _normalize_path(raw.get("source", ""), repo_root)
+
+    # Findings from external files that Spectral followed via $ref
+    # (e.g. code/common/CAMARA_common.yaml) are downgraded to hint —
+    # they are not directly actionable by the API developer.
+    from_external = bool(source and "API_definitions" not in source)
+
     start = raw.get("range", {}).get("start", {})
 
     line = start.get("line", 0) + 1
     character = start.get("character")
     column = (character + 1) if character is not None else None
 
+    level = "hint" if from_external else map_severity(raw.get("severity", 1))
+
     finding: dict = {
         "engine": ENGINE_NAME,
         "engine_rule": raw.get("code", "unknown"),
-        "level": map_severity(raw.get("severity", 1)),
+        "level": level,
         "message": raw.get("message", ""),
         "path": source,
         "line": line,

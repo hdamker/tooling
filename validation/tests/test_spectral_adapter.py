@@ -260,6 +260,38 @@ class TestNormalizeFinding:
         )
         assert finding["path"] == "code/API_definitions/quality-on-demand.yaml"
 
+    def test_external_file_finding_downgraded_to_hint(self):
+        """Findings on files outside API_definitions/ (e.g. common schemas
+        followed via $ref) are downgraded to hint."""
+        raw = {
+            **SAMPLE_SPECTRAL_FINDING,
+            "source": "code/common/CAMARA_common.yaml",
+        }
+        finding = normalize_finding(raw)
+        assert finding["level"] == "hint"
+        assert finding["path"] == "code/common/CAMARA_common.yaml"
+
+    def test_external_file_absolute_path_downgraded_to_hint(self):
+        raw = {
+            **SAMPLE_SPECTRAL_FINDING,
+            "source": "/home/runner/work/R/R/code/common/CAMARA_common.yaml",
+        }
+        finding = normalize_finding(raw, repo_root="/home/runner/work/R/R")
+        assert finding["level"] == "hint"
+
+    def test_empty_source_keeps_original_severity(self):
+        """Findings with empty source (e.g. engine-level errors) keep severity."""
+        raw = {
+            "code": "some-rule",
+            "message": "msg",
+            "severity": 0,
+            "source": "",
+            "range": {"start": {"line": 0}},
+        }
+        finding = normalize_finding(raw)
+        assert finding["level"] == "error"
+        assert finding["path"] == ""
+
 
 # ---------------------------------------------------------------------------
 # TestParseSpectralOutput
@@ -316,6 +348,19 @@ class TestParseSpectralOutput:
         raw = json.dumps([abs_finding])
         findings = parse_spectral_output(raw, repo_root="/runner/work")
         assert findings[0]["path"] == "code/API_definitions/quality-on-demand.yaml"
+
+    def test_external_file_findings_downgraded_to_hint(self):
+        """Findings from common schemas (followed via $ref) become hints."""
+        common_finding = {
+            **SAMPLE_SPECTRAL_FINDING,
+            "source": "code/common/CAMARA_common.yaml",
+            "code": "camara-properties-descriptions",
+        }
+        raw = json.dumps([SAMPLE_SPECTRAL_FINDING, common_finding])
+        findings = parse_spectral_output(raw)
+        assert len(findings) == 2
+        assert findings[0]["level"] == "error"  # original API finding
+        assert findings[1]["level"] == "hint"   # external finding downgraded
 
 
 # ---------------------------------------------------------------------------

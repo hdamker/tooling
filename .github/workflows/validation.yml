@@ -336,7 +336,43 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-      # ── Step 15: Check result ──────────────────────────────────────
+      # ── Step 15: Bundle API specs ─────────────────────────────────
+      #
+      # Produce standalone bundled specs for artifact download and
+      # release automation handoff (DEC-014).  Spectral resolves $ref
+      # natively (DEC-021), so this is an output step, not validation.
+      - name: Bundle API specs
+        if: always() && steps.orchestrator.outcome == 'success'
+        run: |
+          mkdir -p validation-output/bundled
+          BUNDLED=0
+          for spec in code/API_definitions/*.yaml; do
+            [ -f "$spec" ] || continue
+            name=$(basename "$spec")
+            if redocly bundle "$spec" -o "validation-output/bundled/$name" 2>/dev/null; then
+              if ! diff -q "$spec" "validation-output/bundled/$name" > /dev/null 2>&1; then
+                BUNDLED=$((BUNDLED + 1))
+                echo "Bundled: $name"
+              else
+                rm "validation-output/bundled/$name"
+              fi
+            else
+              echo "::warning::Bundling failed for $name (likely unresolved refs)"
+            fi
+          done
+          echo "Bundled $BUNDLED spec(s)"
+
+      # ── Step 16: Upload bundled specs ──────────────────────────────
+      - name: Upload bundled specs
+        if: always() && steps.orchestrator.outcome == 'success'
+        uses: actions/upload-artifact@v6
+        with:
+          name: validation-bundled-specs
+          path: validation-output/bundled/
+          if-no-files-found: ignore
+          retention-days: 90
+
+      # ── Step 17: Check result ──────────────────────────────────────
       - name: Check result
         if: always() && steps.orchestrator.outcome == 'success'
         run: |
