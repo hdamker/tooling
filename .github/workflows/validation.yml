@@ -352,7 +352,7 @@ jobs:
           for spec in code/API_definitions/*.yaml; do
             [ -f "$spec" ] || continue
             name=$(basename "$spec")
-            if redocly bundle "$spec" -o "validation-output/bundled/$name" 2>/dev/null; then
+            if err=$(redocly bundle "$spec" -o "validation-output/bundled/$name" 2>&1); then
               if ! diff -q "$spec" "validation-output/bundled/$name" > /dev/null 2>&1; then
                 BUNDLED=$((BUNDLED + 1))
                 echo "Bundled: $name"
@@ -360,7 +360,7 @@ jobs:
                 rm "validation-output/bundled/$name"
               fi
             else
-              echo "::warning::Bundling failed for $name (likely unresolved refs)"
+              echo "::warning::Bundling failed for $name: ${err##*$'\n'}"
             fi
           done
           echo "Bundled $BUNDLED spec(s)"
