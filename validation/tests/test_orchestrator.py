@@ -284,20 +284,26 @@ class TestRunEngines:
     @patch("validation.orchestrator.run_python_engine")
     @patch("validation.orchestrator.run_spectral_engine")
     @patch("validation.orchestrator.run_yamllint_engine")
-    def test_release_review_skips_yamllint_and_spectral(
+    def test_release_review_runs_all_engines(
         self, mock_yamllint, mock_spectral, mock_python, mock_gherkin, paths
     ):
-        mock_python.return_value = []
-        mock_gherkin.return_value = []
+        """All engines run on release-review PRs (DEC-011 revision)."""
+        mock_yamllint.return_value = [_make_finding(engine="yamllint")]
+        mock_spectral.return_value = [_make_finding(engine="spectral")]
+        mock_python.return_value = [_make_finding(engine="python")]
+        mock_gherkin.return_value = [_make_finding(engine="gherkin")]
         context = _make_context(is_release_review_pr=True)
         test_files = [Path("/repo/code/Test_definitions/test.feature")]
 
         findings, statuses = run_engines(Path("/repo"), paths, context, test_files)
 
-        assert not mock_yamllint.called
-        assert not mock_spectral.called
-        assert "skipped" in statuses["yamllint"]
-        assert "skipped" in statuses["spectral"]
+        assert mock_yamllint.called
+        assert mock_spectral.called
+        assert mock_python.called
+        assert mock_gherkin.called
+        assert len(findings) == 4
+        assert "skipped" not in statuses.get("yamllint", "")
+        assert "skipped" not in statuses.get("spectral", "")
 
     @patch("validation.orchestrator.run_gherkin_engine")
     @patch("validation.orchestrator.run_python_engine")

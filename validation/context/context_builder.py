@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from .api_pattern_detector import detect_api_pattern_from_file
+from .release_metadata_parser import load_release_metadata
 from .release_plan_parser import load_release_plan
 
 logger = logging.getLogger(__name__)
@@ -253,6 +254,7 @@ def build_validation_context(
     release_plan_changed: Optional[bool] = None,
     repo_path: Optional[Path] = None,
     release_plan_schema_path: Optional[Path] = None,
+    release_metadata_schema_path: Optional[Path] = None,
     workflow_run_url: str = "",
     tooling_ref: str = "",
 ) -> ValidationContext:
@@ -281,6 +283,20 @@ def build_validation_context(
     if repo_path is not None and release_plan_schema_path is not None:
         plan_path = repo_path / "release-plan.yaml"
         release_plan = load_release_plan(plan_path, release_plan_schema_path)
+
+        # Fallback: on snapshot branches release-plan.yaml is removed and
+        # replaced with release-metadata.yaml.  Use it to populate context
+        # so Spectral gets the correct ruleset and per-API checks run.
+        if release_plan is None and is_review and release_metadata_schema_path is not None:
+            metadata_path = repo_path / "release-metadata.yaml"
+            release_plan = load_release_metadata(
+                metadata_path, release_metadata_schema_path
+            )
+            if release_plan is not None:
+                logger.info(
+                    "Using release-metadata.yaml fallback for snapshot branch context"
+                )
+
         if release_plan is not None:
             target_release_type = release_plan.target_release_type
             commonalities_release = release_plan.commonalities_release

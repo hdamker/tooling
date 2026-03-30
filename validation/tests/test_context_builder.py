@@ -3,10 +3,12 @@
 from pathlib import Path
 
 import pytest
+import yaml
 
 from validation.context.context_builder import (
     ApiContext,
     ValidationContext,
+    build_validation_context,
     derive_api_maturity,
     derive_branch_type,
     derive_target_branch,
@@ -208,3 +210,137 @@ class TestValidationContextToDict:
     def test_none_values_preserved(self, sample_context):
         d = sample_context.to_dict()
         assert d["icm_release"] is None
+
+
+# ---------------------------------------------------------------------------
+# TestBuildValidationContext — metadata fallback
+# ---------------------------------------------------------------------------
+
+SCHEMAS_DIR = Path(__file__).resolve().parent.parent / "schemas"
+PLAN_SCHEMA = SCHEMAS_DIR / "release-plan-schema.yaml"
+METADATA_SCHEMA = SCHEMAS_DIR / "release-metadata-schema.yaml"
+
+
+def _write_yaml(path: Path, data) -> Path:
+    path.write_text(yaml.dump(data, default_flow_style=False), encoding="utf-8")
+    return path
+
+
+class TestBuildValidationContextMetadataFallback:
+    """Test that build_validation_context falls back to release-metadata.yaml
+    when release-plan.yaml is absent and the PR targets a snapshot branch."""
+
+    @pytest.fixture
+    def repo_with_metadata(self, tmp_path):
+        """Repo checkout with release-metadata.yaml but no release-plan.yaml."""
+        spec_dir = tmp_path / "code" / "API_definitions"
+        spec_dir.mkdir(parents=True)
+        # Minimal spec so api_pattern detection doesn't crash
+        (spec_dir / "quality-on-demand.yaml").write_text(
+            "openapi: '3.0.3'\ninfo:\n  title: QoD\n  version: wip\npaths: {}\n",
+            encoding="utf-8",
+        )
+        _write_yaml(
+            tmp_path / "release-metadata.yaml",
+            {
+                "repository": {
+                    "repository_name": "QualityOnDemand",
+                    "release_tag": "r4.1",
+                    "release_type": "pre-release-rc",
+                    "release_date": None,
+                    "src_commit_sha": "a" * 40,
+                },
+                "dependencies": {
+                    "commonalities_release": "r4.2 (1.2.0-rc.1)",
+                    "identity_consent_management_release": "r4.3 (1.1.0)",
+                },
+                "apis": [
+                    {
+                        "api_name": "quality-on-demand",
+                        "api_version": "1.0.0-rc.2",
+                        "api_title": "Quality On Demand",
+                    },
+                ],
+            },
+        )
+        return tmp_path
+
+    def test_fallback_populates_context(self, repo_with_metadata):
+        ctx = build_validation_context(
+            repo_name="camaraproject/QualityOnDemand",
+            event_name="pull_request",
+            ref_name="release-review/r4.1-abc1234",
+            base_ref="release-snapshot/r4.1-abc1234",
+            repo_path=repo_with_metadata,
+            release_plan_schema_path=PLAN_SCHEMA,
+            release_metadata_schema_path=METADATA_SCHEMA,
+        )
+        assert ctx.is_release_review_pr is True
+        assert ctx.profile == "strict"
+        assert ctx.target_release_type == "pre-release-rc"
+        assert ctx.commonalities_release == "r4.2"
+        assert ctx.icm_release == "r4.3"
+        assert len(ctx.apis) == 1
+        assert ctx.apis[0].api_name == "quality-on-demand"
+        assert ctx.apis[0].target_api_version == "1.0.0-rc.2"
+        assert ctx.apis[0].target_api_status == "rc"
+
+    def test_no_fallback_when_release_plan_exists(self, repo_with_metadata):
+        """When release-plan.yaml exists, metadata fallback is not used."""
+        _write_yaml(
+            repo_with_metadata / "release-plan.yaml",
+            {
+                "repository": {
+                    "release_track": "meta-release",
+                    "meta_release": "Spring26",
+                    "target_release_tag": "r4.1",
+                    "target_release_type": "public-release",
+                },
+                "apis": [
+                    {
+                        "api_name": "quality-on-demand",
+                        "target_api_version": "1.0.0",
+                        "target_api_status": "public",
+                    },
+                ],
+            },
+        )
+        ctx = build_validation_context(
+            repo_name="camaraproject/QualityOnDemand",
+            event_name="pull_request",
+            ref_name="release-review/r4.1-abc1234",
+            base_ref="release-snapshot/r4.1-abc1234",
+            repo_path=repo_with_metadata,
+            release_plan_schema_path=PLAN_SCHEMA,
+            release_metadata_schema_path=METADATA_SCHEMA,
+        )
+        # Should use release-plan.yaml values, not metadata
+        assert ctx.target_release_type == "public-release"
+
+    def test_no_fallback_for_non_review_pr(self, tmp_path):
+        """Metadata fallback only activates for release-review PRs."""
+        _write_yaml(
+            tmp_path / "release-metadata.yaml",
+            {
+                "repository": {
+                    "repository_name": "Foo",
+                    "release_tag": "r4.1",
+                    "release_type": "pre-release-rc",
+                    "release_date": None,
+                    "src_commit_sha": "b" * 40,
+                },
+                "apis": [],
+            },
+        )
+        ctx = build_validation_context(
+            repo_name="camaraproject/Foo",
+            event_name="pull_request",
+            ref_name="fix/something",
+            base_ref="main",
+            repo_path=tmp_path,
+            release_plan_schema_path=PLAN_SCHEMA,
+            release_metadata_schema_path=METADATA_SCHEMA,
+        )
+        # Not a release review → no fallback → target_release_type stays None
+        assert ctx.is_release_review_pr is False
+        assert ctx.target_release_type is None

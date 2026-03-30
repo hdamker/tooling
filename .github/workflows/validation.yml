@@ -229,8 +229,10 @@ jobs:
       # Token resolution (design doc section 5.1), PR comment, and commit
       # status in a single step.  Skipped entirely for non-PR events.
       #
-      # Tier 1 (snapshot context): placeholder — RA handoff is via
-      # artifacts (DEC-014).  Reconsidered in WP-06.13.
+      # Pre-snapshot validation runs via the shared run-validation
+      # action inside the RA workflow (DEC-022).  Release-review PRs
+      # use the standard token tiers below (validation app or
+      # GITHUB_TOKEN).  No RA-specific token tier needed.
       - name: Post findings to PR
         if: >-
           always() && steps.orchestrator.outcome == 'success'

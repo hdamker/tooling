@@ -1,0 +1,116 @@
+name: run-validation
+description: |
+  Run the CAMARA validation orchestrator and return results.
+
+  Installs Python and Node dependencies, runs the validation pipeline
+  (all engines, post-filter, output generation), writes workflow summary,
+  and outputs the overall result.
+
+  Prerequisites: Python 3.11 and Node 24 must be available (caller sets
+  up runtimes via setup-python and setup-node before invoking this action).
+
+inputs:
+  repo_path:
+    description: 'Absolute path to the API repository checkout'
+    required: true
+  tooling_path:
+    description: 'Absolute path to the tooling checkout (parent of validation/ and linting/)'
+    required: true
+  mode:
+    description: 'Execution mode: "" (default) or "pre-snapshot"'
+    required: false
+    default: ''
+  profile:
+    description: 'Profile override: advisory, standard, strict, or "" for auto-select'
+    required: false
+    default: ''
+  release_plan_changed:
+    description: 'Whether release-plan.yaml changed in this PR (true/false)'
+    required: false
+    default: 'false'
+  tooling_ref:
+    description: 'Tooling ref used for this run (for diagnostics)'
+    required: false
+    default: ''
+
+outputs:
+  result:
+    description: 'Validation result: pass, fail, or error'
+    value: ${{ steps.read-result.outputs.result }}
+  should_fail:
+    description: 'Whether the caller should fail the workflow (true/false)'
+    value: ${{ steps.read-result.outputs.should_fail }}
+  summary:
+    description: 'One-line result summary'
+    value: ${{ steps.read-result.outputs.summary }}
+  output_dir:
+    description: 'Absolute path to the validation output directory'
+    value: ${{ steps.run.outputs.output_dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install Python dependencies
+      shell: bash
+      run: pip install --quiet pyyaml==6.0.3 jsonschema==4.26.0 yamllint==1.38.0
+
+    - name: Install Node dependencies
+      shell: bash
+      run: npm ci --ignore-scripts
+      working-directory: ${{ inputs.tooling_path }}/validation
+
+    - name: Run validation orchestrator
+      id: run
+      shell: bash
+      env:
+        PYTHONPATH: ${{ inputs.tooling_path }}
+        PATH_NODE_MODULES: ${{ inputs.tooling_path }}/validation/node_modules/.bin
+        VALIDATION_REPO_PATH: ${{ inputs.repo_path }}
+        VALIDATION_TOOLING_PATH: ${{ inputs.tooling_path }}
+        VALIDATION_OUTPUT_DIR: ${{ inputs.repo_path }}/validation-output
+        VALIDATION_REPO_NAME: ${{ github.repository }}
+        VALIDATION_REPO_OWNER: ${{ github.repository_owner }}
+        VALIDATION_EVENT_NAME: ${{ github.event_name }}
+        VALIDATION_REF_NAME: ${{ github.ref_name }}
+        VALIDATION_BASE_REF: ${{ github.base_ref }}
+        VALIDATION_MODE: ${{ inputs.mode }}
+        VALIDATION_PROFILE: ${{ inputs.profile }}
+        VALIDATION_PR_NUMBER: ${{ github.event.pull_request.number }}
+        VALIDATION_RELEASE_PLAN_CHANGED: ${{ inputs.release_plan_changed }}
+        VALIDATION_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        VALIDATION_TOOLING_REF: ${{ inputs.tooling_ref }}
+        VALIDATION_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: |
+        export PATH="${PATH_NODE_MODULES}:${PATH}"
+        python -m validation.orchestrator
+        echo "output_dir=${VALIDATION_OUTPUT_DIR}" >> "$GITHUB_OUTPUT"
+
+    - name: Write workflow summary
+      if: always() && steps.run.outcome == 'success'
+      shell: bash
+      env:
+        OUTPUT_DIR: ${{ steps.run.outputs.output_dir }}
+      run: |
+        if [ -f "${OUTPUT_DIR}/summary.md" ]; then
+          cat "${OUTPUT_DIR}/summary.md" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Read result
+      id: read-result
+      if: always() && steps.run.outcome == 'success'
+      shell: bash
+      env:
+        OUTPUT_DIR: ${{ steps.run.outputs.output_dir }}
+      run: |
+        if [ -f "${OUTPUT_DIR}/result.json" ]; then
+          RESULT=$(python3 -c "import json; r=json.load(open('${OUTPUT_DIR}/result.json')); print(r.get('result', 'error'))")
+          SHOULD_FAIL=$(python3 -c "import json; r=json.load(open('${OUTPUT_DIR}/result.json')); print(str(r.get('should_fail', False)).lower())")
+          SUMMARY=$(python3 -c "import json; r=json.load(open('${OUTPUT_DIR}/result.json')); print(r.get('summary', ''))")
+          echo "result=${RESULT}" >> "$GITHUB_OUTPUT"
+          echo "should_fail=${SHOULD_FAIL}" >> "$GITHUB_OUTPUT"
+          echo "summary=${SUMMARY}" >> "$GITHUB_OUTPUT"
+        else
+          echo "result=error" >> "$GITHUB_OUTPUT"
+          echo "should_fail=true" >> "$GITHUB_OUTPUT"
+          echo "summary=Orchestrator produced no result file" >> "$GITHUB_OUTPUT"
+        fi

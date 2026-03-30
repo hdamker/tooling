@@ -146,6 +146,7 @@ class ToolingPaths:
     config_file: Path
     config_schema: Path
     release_plan_schema: Path
+    release_metadata_schema: Path
     linting_config_dir: Path
     rules_dir: Path
 
@@ -156,6 +157,7 @@ def resolve_tooling_paths(tooling_path: Path) -> ToolingPaths:
         config_file=tooling_path / "validation" / "config" / "validation-config.yaml",
         config_schema=tooling_path / "validation" / "schemas" / "validation-config-schema.yaml",
         release_plan_schema=tooling_path / "validation" / "schemas" / "release-plan-schema.yaml",
+        release_metadata_schema=tooling_path / "validation" / "schemas" / "release-metadata-schema.yaml",
         linting_config_dir=tooling_path / "linting" / "config",
         rules_dir=tooling_path / "validation" / "rules",
     )
@@ -194,44 +196,35 @@ def run_engines(
     """
     all_findings: List[dict] = []
     engine_statuses: Dict[str, str] = {}
-    is_release_review = getattr(context, "is_release_review_pr", False)
 
     # --- yamllint ---
-    if is_release_review:
-        engine_statuses["yamllint"] = "skipped (release review PR)"
-        logger.info("yamllint: skipped (release review PR)")
-    else:
-        try:
-            yamllint_config = paths.linting_config_dir / ".yamllint.yaml"
-            findings = run_yamllint_engine(
-                repo_path=repo_path,
-                config_path=yamllint_config,
-            )
-            all_findings.extend(findings)
-            engine_statuses["yamllint"] = f"{len(findings)} finding(s)"
-            logger.info("yamllint: %d finding(s)", len(findings))
-        except Exception as exc:
-            engine_statuses["yamllint"] = f"error: {exc}"
-            logger.error("yamllint failed: %s", exc)
+    try:
+        yamllint_config = paths.linting_config_dir / ".yamllint.yaml"
+        findings = run_yamllint_engine(
+            repo_path=repo_path,
+            config_path=yamllint_config,
+        )
+        all_findings.extend(findings)
+        engine_statuses["yamllint"] = f"{len(findings)} finding(s)"
+        logger.info("yamllint: %d finding(s)", len(findings))
+    except Exception as exc:
+        engine_statuses["yamllint"] = f"error: {exc}"
+        logger.error("yamllint failed: %s", exc)
 
     # --- Spectral ---
-    if is_release_review:
-        engine_statuses["spectral"] = "skipped (release review PR)"
-        logger.info("Spectral: skipped (release review PR)")
-    else:
-        try:
-            commonalities_release = getattr(context, "commonalities_release", None)
-            findings = run_spectral_engine(
-                repo_path=repo_path,
-                config_dir=paths.linting_config_dir,
-                commonalities_release=commonalities_release,
-            )
-            all_findings.extend(findings)
-            engine_statuses["spectral"] = f"{len(findings)} finding(s)"
-            logger.info("Spectral: %d finding(s)", len(findings))
-        except Exception as exc:
-            engine_statuses["spectral"] = f"error: {exc}"
-            logger.error("Spectral failed: %s", exc)
+    try:
+        commonalities_release = getattr(context, "commonalities_release", None)
+        findings = run_spectral_engine(
+            repo_path=repo_path,
+            config_dir=paths.linting_config_dir,
+            commonalities_release=commonalities_release,
+        )
+        all_findings.extend(findings)
+        engine_statuses["spectral"] = f"{len(findings)} finding(s)"
+        logger.info("Spectral: %d finding(s)", len(findings))
+    except Exception as exc:
+        engine_statuses["spectral"] = f"error: {exc}"
+        logger.error("Spectral failed: %s", exc)
 
     # --- Python checks ---
     try:
@@ -422,6 +415,7 @@ def main() -> int:
         release_plan_changed=args.release_plan_changed,
         repo_path=args.repo_path,
         release_plan_schema_path=paths.release_plan_schema,
+        release_metadata_schema_path=paths.release_metadata_schema,
         workflow_run_url=args.workflow_run_url,
         tooling_ref=args.tooling_ref,
     )
