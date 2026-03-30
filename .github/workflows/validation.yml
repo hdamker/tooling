@@ -150,16 +150,7 @@ jobs:
         with:
           node-version: "24"
 
-      # ── Step 6: Install Python dependencies ────────────────────────
-      - name: Install Python dependencies
-        run: pip install --quiet pyyaml==6.0.3 jsonschema==4.26.0 yamllint==1.38.0
-
-      # ── Step 7: Install Node dependencies ──────────────────────────
-      - name: Install Node dependencies
-        run: npm ci --ignore-scripts
-        working-directory: .tooling/validation
-
-      # ── Step 8: Detect release-plan changes (PR only) ──────────────
+      # ── Step 6: Detect release-plan changes (PR only) ──────────────
       - name: Detect release-plan changes
         id: detect-changes
         if: github.event_name == 'pull_request'
@@ -170,52 +161,34 @@ jobs:
             echo "release_plan_changed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # ── Step 9: Run validation orchestrator ────────────────────────
+      # ── Step 7: Run validation (shared action) ─────────────────────
+      #
+      # The run-validation action installs dependencies, runs the Python
+      # orchestrator, writes the workflow summary, and outputs the result.
       - name: Run validation
-        id: orchestrator
-        env:
-          PYTHONPATH: ${{ github.workspace }}/.tooling
-          PATH_NODE_MODULES: ${{ github.workspace }}/.tooling/validation/node_modules/.bin
-          VALIDATION_REPO_PATH: ${{ github.workspace }}
-          VALIDATION_TOOLING_PATH: ${{ github.workspace }}/.tooling
-          VALIDATION_OUTPUT_DIR: ${{ github.workspace }}/validation-output
-          VALIDATION_REPO_NAME: ${{ github.repository }}
-          VALIDATION_REPO_OWNER: ${{ github.repository_owner }}
-          VALIDATION_EVENT_NAME: ${{ github.event_name }}
-          VALIDATION_REF_NAME: ${{ github.ref_name }}
-          VALIDATION_BASE_REF: ${{ github.base_ref }}
-          VALIDATION_MODE: ${{ inputs.mode }}
-          VALIDATION_PROFILE: ${{ inputs.profile }}
-          VALIDATION_PR_NUMBER: ${{ github.event.pull_request.number }}
-          VALIDATION_RELEASE_PLAN_CHANGED: ${{ steps.detect-changes.outputs.release_plan_changed }}
-          VALIDATION_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          VALIDATION_TOOLING_REF: ${{ steps.resolve-ref.outputs.tooling_checkout_ref }}
-          VALIDATION_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          export PATH="${PATH_NODE_MODULES}:${PATH}"
-          python -m validation.orchestrator
+        id: validation
+        uses: ./.tooling/shared-actions/run-validation
+        with:
+          repo_path: ${{ github.workspace }}
+          tooling_path: ${{ github.workspace }}/.tooling
+          mode: ${{ inputs.mode }}
+          profile: ${{ inputs.profile }}
+          release_plan_changed: ${{ steps.detect-changes.outputs.release_plan_changed || 'false' }}
+          tooling_ref: ${{ steps.resolve-ref.outputs.tooling_checkout_ref }}
 
-      # ── Step 10: Emit annotations (PR only) ────────────────────────
+      # ── Step 8: Emit annotations (PR only) ────────────────────────
       - name: Emit annotations
-        if: always() && steps.orchestrator.outcome == 'success' && github.event_name == 'pull_request'
+        if: always() && steps.validation.outcome == 'success' && github.event_name == 'pull_request'
         run: |
           if [ -f validation-output/annotations.txt ]; then
             cat validation-output/annotations.txt
           fi
 
-      # ── Step 11: Write workflow summary ────────────────────────────
-      - name: Write workflow summary
-        if: always() && steps.orchestrator.outcome == 'success'
-        run: |
-          if [ -f validation-output/summary.md ]; then
-            cat validation-output/summary.md >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      # ── Step 12: Mint validation app token (PR only) ─────────────
+      # ── Step 9: Mint validation app token (PR only) ──────────────
       - name: Mint validation app token
         id: mint-token
         if: >-
-          always() && steps.orchestrator.outcome == 'success'
+          always() && steps.validation.outcome == 'success'
           && github.event_name == 'pull_request'
           && vars.VALIDATION_APP_ID != ''
         continue-on-error: true
@@ -235,7 +208,7 @@ jobs:
       # GITHUB_TOKEN).  No release-automation-specific token needed.
       - name: Post findings to PR
         if: >-
-          always() && steps.orchestrator.outcome == 'success'
+          always() && steps.validation.outcome == 'success'
           && github.event_name == 'pull_request'
         uses: actions/github-script@v8
         with:
@@ -330,7 +303,7 @@ jobs:
 
       # ── Step 14: Upload diagnostics ────────────────────────────────
       - name: Upload diagnostics
-        if: always() && steps.orchestrator.outcome == 'success'
+        if: always() && steps.validation.outcome == 'success'
         uses: actions/upload-artifact@v6
         with:
           name: validation-diagnostics
@@ -344,7 +317,7 @@ jobs:
       # release automation handoff.  Spectral resolves $ref natively,
       # so this is an output step, not a validation prerequisite.
       - name: Bundle API specs
-        if: always() && steps.orchestrator.outcome == 'success'
+        if: always() && steps.validation.outcome == 'success'
         env:
           PATH_NODE_MODULES: ${{ github.workspace }}/.tooling/validation/node_modules/.bin
         run: |
@@ -369,7 +342,7 @@ jobs:
 
       # ── Step 16: Upload bundled specs ──────────────────────────────
       - name: Upload bundled specs
-        if: always() && steps.orchestrator.outcome == 'success'
+        if: always() && steps.validation.outcome == 'success'
         uses: actions/upload-artifact@v6
         with:
           name: validation-bundled-specs
@@ -377,21 +350,18 @@ jobs:
           if-no-files-found: ignore
           retention-days: 90
 
-      # ── Step 17: Check result ──────────────────────────────────────
+      # ── Check result ────────────────────────────────────────────────
       - name: Check result
-        if: always() && steps.orchestrator.outcome == 'success'
+        if: always() && steps.validation.outcome == 'success'
         run: |
-          if [ -f validation-output/result.json ]; then
-            SHOULD_FAIL=$(python3 -c "import json; r=json.load(open('validation-output/result.json')); print(r.get('should_fail', False))")
-            if [ "$SHOULD_FAIL" = "True" ]; then
-              echo "::error::Validation failed — see summary and annotations above"
-              exit 1
-            fi
+          if [ "${{ steps.validation.outputs.should_fail }}" = "true" ]; then
+            echo "::error::Validation failed — see summary and annotations above"
+            exit 1
           fi
 
       # ── Fallback: orchestrator infrastructure error ────────────────
       - name: Report orchestrator failure
-        if: always() && steps.orchestrator.outcome == 'failure'
+        if: always() && steps.validation.outcome == 'failure'
         run: |
           echo "## CAMARA Validation" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
