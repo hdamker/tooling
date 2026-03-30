@@ -287,7 +287,7 @@ class TestRunEngines:
     def test_release_review_runs_all_engines(
         self, mock_yamllint, mock_spectral, mock_python, mock_gherkin, paths
     ):
-        """All engines run on release-review PRs (DEC-011 revision)."""
+        """All engines run on release-review PRs (full-scope validation)."""
         mock_yamllint.return_value = [_make_finding(engine="yamllint")]
         mock_spectral.return_value = [_make_finding(engine="spectral")]
         mock_python.return_value = [_make_finding(engine="python")]

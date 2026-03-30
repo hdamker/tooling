@@ -787,13 +787,13 @@ jobs:
       needs.validate-command.outputs.allowed == 'true'
     runs-on: ubuntu-latest
     outputs:
-      success: ${{ steps.create.outputs.success }}
+      success: ${{ steps.create.outputs.success || steps.validation-gate.outputs.success }}
       snapshot_id: ${{ steps.create.outputs.snapshot_id }}
       snapshot_branch: ${{ steps.create.outputs.snapshot_branch }}
       release_review_branch: ${{ steps.create.outputs.release_review_branch }}
       release_pr_number: ${{ steps.create.outputs.release_pr_number }}
       release_pr_url: ${{ steps.create.outputs.release_pr_url }}
-      error_message: ${{ steps.create.outputs.error_message }}
+      error_message: ${{ steps.create.outputs.error_message || steps.validation-gate.outputs.error_message }}
       apis_json: ${{ steps.create.outputs.apis_json }}
     steps:
       - name: Generate App Token
@@ -815,6 +815,52 @@ jobs:
             release_automation/templates
             release_automation/config
             shared-actions/create-snapshot
+            shared-actions/run-validation
+            validation
+            linting/config
+
+      # ── Pre-snapshot validation ────────────────────────────────────
+      #
+      # Run the validation framework on the source branch before
+      # creating the snapshot.  Strict profile — errors and warnings
+      # block snapshot creation.
+
+      - name: Checkout repository for validation
+        uses: actions/checkout@v6
+        with:
+          path: _repo
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Run pre-snapshot validation
+        id: validation
+        uses: ./_tooling/shared-actions/run-validation
+        with:
+          repo_path: ${{ github.workspace }}/_repo
+          tooling_path: ${{ github.workspace }}/_tooling
+          mode: pre-snapshot
+          tooling_ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+
+      - name: Gate on validation result
+        id: validation-gate
+        if: always() && steps.validation.outputs.should_fail == 'true'
+        run: |
+          echo "::error::Pre-snapshot validation failed — fix issues on main before re-running /create-snapshot"
+          echo "success=false" >> "$GITHUB_OUTPUT"
+          SUMMARY="${{ steps.validation.outputs.summary }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "error_message=Pre-snapshot validation failed: ${SUMMARY}. See ${RUN_URL}" >> "$GITHUB_OUTPUT"
+          exit 1
+
+      # ── Snapshot creation ─────────────────────────────────────────
 
       - name: Resolve Bot Identity
         id: bot-identity
@@ -846,6 +892,11 @@ jobs:
       - name: Log Result
         if: always()
         run: |
+          echo "Pre-snapshot validation: ${{ steps.validation.outputs.result || 'skipped' }}"
+          if [ "${{ steps.validation-gate.outcome }}" == "failure" ]; then
+            echo "  Validation blocked snapshot creation"
+            echo "  Summary: ${{ steps.validation.outputs.summary }}"
+          fi
           echo "Create snapshot result:"
           echo "  Success: ${{ steps.create.outputs.success }}"
           echo "  Snapshot ID: ${{ steps.create.outputs.snapshot_id }}"

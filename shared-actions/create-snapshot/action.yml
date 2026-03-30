@@ -68,9 +68,18 @@ runs:
       with:
         python-version: '3.11'
 
-    - name: Install dependencies
+    - name: Install Python dependencies
       shell: bash
       run: pip install --quiet pyyaml pystache
+
+    - name: Setup Node
+      uses: actions/setup-node@v6
+      with:
+        node-version: '24'
+
+    - name: Install Redocly CLI
+      shell: bash
+      run: npm install -g @redocly/cli@^1.31.0
 
     - name: Create Snapshot
       id: create

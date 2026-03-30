@@ -230,9 +230,9 @@ jobs:
       # status in a single step.  Skipped entirely for non-PR events.
       #
       # Pre-snapshot validation runs via the shared run-validation
-      # action inside the RA workflow (DEC-022).  Release-review PRs
-      # use the standard token tiers below (validation app or
-      # GITHUB_TOKEN).  No RA-specific token tier needed.
+      # action inside the release automation workflow.  Release-review
+      # PRs use the standard token tiers below (validation app or
+      # GITHUB_TOKEN).  No release-automation-specific token needed.
       - name: Post findings to PR
         if: >-
           always() && steps.orchestrator.outcome == 'success'
@@ -341,8 +341,8 @@ jobs:
       # ── Step 15: Bundle API specs ─────────────────────────────────
       #
       # Produce standalone bundled specs for artifact download and
-      # release automation handoff (DEC-014).  Spectral resolves $ref
-      # natively (DEC-021), so this is an output step, not validation.
+      # release automation handoff.  Spectral resolves $ref natively,
+      # so this is an output step, not a validation prerequisite.
       - name: Bundle API specs
         if: always() && steps.orchestrator.outcome == 'success'
         env:

@@ -258,9 +258,9 @@ def run_engines(
             logger.error("gherkin-lint failed: %s", exc)
 
     # --- Bundling ---
-    # Spectral resolves external $ref natively (DEC-021), so bundling is not
-    # a validation prerequisite.  Bundled standalone specs are produced by a
-    # separate workflow step for artifact upload and release automation handoff.
+    # Spectral resolves external $ref natively, so bundling is not a
+    # validation prerequisite.  Bundled standalone specs are produced by
+    # a separate workflow step for artifact upload and handoff.
     engine_statuses["bundling"] = "separate workflow step"
 
     return all_findings, engine_statuses
