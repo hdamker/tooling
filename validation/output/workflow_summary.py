@@ -22,7 +22,7 @@ from validation.postfilter.engine import PostFilterResult
 from .formatting import (
     REPO_LEVEL_LABEL,
     count_findings,
-    count_findings_by_api,
+    count_findings_by_engine,
     format_rule_label,
     sort_findings_by_priority,
 )
@@ -103,21 +103,45 @@ def _render_header(
     )
 
 
-def _render_api_table(findings: List[dict]) -> str:
-    """Render the per-API summary table."""
-    by_api = count_findings_by_api(findings)
-    if not by_api:
+def _render_engine_summary_table(
+    findings: List[dict],
+    engine_statuses: Optional[Dict[str, str]],
+) -> str:
+    """Render a per-engine summary table with post-filter counts.
+
+    For engines that produced findings: show error/warning/hint counts.
+    For engines that ran clean: show 0/0/0.
+    For engines that were skipped or errored: show status text instead.
+    """
+    if not engine_statuses:
         return ""
+
+    by_engine = count_findings_by_engine(findings)
 
     lines = [
         "\n### Summary\n",
-        "| API / Test | Errors | Warnings | Hints |",
-        "|------------|--------|----------|-------|",
+        "| Engine | Errors | Warnings | Hints | Status |",
+        "|--------|--------|----------|-------|--------|",
     ]
-    for api_name, counts in by_api.items():
-        lines.append(
-            f"| {api_name} | {counts.errors} | {counts.warnings} | {counts.hints} |"
-        )
+
+    for engine, status in engine_statuses.items():
+        counts = by_engine.get(engine)
+        # Engine ran and produced findings, or ran clean with "N finding(s)"
+        ran = status.endswith("finding(s)") or status.startswith("0 ")
+        if ran:
+            c = counts if counts else None
+            errors = c.errors if c else 0
+            warnings = c.warnings if c else 0
+            hints = c.hints if c else 0
+            lines.append(
+                f"| {engine} | {errors} | {warnings} | {hints} | — |"
+            )
+        else:
+            # Skipped, error, or special status
+            lines.append(
+                f"| {engine} | — | — | — | {status} |"
+            )
+
     lines.append("")
     return "\n".join(lines)
 
@@ -145,24 +169,6 @@ def _render_findings_table(
         message = f.get("message", "").replace("|", "\\|")
         hint = (f.get("hint") or "").replace("|", "\\|")
         lines.append(f"| {rule} | {path} | {line} | {message} | {hint} |")
-    lines.append("")
-    return "\n".join(lines)
-
-
-def _render_engine_table(
-    engine_statuses: Optional[Dict[str, str]],
-) -> str:
-    """Render the engine status table."""
-    if not engine_statuses:
-        return ""
-
-    lines = [
-        "\n### Engine Status\n",
-        "| Engine | Status |",
-        "|--------|--------|",
-    ]
-    for engine, status in engine_statuses.items():
-        lines.append(f"| {engine} | {status} |")
     lines.append("")
     return "\n".join(lines)
 
@@ -238,12 +244,11 @@ def generate_workflow_summary(
 
     # Fixed sections (always rendered)
     header = _render_header(post_filter_result.result, context, findings)
-    api_table = _render_api_table(findings)
-    engine_table = _render_engine_table(engine_statuses)
+    engine_summary = _render_engine_summary_table(findings, engine_statuses)
     footer = _render_footer(context, commit_sha)
 
     fixed_size = sum(
-        _byte_size(s) for s in (header, api_table, engine_table, footer)
+        _byte_size(s) for s in (header, engine_summary, footer)
     )
 
     # Budget for findings sections
@@ -289,11 +294,10 @@ def generate_workflow_summary(
     # Assemble
     markdown = (
         header
-        + api_table
+        + engine_summary
         + errors_section
         + warnings_section
         + hints_section
-        + engine_table
         + footer
     )
 

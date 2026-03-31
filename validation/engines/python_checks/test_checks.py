@@ -1,13 +1,14 @@
 """Test file checks.
 
 Validates that test files exist for each API, are located in
-``code/Test_definitions/``, and have version-aligned filenames.
+``code/Test_definitions/``, and carry version-aligned Feature lines.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from validation.context import ValidationContext
 
@@ -106,17 +107,44 @@ def check_test_files_exist(
     ]
 
 
+# Regex to extract version from CAMARA Feature line.
+# Matches ", v{segment}" where segment runs until whitespace or " -".
+# Examples:
+#   "Feature: CAMARA Quality On Demand API, vwip - Operation deleteSession"  → "vwip"
+#   "Feature: CAMARA QoD API, v0.2alpha2"                                    → "v0.2alpha2"
+_FEATURE_VERSION_RE = re.compile(r",\s*v([^\s-]+)")
+
+
+def _extract_feature_version(file_path: Path) -> Optional[str]:
+    """Read the first line and extract the version segment.
+
+    Returns the version segment (e.g. ``"vwip"``, ``"v1"``) or ``None``
+    if no version could be parsed from the Feature line.
+    """
+    try:
+        with open(file_path, encoding="utf-8") as fh:
+            first_line = fh.readline()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+    m = _FEATURE_VERSION_RE.search(first_line)
+    if m:
+        return f"v{m.group(1)}"
+    return None
+
+
 def check_test_file_version(
     repo_path: Path, context: ValidationContext
 ) -> List[dict]:
-    """Validate test file version suffix matches API version.
+    """Validate that the version in test Feature lines matches the API version.
 
-    Per-API check.  Uses CAMARA version-to-URL mapping rules to derive
-    the expected version suffix.  Test files should be named like:
-    ``{api-name}.{version-suffix}.feature`` or
-    ``{api-name}-{operationId}.{version-suffix}.feature``.
+    Per-API check.  Reads the ``Feature:`` line of each ``.feature`` file
+    and extracts the version segment (e.g. ``vwip``, ``v1``).  Compares
+    against the expected version derived from the API's ``info.version``.
 
-    Example: ``quality-on-demand.v0.2alpha2.feature``
+    Example Feature line::
+
+        Feature: CAMARA Quality On Demand API, vwip - Operation deleteSession
     """
     api = context.apis[0]
     test_dir = repo_path / _TEST_DIR
@@ -133,8 +161,7 @@ def check_test_file_version(
         f for f in test_dir.iterdir()
         if f.is_file()
         and f.suffix == ".feature"
-        and (f.stem == api.api_name or f.stem.startswith(f"{api.api_name}-")
-             or f.stem.startswith(f"{api.api_name}."))
+        and _stem_matches_api(f.stem, api.api_name)
     ]
 
     if not matching:
@@ -143,20 +170,16 @@ def check_test_file_version(
 
     findings: List[dict] = []
     for test_file in matching:
-        # Extract version suffix: everything after the first dot in the stem.
-        # e.g. "quality-on-demand.v1" -> "v1"
-        # e.g. "quality-on-demand-createSession.v0.3" -> "v0.3"
-        stem = test_file.stem
-        dot_idx = stem.find(".")
-        if dot_idx == -1:
-            # No version suffix in filename — report as finding.
+        actual_version = _extract_feature_version(test_file)
+
+        if actual_version is None:
             findings.append(
                 make_finding(
                     engine_rule="check-test-file-version",
                     level="error",
                     message=(
-                        f"Test file '{test_file.name}' has no version suffix "
-                        f"(expected '.{expected_segment}' before .feature)"
+                        f"Test file '{test_file.name}' has no version in its "
+                        f"Feature line (expected '{expected_segment}')"
                     ),
                     path=f"{_TEST_DIR}/{test_file.name}",
                     line=1,
@@ -165,15 +188,15 @@ def check_test_file_version(
             )
             continue
 
-        actual_suffix = stem[dot_idx + 1:]
-        if actual_suffix.lower() != expected_segment.lower():
+        if actual_version.lower() != expected_segment.lower():
             findings.append(
                 make_finding(
                     engine_rule="check-test-file-version",
                     level="error",
                     message=(
-                        f"Test file '{test_file.name}' has version suffix "
-                        f"'{actual_suffix}' but expected '{expected_segment}' "
+                        f"Test file '{test_file.name}' has version "
+                        f"'{actual_version}' in Feature line but expected "
+                        f"'{expected_segment}' "
                         f"(from API version '{api.target_api_version}')"
                     ),
                     path=f"{_TEST_DIR}/{test_file.name}",

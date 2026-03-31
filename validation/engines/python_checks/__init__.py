@@ -9,6 +9,7 @@ from ._types import CheckDescriptor, CheckScope
 from .changelog_checks import check_changelog_format
 from .filename_checks import check_filename_kebab_case, check_filename_matches_api_name
 from .metadata_checks import check_license_commonalities_consistency
+from .readme_checks import check_readme_placeholder_removal
 from .release_plan_checks import check_release_plan_semantics
 from .release_review_checks import check_release_review_file_restriction
 from .test_checks import (
@@ -38,6 +39,7 @@ CHECKS: list[CheckDescriptor] = [
     CheckDescriptor("check-release-plan-semantics", CheckScope.REPO, check_release_plan_semantics),
     CheckDescriptor("check-changelog-format", CheckScope.REPO, check_changelog_format),
     CheckDescriptor("check-license-commonalities-consistency", CheckScope.REPO, check_license_commonalities_consistency),
+    CheckDescriptor("check-readme-placeholder-removal", CheckScope.REPO, check_readme_placeholder_removal),
     CheckDescriptor("check-release-review-file-restriction", CheckScope.REPO, check_release_review_file_restriction),
 ]
 

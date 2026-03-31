@@ -128,46 +128,77 @@ class TestCheckTestFilesExist:
 
 
 class TestCheckTestFileVersion:
+    """Tests for check_test_file_version — parses Feature line content."""
+
+    def _write_feature(self, path: Path, feature_line: str) -> None:
+        path.write_text(f"{feature_line}\n  Background: setup\n")
+
     def test_matching_version(self, tmp_path: Path):
         test_dir = _make_test_dir(tmp_path)
-        (test_dir / "qod.v1.feature").touch()
+        self._write_feature(
+            test_dir / "qod.feature",
+            "Feature: CAMARA QoD API, v1 - Operation createSession",
+        )
         ctx = _make_context("qod", version="1.0.0")
         assert check_test_file_version(tmp_path, ctx) == []
 
     def test_matching_initial_version(self, tmp_path: Path):
         test_dir = _make_test_dir(tmp_path)
-        (test_dir / "qod.v0.3.feature").touch()
+        self._write_feature(
+            test_dir / "qod.feature",
+            "Feature: CAMARA QoD API, v0.3 - Operation createSession",
+        )
         ctx = _make_context("qod", version="0.3.0")
         assert check_test_file_version(tmp_path, ctx) == []
 
     def test_matching_wip_version(self, tmp_path: Path):
         test_dir = _make_test_dir(tmp_path)
-        (test_dir / "qod.vwip.feature").touch()
+        self._write_feature(
+            test_dir / "qod.feature",
+            "Feature: CAMARA QoD API, vwip - Operation createSession",
+        )
         ctx = _make_context("qod", version="wip")
         assert check_test_file_version(tmp_path, ctx) == []
 
     def test_matching_alpha_version(self, tmp_path: Path):
         test_dir = _make_test_dir(tmp_path)
-        (test_dir / "qod.v0.2alpha2.feature").touch()
+        self._write_feature(
+            test_dir / "qod.feature",
+            "Feature: CAMARA QoD API, v0.2alpha2 - Operation createSession",
+        )
         ctx = _make_context("qod", version="0.2.0-alpha.2")
         assert check_test_file_version(tmp_path, ctx) == []
 
     def test_mismatched_version(self, tmp_path: Path):
         test_dir = _make_test_dir(tmp_path)
-        (test_dir / "qod.v2.feature").touch()
+        self._write_feature(
+            test_dir / "qod.feature",
+            "Feature: CAMARA QoD API, v2 - Operation createSession",
+        )
         ctx = _make_context("qod", version="1.0.0")
         findings = check_test_file_version(tmp_path, ctx)
         assert len(findings) == 1
         assert "v2" in findings[0]["message"]
         assert "v1" in findings[0]["message"]
 
-    def test_no_version_suffix(self, tmp_path: Path):
+    def test_no_version_in_feature_line(self, tmp_path: Path):
         test_dir = _make_test_dir(tmp_path)
-        (test_dir / "qod.feature").touch()
+        self._write_feature(
+            test_dir / "qod.feature",
+            "Feature: QoD API tests",
+        )
         ctx = _make_context("qod", version="1.0.0")
         findings = check_test_file_version(tmp_path, ctx)
         assert len(findings) == 1
-        assert "no version suffix" in findings[0]["message"]
+        assert "no version" in findings[0]["message"]
+
+    def test_empty_file(self, tmp_path: Path):
+        test_dir = _make_test_dir(tmp_path)
+        (test_dir / "qod.feature").write_text("")
+        ctx = _make_context("qod", version="1.0.0")
+        findings = check_test_file_version(tmp_path, ctx)
+        assert len(findings) == 1
+        assert "no version" in findings[0]["message"]
 
     def test_no_test_dir(self, tmp_path: Path):
         ctx = _make_context("qod")
@@ -176,12 +207,44 @@ class TestCheckTestFileVersion:
     def test_no_matching_files(self, tmp_path: Path):
         """No test files for this API => skip (other check reports it)."""
         test_dir = _make_test_dir(tmp_path)
-        (test_dir / "other-api.v1.feature").touch()
+        self._write_feature(
+            test_dir / "other-api.feature",
+            "Feature: CAMARA Other API, v1 - Operation foo",
+        )
         ctx = _make_context("qod")
         assert check_test_file_version(tmp_path, ctx) == []
 
     def test_operation_specific_file(self, tmp_path: Path):
         test_dir = _make_test_dir(tmp_path)
-        (test_dir / "qod-createSession.v1.feature").touch()
+        self._write_feature(
+            test_dir / "qod-createSession.feature",
+            "Feature: CAMARA QoD API, v1 - Operation createSession",
+        )
         ctx = _make_context("qod", version="1.0.0")
         assert check_test_file_version(tmp_path, ctx) == []
+
+    def test_feature_line_without_operation(self, tmp_path: Path):
+        """Feature line with version but no operation suffix."""
+        test_dir = _make_test_dir(tmp_path)
+        self._write_feature(
+            test_dir / "qod.feature",
+            "Feature: CAMARA QoD API, v1",
+        )
+        ctx = _make_context("qod", version="1.0.0")
+        assert check_test_file_version(tmp_path, ctx) == []
+
+    def test_multiple_files_mixed(self, tmp_path: Path):
+        """Two files: one matching, one mismatched."""
+        test_dir = _make_test_dir(tmp_path)
+        self._write_feature(
+            test_dir / "qod-createSession.feature",
+            "Feature: CAMARA QoD API, v1 - Operation createSession",
+        )
+        self._write_feature(
+            test_dir / "qod-deleteSession.feature",
+            "Feature: CAMARA QoD API, v2 - Operation deleteSession",
+        )
+        ctx = _make_context("qod", version="1.0.0")
+        findings = check_test_file_version(tmp_path, ctx)
+        assert len(findings) == 1
+        assert "deleteSession" in findings[0]["path"]

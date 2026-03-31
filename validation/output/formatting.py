@@ -88,6 +88,20 @@ def count_findings_by_api(
     return {api: count_findings(fs) for api, fs in groups.items()}
 
 
+def count_findings_by_engine(
+    findings: List[dict],
+) -> Dict[str, FindingCounts]:
+    """Group findings by ``engine`` and count each group.
+
+    Keys are returned in insertion order (first-seen engine).
+    """
+    groups: Dict[str, List[dict]] = {}
+    for f in findings:
+        key = f.get("engine", "unknown")
+        groups.setdefault(key, []).append(f)
+    return {engine: count_findings(fs) for engine, fs in groups.items()}
+
+
 # ---------------------------------------------------------------------------
 # Sorting
 # ---------------------------------------------------------------------------

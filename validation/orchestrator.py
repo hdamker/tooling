@@ -33,6 +33,7 @@ from validation.engines import (
 )
 from validation.output import (
     generate_annotations,
+    generate_check_run_payload,
     generate_commit_status,
     generate_pr_comment,
     generate_workflow_summary,
@@ -305,14 +306,25 @@ def write_outputs(
     """Write all output files for the workflow to consume."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- Annotations ---
+    # --- Check Run payload (Checks API — primary) ---
+    check_run = generate_check_run_payload(post_filter_result, context)
+    (output_dir / "check-run.json").write_text(
+        json.dumps(check_run.to_dict(), indent=2) + "\n"
+    )
+    logger.info(
+        "Check Run: conclusion=%s, %d annotations",
+        check_run.conclusion,
+        len(check_run.annotations),
+    )
+
+    # --- Annotations (workflow commands — fork PR fallback) ---
     annotation_result = generate_annotations(post_filter_result)
     if annotation_result.commands:
         (output_dir / "annotations.txt").write_text(
             "\n".join(annotation_result.commands) + "\n"
         )
     logger.info(
-        "Annotations: %d emitted (of %d total, truncated=%s)",
+        "Annotations fallback: %d emitted (of %d total, truncated=%s)",
         annotation_result.annotations_emitted,
         annotation_result.total_findings,
         annotation_result.truncated,

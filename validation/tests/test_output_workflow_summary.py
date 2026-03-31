@@ -116,30 +116,83 @@ class TestHeader:
 
 
 # ---------------------------------------------------------------------------
-# API summary table
+# Engine summary table
 # ---------------------------------------------------------------------------
 
 
-class TestApiTable:
-    def test_multi_api(self):
+class TestEngineSummaryTable:
+    def test_engine_with_findings(self):
         findings = [
-            _make_finding(level="error", api_name="api-a"),
-            _make_finding(level="warn", api_name="api-a"),
-            _make_finding(level="hint", api_name="api-b"),
+            _make_finding(level="error"),
+            _make_finding(level="warn"),
         ]
-        ctx = _make_context()
-        sr = generate_workflow_summary(_make_result(findings), ctx)
-        assert "| api-a |" in sr.markdown
-        assert "| api-b |" in sr.markdown
+        statuses = {"spectral": "2 finding(s)"}
+        sr = generate_workflow_summary(
+            _make_result(findings), _make_context(), engine_statuses=statuses,
+        )
+        assert "### Summary" in sr.markdown
+        assert "| spectral | 1 | 1 | 0 | — |" in sr.markdown
 
-    def test_empty_findings_no_table(self):
+    def test_engine_ran_clean(self):
+        statuses = {"yamllint": "0 finding(s)"}
+        sr = generate_workflow_summary(
+            _make_result(), _make_context(), engine_statuses=statuses,
+        )
+        assert "| yamllint | 0 | 0 | 0 | — |" in sr.markdown
+
+    def test_engine_skipped(self):
+        statuses = {"gherkin": "skipped (no test files)"}
+        sr = generate_workflow_summary(
+            _make_result(), _make_context(), engine_statuses=statuses,
+        )
+        assert "| gherkin | — | — | — | skipped (no test files) |" in sr.markdown
+
+    def test_engine_errored(self):
+        statuses = {"spectral": "error: timeout"}
+        sr = generate_workflow_summary(
+            _make_result(), _make_context(), engine_statuses=statuses,
+        )
+        assert "| spectral | — | — | — | error: timeout |" in sr.markdown
+
+    def test_mixed_engines(self):
+        findings = [
+            _make_finding(level="error"),  # engine=spectral
+            _make_finding(level="warn"),   # engine=spectral
+        ]
+        statuses = {
+            "yamllint": "0 finding(s)",
+            "spectral": "2 finding(s)",
+            "python": "0 finding(s)",
+            "gherkin": "skipped (no test files)",
+            "bundling": "separate workflow step",
+        }
+        sr = generate_workflow_summary(
+            _make_result(findings), _make_context(), engine_statuses=statuses,
+        )
+        assert "| yamllint | 0 | 0 | 0 | — |" in sr.markdown
+        assert "| spectral | 1 | 1 | 0 | — |" in sr.markdown
+        assert "| python | 0 | 0 | 0 | — |" in sr.markdown
+        assert "| gherkin | — | — | — | skipped (no test files) |" in sr.markdown
+        assert "| bundling | — | — | — | separate workflow step |" in sr.markdown
+
+    def test_no_statuses_no_table(self):
         sr = generate_workflow_summary(_make_result(), _make_context())
         assert "### Summary" not in sr.markdown
 
-    def test_repo_level_findings(self):
-        findings = [_make_finding(api_name=None, level="warn")]
-        sr = generate_workflow_summary(_make_result(findings), _make_context())
-        assert "(repository)" in sr.markdown
+    def test_all_findings_filtered_by_postfilter(self):
+        """Engine ran and reported findings but all were filtered → 0/0/0."""
+        statuses = {"python": "3 finding(s)"}
+        sr = generate_workflow_summary(
+            _make_result(), _make_context(), engine_statuses=statuses,
+        )
+        assert "| python | 0 | 0 | 0 | — |" in sr.markdown
+
+    def test_table_header(self):
+        statuses = {"spectral": "0 finding(s)"}
+        sr = generate_workflow_summary(
+            _make_result(), _make_context(), engine_statuses=statuses,
+        )
+        assert "| Engine | Errors | Warnings | Hints | Status |" in sr.markdown
 
 
 # ---------------------------------------------------------------------------
@@ -193,27 +246,6 @@ class TestFindingsTables:
         sr = generate_workflow_summary(_make_result(findings), _make_context())
         assert "### Errors" not in sr.markdown
         assert "### Hints" not in sr.markdown
-
-
-# ---------------------------------------------------------------------------
-# Engine status table
-# ---------------------------------------------------------------------------
-
-
-class TestEngineTable:
-    def test_with_statuses(self):
-        sr = generate_workflow_summary(
-            _make_result(),
-            _make_context(),
-            engine_statuses={"Spectral": "completed", "yamllint": "error"},
-        )
-        assert "### Engine Status" in sr.markdown
-        assert "| Spectral | completed |" in sr.markdown
-        assert "| yamllint | error |" in sr.markdown
-
-    def test_none_statuses(self):
-        sr = generate_workflow_summary(_make_result(), _make_context())
-        assert "### Engine Status" not in sr.markdown
 
 
 # ---------------------------------------------------------------------------

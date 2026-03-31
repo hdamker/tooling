@@ -56,15 +56,20 @@
           target_release_type: [pre-release-rc, public-release]
         level: warn
 
-# P-007: check-test-file-version — SUPPRESSED pending fix
-# Current check validates filename version suffix, but the version belongs
-# inside the .feature file (first line), not the filename. Needs rewrite
-# to parse file content (same approach as P-003 for spec info.version).
+# P-007: check-test-file-version
+# Parses the Feature line of .feature files to extract the version
+# (e.g. "Feature: CAMARA API, vwip - Operation foo") and compares
+# against the expected version from info.version.
 - id: P-007
   engine: python
   engine_rule: check-test-file-version
   conditional_level:
-    default: muted
+    default: hint
+    overrides:
+      - condition:
+          target_api_maturity: [stable]
+          target_release_type: [pre-release-rc, public-release]
+        level: warn
 
 # P-008: check-test-directory-exists
 - id: P-008
@@ -108,3 +113,10 @@
     is_release_review_pr: true
   conditional_level:
     default: error
+
+# P-013: check-readme-placeholder-removal
+- id: P-013
+  engine: python
+  engine_rule: check-readme-placeholder-removal
+  conditional_level:
+    default: warn

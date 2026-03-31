@@ -176,15 +176,7 @@ jobs:
           release_plan_changed: ${{ steps.detect-changes.outputs.release_plan_changed || 'false' }}
           tooling_ref: ${{ steps.resolve-ref.outputs.tooling_checkout_ref }}
 
-      # ── Step 8: Emit annotations (PR only) ────────────────────────
-      - name: Emit annotations
-        if: always() && steps.validation.outcome == 'success' && github.event_name == 'pull_request'
-        run: |
-          if [ -f validation-output/annotations.txt ]; then
-            cat validation-output/annotations.txt
-          fi
-
-      # ── Step 9: Mint validation app token (PR only) ──────────────
+      # ── Step 8: Mint validation app token (PR only) ──────────────
       - name: Mint validation app token
         id: mint-token
         if: >-
@@ -197,7 +189,96 @@ jobs:
           app-id: ${{ vars.VALIDATION_APP_ID }}
           private-key: ${{ secrets.VALIDATION_APP_PRIVATE_KEY }}
 
-      # ── Step 13: Post findings to PR ───────────────────────────────
+      # ── Step 9: Create Check Run (PR only) ─────────────────────
+      #
+      # Creates a GitHub Check Run with inline annotations via the
+      # Checks API.  Unlike workflow commands (::error etc.), Check
+      # Run annotations have no display cap in the PR Files tab.
+      #
+      # Token resolution: app token → GITHUB_TOKEN (same-repo PRs
+      # have checks:write).  Fork PRs without app token fall back
+      # to workflow command annotations in the next step.
+      - name: Create Check Run
+        id: check-run
+        if: >-
+          always() && steps.validation.outcome == 'success'
+          && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ steps.mint-token.outputs.token || github.token }}
+          script: |
+            const fs = require('fs');
+            const path = 'validation-output/check-run.json';
+            if (!fs.existsSync(path)) {
+              core.info('No check-run.json — skipping Check Run creation');
+              return;
+            }
+
+            const payload = JSON.parse(fs.readFileSync(path, 'utf8'));
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const sha = '${{ github.event.pull_request.head.sha || github.sha }}';
+            const allAnnotations = payload.annotations || [];
+
+            // Checks API accepts max 50 annotations per call.
+            // Create the Check Run with the first batch, then update
+            // with remaining batches.
+            const BATCH_SIZE = 50;
+            const firstBatch = allAnnotations.slice(0, BATCH_SIZE);
+
+            try {
+              const checkRun = await github.rest.checks.create({
+                owner, repo,
+                name: 'CAMARA Validation',
+                head_sha: sha,
+                status: 'completed',
+                conclusion: payload.conclusion,
+                output: {
+                  title: payload.title,
+                  summary: payload.summary,
+                  annotations: firstBatch,
+                },
+              });
+              core.info(`Check Run created: id=${checkRun.data.id}, conclusion=${payload.conclusion}`);
+
+              // Batch remaining annotations
+              for (let i = BATCH_SIZE; i < allAnnotations.length; i += BATCH_SIZE) {
+                const batch = allAnnotations.slice(i, i + BATCH_SIZE);
+                await github.rest.checks.update({
+                  owner, repo,
+                  check_run_id: checkRun.data.id,
+                  output: {
+                    title: payload.title,
+                    summary: payload.summary,
+                    annotations: batch,
+                  },
+                });
+                core.info(`Check Run updated: batch ${Math.floor(i / BATCH_SIZE) + 1}, ${batch.length} annotations`);
+              }
+
+              core.info(`Total annotations: ${allAnnotations.length}`);
+            } catch (e) {
+              core.warning(`Check Run creation failed: ${e.message}`);
+            }
+
+      # ── Step 10: Emit annotations fallback (fork PR only) ──────
+      #
+      # Workflow command annotations (::error etc.) as fallback when
+      # Check Run creation is not available.  Limited to ~10 per
+      # severity level in the PR view.
+      - name: Emit annotations (fallback)
+        if: >-
+          always() && steps.validation.outcome == 'success'
+          && github.event_name == 'pull_request'
+          && steps.check-run.outcome != 'success'
+        run: |
+          if [ -f validation-output/annotations.txt ]; then
+            echo "::notice::Check Run unavailable — using workflow command annotations (limited display)"
+            cat validation-output/annotations.txt
+          fi
+
+      # ── Step 11: Post findings to PR ───────────────────────────────
       #
       # Token resolution (design doc section 5.1), PR comment, and commit
       # status in a single step.  Skipped entirely for non-PR events.

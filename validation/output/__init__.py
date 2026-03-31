@@ -3,6 +3,7 @@
 # commit status, and diagnostic artifacts.
 
 from .annotations import AnnotationResult, generate_annotations  # noqa: F401
+from .check_run import CheckRunPayload, generate_check_run_payload  # noqa: F401
 from .commit_status import (  # noqa: F401
     CommitStatusPayload,
     generate_commit_status,
