@@ -74,27 +74,69 @@ class TestDeriveTriggerType:
 
 
 class TestSelectProfile:
+    """Profile selection tests per DEC-023: config-driven profiles."""
+
     def test_dispatch_gets_advisory(self):
-        assert select_profile("dispatch", "main", False) == "advisory"
+        """Dispatch always returns advisory regardless of config profiles."""
+        assert select_profile(
+            "dispatch", "main", False,
+            pr_profile="strict", release_profile="strict",
+        ) == "advisory"
 
-    def test_release_automation_gets_strict(self):
-        assert select_profile("release-automation", "main", False) == "strict"
+    def test_local_gets_advisory(self):
+        """Local always returns advisory regardless of config profiles."""
+        assert select_profile(
+            "local", "main", False,
+            pr_profile="strict", release_profile="strict",
+        ) == "advisory"
 
-    def test_pr_release_review_gets_strict(self):
-        assert select_profile("pr", "release", True) == "strict"
+    def test_release_automation_uses_release_profile(self):
+        assert select_profile(
+            "release-automation", "main", False,
+            release_profile="strict",
+        ) == "strict"
 
-    def test_pr_main_gets_standard(self):
+    def test_release_automation_defaults_to_standard(self):
+        assert select_profile("release-automation", "main", False) == "standard"
+
+    def test_pr_release_review_uses_release_profile(self):
+        assert select_profile(
+            "pr", "release", True,
+            release_profile="strict",
+        ) == "strict"
+
+    def test_pr_release_review_defaults_to_standard(self):
+        assert select_profile("pr", "release", True) == "standard"
+
+    def test_pr_main_uses_pr_profile(self):
+        assert select_profile(
+            "pr", "main", False,
+            pr_profile="advisory",
+        ) == "advisory"
+
+    def test_pr_feature_uses_pr_profile(self):
+        assert select_profile(
+            "pr", "feature", False,
+            pr_profile="strict",
+        ) == "strict"
+
+    def test_pr_defaults_to_standard(self):
         assert select_profile("pr", "main", False) == "standard"
 
-    def test_pr_feature_gets_standard(self):
-        assert select_profile("pr", "feature", False) == "standard"
-
-    def test_pr_maintenance_gets_standard(self):
-        assert select_profile("pr", "maintenance", False) == "standard"
+    def test_pr_maintenance_uses_pr_profile(self):
+        assert select_profile(
+            "pr", "maintenance", False,
+            pr_profile="advisory",
+        ) == "advisory"
 
     def test_profile_override_wins(self):
+        """Override takes precedence over config profiles."""
         assert (
-            select_profile("dispatch", "main", False, profile_override="strict")
+            select_profile(
+                "pr", "main", False,
+                profile_override="strict",
+                pr_profile="advisory",
+            )
             == "strict"
         )
 
@@ -103,9 +145,6 @@ class TestSelectProfile:
             select_profile("dispatch", "main", False, profile_override="invalid")
             == "advisory"
         )
-
-    def test_local_gets_advisory(self):
-        assert select_profile("local", "main", False) == "advisory"
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +208,7 @@ class TestValidationContextToDict:
             branch_type="main",
             trigger_type="pr",
             profile="standard",
-            stage="standard",
+            stage="enabled",
             target_release_type="pre-release-rc",
             commonalities_release="r4.1",
             icm_release=None,
@@ -271,6 +310,7 @@ class TestBuildValidationContextMetadataFallback:
             event_name="pull_request",
             ref_name="release-review/r4.1-abc1234",
             base_ref="release-snapshot/r4.1-abc1234",
+            release_profile="strict",
             repo_path=repo_with_metadata,
             release_plan_schema_path=PLAN_SCHEMA,
             release_metadata_schema_path=METADATA_SCHEMA,
@@ -284,6 +324,20 @@ class TestBuildValidationContextMetadataFallback:
         assert ctx.apis[0].api_name == "quality-on-demand"
         assert ctx.apis[0].target_api_version == "1.0.0-rc.2"
         assert ctx.apis[0].target_api_status == "rc"
+
+    def test_fallback_defaults_to_standard_profile(self, repo_with_metadata):
+        """Without explicit release_profile, release-review PR defaults to standard."""
+        ctx = build_validation_context(
+            repo_name="camaraproject/QualityOnDemand",
+            event_name="pull_request",
+            ref_name="release-review/r4.1-abc1234",
+            base_ref="release-snapshot/r4.1-abc1234",
+            repo_path=repo_with_metadata,
+            release_plan_schema_path=PLAN_SCHEMA,
+            release_metadata_schema_path=METADATA_SCHEMA,
+        )
+        assert ctx.is_release_review_pr is True
+        assert ctx.profile == "standard"
 
     def test_no_fallback_when_release_plan_exists(self, repo_with_metadata):
         """When release-plan.yaml exists, metadata fallback is not used."""
@@ -341,6 +395,6 @@ class TestBuildValidationContextMetadataFallback:
             release_plan_schema_path=PLAN_SCHEMA,
             release_metadata_schema_path=METADATA_SCHEMA,
         )
-        # Not a release review → no fallback → target_release_type stays None
+        # Not a release review -> no fallback -> target_release_type stays None
         assert ctx.is_release_review_pr is False
         assert ctx.target_release_type is None

@@ -21,7 +21,7 @@ def _make_context(
         branch_type="main",
         trigger_type="pr",
         profile=profile,
-        stage="standard",
+        stage="enabled",
         target_release_type=None,
         commonalities_release=None,
         icm_release=None,

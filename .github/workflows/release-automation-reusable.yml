@@ -822,8 +822,8 @@ jobs:
       # ── Pre-snapshot validation ────────────────────────────────────
       #
       # Run the validation framework on the source branch before
-      # creating the snapshot.  Strict profile — errors and warnings
-      # block snapshot creation.
+      # creating the snapshot.  Profile from per-repo config
+      # (default: standard — errors block snapshot creation).
 
       - name: Checkout repository for validation
         uses: actions/checkout@v6

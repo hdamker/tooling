@@ -390,11 +390,14 @@ def main() -> int:
         trigger_type=args.event_name,
     )
     logger.info(
-        "Config gate: stage=%s continue=%s fork=%s override=%s",
+        "Config gate: stage=%s continue=%s fork=%s override=%s "
+        "pr_profile=%s release_profile=%s",
         stage_result.stage,
         stage_result.should_continue,
         stage_result.is_fork,
         stage_result.fork_override_applied,
+        stage_result.pr_profile,
+        stage_result.release_profile,
     )
     if not stage_result.should_continue:
         write_skip_output(args.output_dir, stage_result.reason)
@@ -411,6 +414,8 @@ def main() -> int:
         mode=args.mode,
         profile_override=args.profile,
         stage=stage_result.stage,
+        pr_profile=stage_result.pr_profile,
+        release_profile=stage_result.release_profile,
         pr_number=args.pr_number,
         release_plan_changed=args.release_plan_changed,
         repo_path=args.repo_path,

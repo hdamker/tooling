@@ -25,11 +25,24 @@ properties:
     properties:
       stage:
         type: string
-        enum: [disabled, advisory, standard]
+        enum: [disabled, advisory, enabled]
         description: >
           Default stage for repositories not listed under "repositories".
           disabled = dark (exit immediately), advisory = dispatch only,
-          standard = PRs and dispatch.
+          enabled = PRs and dispatch.
+      pr_profile:
+        type: string
+        enum: [advisory, standard, strict]
+        description: >
+          Default profile for PR-triggered validation.
+          advisory = nothing blocks, standard = errors block,
+          strict = errors and warnings block.
+      release_profile:
+        type: string
+        enum: [advisory, standard, strict]
+        description: >
+          Default profile for release-automation and release-review
+          validation.
     additionalProperties: false
 
   fork_owners:
@@ -39,7 +52,7 @@ properties:
     description: >
       GitHub usernames allowed to test in forks.  When the workflow runs
       in a fork owned by a listed user, the stage is overridden to
-      "standard" regardless of the upstream repo's configured stage.
+      "enabled" regardless of the upstream repo's configured stage.
 
   repositories:
     type: object
@@ -50,7 +63,18 @@ properties:
       properties:
         stage:
           type: string
-          enum: [disabled, advisory, standard]
+          enum: [disabled, advisory, enabled]
+        pr_profile:
+          type: string
+          enum: [advisory, standard, strict]
+          description: >
+            Profile for PR-triggered validation on this repository.
+        release_profile:
+          type: string
+          enum: [advisory, standard, strict]
+          description: >
+            Profile for release-automation and release-review validation
+            on this repository.
       additionalProperties: false
 
 additionalProperties: false

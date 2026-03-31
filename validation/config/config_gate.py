@@ -25,7 +25,7 @@ UPSTREAM_ORGS = frozenset({"camaraproject", "GSMA-Open-Gateway"})
 
 STAGE_DISABLED = "disabled"
 STAGE_ADVISORY = "advisory"
-STAGE_STANDARD = "standard"
+STAGE_ENABLED = "enabled"
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -65,6 +65,8 @@ class StageGateResult:
     reason: str = ""
     is_fork: bool = False
     fork_override_applied: bool = False
+    pr_profile: str = "standard"
+    release_profile: str = "standard"
 
 
 # ---------------------------------------------------------------------------
@@ -147,8 +149,25 @@ def resolve_stage(
     if is_fork:
         fork_owners = config.get("fork_owners") or []
         if repo_owner in fork_owners:
-            stage = STAGE_STANDARD
+            stage = STAGE_ENABLED
             fork_override_applied = True
+
+    # Resolve profiles from config
+    defaults = config.get("defaults") or {}
+    if fork_override_applied:
+        pr_profile = "standard"
+        release_profile = "standard"
+    else:
+        pr_profile = (
+            (repo_entry or {}).get("pr_profile")
+            or defaults.get("pr_profile")
+            or "standard"
+        )
+        release_profile = (
+            (repo_entry or {}).get("release_profile")
+            or defaults.get("release_profile")
+            or "standard"
+        )
 
     # Steps 5-7: gate decisions
     if stage == STAGE_DISABLED:
@@ -158,6 +177,8 @@ def resolve_stage(
             reason="Validation is not enabled for this repository",
             is_fork=is_fork,
             fork_override_applied=fork_override_applied,
+            pr_profile=pr_profile,
+            release_profile=release_profile,
         )
 
     if stage == STAGE_ADVISORY and trigger_type == "pull_request":
@@ -170,6 +191,8 @@ def resolve_stage(
             ),
             is_fork=is_fork,
             fork_override_applied=fork_override_applied,
+            pr_profile=pr_profile,
+            release_profile=release_profile,
         )
 
     return StageGateResult(
@@ -177,6 +200,8 @@ def resolve_stage(
         should_continue=True,
         is_fork=is_fork,
         fork_override_applied=fork_override_applied,
+        pr_profile=pr_profile,
+        release_profile=release_profile,
     )
 
 

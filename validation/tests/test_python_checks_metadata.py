@@ -36,7 +36,7 @@ def _make_context(api_names: list[str]) -> ValidationContext:
         branch_type="main",
         trigger_type="dispatch",
         profile="advisory",
-        stage="standard",
+        stage="enabled",
         target_release_type=None,
         commonalities_release=None,
         icm_release=None,

@@ -33,7 +33,7 @@ def _make_context(
         branch_type=branch_type,
         trigger_type=trigger_type,
         profile=profile,
-        stage="standard",
+        stage="enabled",
         target_release_type=target_release_type,
         commonalities_release=commonalities_release,
         icm_release=None,

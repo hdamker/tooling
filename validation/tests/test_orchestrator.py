@@ -90,7 +90,7 @@ def _make_context(**overrides):
         "branch_type": "main",
         "trigger_type": "pr",
         "profile": "standard",
-        "stage": "standard",
+        "stage": "enabled",
         "target_release_type": None,
         "commonalities_release": None,
         "icm_release": None,
@@ -550,11 +550,13 @@ class TestMainPipeline:
         (tmp_path / "tooling").mkdir()
 
         mock_gate.return_value = MagicMock(
-            stage="standard",
+            stage="enabled",
             should_continue=True,
             is_fork=False,
             fork_override_applied=False,
             reason="",
+            pr_profile="standard",
+            release_profile="standard",
         )
         ctx = _make_context()
         mock_context.return_value = ctx
@@ -585,8 +587,9 @@ class TestMainPipeline:
         (tmp_path / "tooling").mkdir()
 
         mock_gate.return_value = MagicMock(
-            stage="standard", should_continue=True, is_fork=False,
+            stage="enabled", should_continue=True, is_fork=False,
             fork_override_applied=False, reason="",
+            pr_profile="standard", release_profile="standard",
         )
         mock_context.return_value = _make_context()
         findings = [_make_finding(level="error", blocks=True)]
@@ -635,8 +638,9 @@ class TestMainPipeline:
         (tmp_path / "tooling").mkdir()
 
         mock_gate.return_value = MagicMock(
-            stage="standard", should_continue=True, is_fork=False,
+            stage="enabled", should_continue=True, is_fork=False,
             fork_override_applied=False, reason="",
+            pr_profile="standard", release_profile="standard",
         )
         mock_context.return_value = _make_context()
         statuses = {

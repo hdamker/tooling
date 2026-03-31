@@ -196,16 +196,18 @@ def select_profile(
     branch_type: str,
     is_release_review_pr: bool,
     profile_override: str = "",
+    pr_profile: str = "standard",
+    release_profile: str = "standard",
 ) -> str:
     """Auto-select the validation profile.
 
     If *profile_override* is a valid profile name it takes precedence.
 
-    Profile selection table (design doc section 8.1):
-        dispatch / local         → advisory
-        release-automation       → strict
-        pr + release + review    → strict
-        pr + any other           → standard
+    Profile selection (DEC-023):
+        dispatch / local              → advisory (hardcoded)
+        release-automation            → release_profile from config
+        pr + release + review         → release_profile from config
+        pr + any other                → pr_profile from config
     """
     if profile_override and profile_override in _VALID_PROFILES:
         return profile_override
@@ -213,11 +215,11 @@ def select_profile(
     if trigger_type in (TRIGGER_DISPATCH, TRIGGER_LOCAL):
         return PROFILE_ADVISORY
     if trigger_type == TRIGGER_RELEASE_AUTOMATION:
-        return PROFILE_STRICT
+        return release_profile
     # trigger_type == TRIGGER_PR
     if branch_type == BRANCH_RELEASE and is_release_review_pr:
-        return PROFILE_STRICT
-    return PROFILE_STANDARD
+        return release_profile
+    return pr_profile
 
 
 def derive_api_maturity(target_api_version: str) -> str:
@@ -250,6 +252,8 @@ def build_validation_context(
     mode: str = "",
     profile_override: str = "",
     stage: str = "",
+    pr_profile: str = "standard",
+    release_profile: str = "standard",
     pr_number: Optional[int] = None,
     release_plan_changed: Optional[bool] = None,
     repo_path: Optional[Path] = None,
@@ -272,7 +276,10 @@ def build_validation_context(
     is_review = is_release_review_pr_check(base_ref) if base_ref else False
 
     # Profile selection
-    profile = select_profile(trigger_type, branch_type, is_review, profile_override)
+    profile = select_profile(
+        trigger_type, branch_type, is_review, profile_override,
+        pr_profile=pr_profile, release_profile=release_profile,
+    )
 
     # Release plan
     target_release_type: Optional[str] = None

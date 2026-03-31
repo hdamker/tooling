@@ -31,7 +31,7 @@ def _make_context(
         branch_type=branch_type,
         trigger_type="dispatch",
         profile="advisory",
-        stage="standard",
+        stage="enabled",
         target_release_type=None,
         commonalities_release=None,
         icm_release=None,
