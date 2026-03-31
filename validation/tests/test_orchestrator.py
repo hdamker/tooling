@@ -278,7 +278,6 @@ class TestRunEngines:
         assert "finding(s)" in statuses["spectral"]
         assert "finding(s)" in statuses["python"]
         assert "finding(s)" in statuses["gherkin"]
-        assert statuses["bundling"] == "separate workflow step"
 
     @patch("validation.orchestrator.run_gherkin_engine")
     @patch("validation.orchestrator.run_python_engine")
@@ -648,7 +647,6 @@ class TestMainPipeline:
             "spectral": "3 finding(s)",
             "python": "0 finding(s)",
             "gherkin": "skipped (no test files)",
-            "bundling": "separate workflow step",
         }
         mock_engines.return_value = ([], statuses)
         mock_postfilter.return_value = _make_post_filter_result()

@@ -164,7 +164,6 @@ class TestEngineSummaryTable:
             "spectral": "2 finding(s)",
             "python": "0 finding(s)",
             "gherkin": "skipped (no test files)",
-            "bundling": "separate workflow step",
         }
         sr = generate_workflow_summary(
             _make_result(findings), _make_context(), engine_statuses=statuses,
@@ -173,7 +172,6 @@ class TestEngineSummaryTable:
         assert "| spectral | 1 | 1 | 0 | — |" in sr.markdown
         assert "| python | 0 | 0 | 0 | — |" in sr.markdown
         assert "| gherkin | — | — | — | skipped (no test files) |" in sr.markdown
-        assert "| bundling | — | — | — | separate workflow step |" in sr.markdown
 
     def test_no_statuses_no_table(self):
         sr = generate_workflow_summary(_make_result(), _make_context())
