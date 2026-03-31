@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from validation.context import ValidationContext
 
-from ._types import make_finding
+from ._types import load_yaml_safe, make_finding
 from .version_checks import build_version_segment
 
 _TEST_DIR = "code/Test_definitions"
@@ -136,11 +136,16 @@ def _extract_feature_version(file_path: Path) -> Optional[str]:
 def check_test_file_version(
     repo_path: Path, context: ValidationContext
 ) -> List[dict]:
-    """Validate that the version in test Feature lines matches the API version.
+    """Validate that the version in test Feature lines matches the branch.
 
-    Per-API check.  Reads the ``Feature:`` line of each ``.feature`` file
-    and extracts the version segment (e.g. ``vwip``, ``v1``).  Compares
-    against the expected version derived from the API's ``info.version``.
+    Per-API check.  On main and maintenance the Feature line must carry
+    ``vwip``.  On release branches it must match the version derived
+    from ``target_api_version`` (sourced from release-metadata.yaml).
+    Feature branches are skipped.
+
+    This avoids cascading with P-003 (info.version format): on
+    main/maintenance the expected value is hardcoded, not derived from
+    the spec.
 
     Example Feature line::
 
@@ -152,8 +157,14 @@ def check_test_file_version(
     if not test_dir.is_dir():
         return []
 
-    expected_segment = build_version_segment(api.target_api_version)
-    if expected_segment is None:
+    if context.branch_type in ("main", "maintenance"):
+        expected_segment = "vwip"
+    elif context.branch_type == "release":
+        expected_segment = build_version_segment(api.target_api_version)
+        if expected_segment is None:
+            return []
+    else:
+        # Feature branches: no constraint.
         return []
 
     # Find all .feature files matching this API.
@@ -197,7 +208,7 @@ def check_test_file_version(
                         f"Test file '{test_file.name}' has version "
                         f"'{actual_version}' in Feature line but expected "
                         f"'{expected_segment}' "
-                        f"(from API version '{api.target_api_version}')"
+                        f"(on {context.branch_type} branch)"
                     ),
                     path=f"{_TEST_DIR}/{test_file.name}",
                     line=1,

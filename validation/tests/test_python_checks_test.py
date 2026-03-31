@@ -23,6 +23,7 @@ def _make_context(
     api_name: str = "quality-on-demand",
     version: str = "1.0.0",
     apis: tuple[ApiContext, ...] | None = None,
+    branch_type: str = "main",
 ) -> ValidationContext:
     if apis is None:
         api = ApiContext(
@@ -36,7 +37,7 @@ def _make_context(
         apis = (api,)
     return ValidationContext(
         repository="TestRepo",
-        branch_type="main",
+        branch_type=branch_type,
         trigger_type="dispatch",
         profile="advisory",
         stage="enabled",
@@ -128,58 +129,117 @@ class TestCheckTestFilesExist:
 
 
 class TestCheckTestFileVersion:
-    """Tests for check_test_file_version — parses Feature line content."""
+    """Tests for check_test_file_version — parses Feature line content.
+
+    Branch rules:
+    - main/maintenance: Feature line must have vwip
+    - release: Feature line must match target_api_version
+    - feature: skipped (no constraint)
+    """
 
     def _write_feature(self, path: Path, feature_line: str) -> None:
         path.write_text(f"{feature_line}\n  Background: setup\n")
 
-    def test_matching_version(self, tmp_path: Path):
-        test_dir = _make_test_dir(tmp_path)
-        self._write_feature(
-            test_dir / "qod.feature",
-            "Feature: CAMARA QoD API, v1 - Operation createSession",
-        )
-        ctx = _make_context("qod", version="1.0.0")
-        assert check_test_file_version(tmp_path, ctx) == []
+    # --- main branch: always vwip ---
 
-    def test_matching_initial_version(self, tmp_path: Path):
-        test_dir = _make_test_dir(tmp_path)
-        self._write_feature(
-            test_dir / "qod.feature",
-            "Feature: CAMARA QoD API, v0.3 - Operation createSession",
-        )
-        ctx = _make_context("qod", version="0.3.0")
-        assert check_test_file_version(tmp_path, ctx) == []
-
-    def test_matching_wip_version(self, tmp_path: Path):
+    def test_main_vwip_passes(self, tmp_path: Path):
         test_dir = _make_test_dir(tmp_path)
         self._write_feature(
             test_dir / "qod.feature",
             "Feature: CAMARA QoD API, vwip - Operation createSession",
         )
-        ctx = _make_context("qod", version="wip")
+        ctx = _make_context("qod", branch_type="main")
         assert check_test_file_version(tmp_path, ctx) == []
 
-    def test_matching_alpha_version(self, tmp_path: Path):
+    def test_main_real_version_fails(self, tmp_path: Path):
+        """On main, v1 is wrong even when target_api_version is 1.0.0."""
+        test_dir = _make_test_dir(tmp_path)
+        self._write_feature(
+            test_dir / "qod.feature",
+            "Feature: CAMARA QoD API, v1 - Operation createSession",
+        )
+        ctx = _make_context("qod", version="1.0.0", branch_type="main")
+        findings = check_test_file_version(tmp_path, ctx)
+        assert len(findings) == 1
+        assert "v1" in findings[0]["message"]
+        assert "vwip" in findings[0]["message"]
+
+    # --- maintenance branch: always vwip ---
+
+    def test_maintenance_vwip_passes(self, tmp_path: Path):
+        test_dir = _make_test_dir(tmp_path)
+        self._write_feature(
+            test_dir / "qod.feature",
+            "Feature: CAMARA QoD API, vwip - Operation createSession",
+        )
+        ctx = _make_context("qod", branch_type="maintenance")
+        assert check_test_file_version(tmp_path, ctx) == []
+
+    # --- release branch: must match target_api_version ---
+
+    def test_release_matching_version(self, tmp_path: Path):
+        test_dir = _make_test_dir(tmp_path)
+        self._write_feature(
+            test_dir / "qod.feature",
+            "Feature: CAMARA QoD API, v1 - Operation createSession",
+        )
+        ctx = _make_context("qod", version="1.0.0", branch_type="release")
+        assert check_test_file_version(tmp_path, ctx) == []
+
+    def test_release_matching_initial_version(self, tmp_path: Path):
+        test_dir = _make_test_dir(tmp_path)
+        self._write_feature(
+            test_dir / "qod.feature",
+            "Feature: CAMARA QoD API, v0.3 - Operation createSession",
+        )
+        ctx = _make_context("qod", version="0.3.0", branch_type="release")
+        assert check_test_file_version(tmp_path, ctx) == []
+
+    def test_release_matching_alpha_version(self, tmp_path: Path):
         test_dir = _make_test_dir(tmp_path)
         self._write_feature(
             test_dir / "qod.feature",
             "Feature: CAMARA QoD API, v0.2alpha2 - Operation createSession",
         )
-        ctx = _make_context("qod", version="0.2.0-alpha.2")
+        ctx = _make_context("qod", version="0.2.0-alpha.2", branch_type="release")
         assert check_test_file_version(tmp_path, ctx) == []
 
-    def test_mismatched_version(self, tmp_path: Path):
+    def test_release_mismatched_version(self, tmp_path: Path):
         test_dir = _make_test_dir(tmp_path)
         self._write_feature(
             test_dir / "qod.feature",
             "Feature: CAMARA QoD API, v2 - Operation createSession",
         )
-        ctx = _make_context("qod", version="1.0.0")
+        ctx = _make_context("qod", version="1.0.0", branch_type="release")
         findings = check_test_file_version(tmp_path, ctx)
         assert len(findings) == 1
         assert "v2" in findings[0]["message"]
         assert "v1" in findings[0]["message"]
+
+    def test_release_vwip_fails(self, tmp_path: Path):
+        """On release, vwip is wrong — must be the release version."""
+        test_dir = _make_test_dir(tmp_path)
+        self._write_feature(
+            test_dir / "qod.feature",
+            "Feature: CAMARA QoD API, vwip - Operation createSession",
+        )
+        ctx = _make_context("qod", version="1.0.0", branch_type="release")
+        findings = check_test_file_version(tmp_path, ctx)
+        assert len(findings) == 1
+        assert "vwip" in findings[0]["message"]
+
+    # --- feature branch: skipped ---
+
+    def test_feature_branch_skipped(self, tmp_path: Path):
+        test_dir = _make_test_dir(tmp_path)
+        self._write_feature(
+            test_dir / "qod.feature",
+            "Feature: CAMARA QoD API, v999 - Operation createSession",
+        )
+        ctx = _make_context("qod", branch_type="feature")
+        assert check_test_file_version(tmp_path, ctx) == []
+
+    # --- common edge cases ---
 
     def test_no_version_in_feature_line(self, tmp_path: Path):
         test_dir = _make_test_dir(tmp_path)
@@ -187,7 +247,7 @@ class TestCheckTestFileVersion:
             test_dir / "qod.feature",
             "Feature: QoD API tests",
         )
-        ctx = _make_context("qod", version="1.0.0")
+        ctx = _make_context("qod", branch_type="main")
         findings = check_test_file_version(tmp_path, ctx)
         assert len(findings) == 1
         assert "no version" in findings[0]["message"]
@@ -195,7 +255,7 @@ class TestCheckTestFileVersion:
     def test_empty_file(self, tmp_path: Path):
         test_dir = _make_test_dir(tmp_path)
         (test_dir / "qod.feature").write_text("")
-        ctx = _make_context("qod", version="1.0.0")
+        ctx = _make_context("qod", branch_type="main")
         findings = check_test_file_version(tmp_path, ctx)
         assert len(findings) == 1
         assert "no version" in findings[0]["message"]
@@ -209,7 +269,7 @@ class TestCheckTestFileVersion:
         test_dir = _make_test_dir(tmp_path)
         self._write_feature(
             test_dir / "other-api.feature",
-            "Feature: CAMARA Other API, v1 - Operation foo",
+            "Feature: CAMARA Other API, vwip - Operation foo",
         )
         ctx = _make_context("qod")
         assert check_test_file_version(tmp_path, ctx) == []
@@ -218,9 +278,9 @@ class TestCheckTestFileVersion:
         test_dir = _make_test_dir(tmp_path)
         self._write_feature(
             test_dir / "qod-createSession.feature",
-            "Feature: CAMARA QoD API, v1 - Operation createSession",
+            "Feature: CAMARA QoD API, vwip - Operation createSession",
         )
-        ctx = _make_context("qod", version="1.0.0")
+        ctx = _make_context("qod", branch_type="main")
         assert check_test_file_version(tmp_path, ctx) == []
 
     def test_feature_line_without_operation(self, tmp_path: Path):
@@ -228,13 +288,13 @@ class TestCheckTestFileVersion:
         test_dir = _make_test_dir(tmp_path)
         self._write_feature(
             test_dir / "qod.feature",
-            "Feature: CAMARA QoD API, v1",
+            "Feature: CAMARA QoD API, vwip",
         )
-        ctx = _make_context("qod", version="1.0.0")
+        ctx = _make_context("qod", branch_type="main")
         assert check_test_file_version(tmp_path, ctx) == []
 
     def test_multiple_files_mixed(self, tmp_path: Path):
-        """Two files: one matching, one mismatched."""
+        """Two files on release: one matching, one mismatched."""
         test_dir = _make_test_dir(tmp_path)
         self._write_feature(
             test_dir / "qod-createSession.feature",
@@ -244,7 +304,7 @@ class TestCheckTestFileVersion:
             test_dir / "qod-deleteSession.feature",
             "Feature: CAMARA QoD API, v2 - Operation deleteSession",
         )
-        ctx = _make_context("qod", version="1.0.0")
+        ctx = _make_context("qod", version="1.0.0", branch_type="release")
         findings = check_test_file_version(tmp_path, ctx)
         assert len(findings) == 1
         assert "deleteSession" in findings[0]["path"]
