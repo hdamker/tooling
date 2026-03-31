@@ -12,8 +12,7 @@ from typing import List, Optional
 
 from validation.context import ValidationContext
 
-from ._types import load_yaml_safe, make_finding
-from .version_checks import build_version_segment
+from ._types import make_finding
 
 _TEST_DIR = "code/Test_definitions"
 
@@ -108,28 +107,30 @@ def check_test_files_exist(
 
 
 # Regex to extract version from CAMARA Feature line.
-# Matches ", v{segment}" where segment runs until whitespace or " -".
+# Matches ", v{segment}" where segment runs until " - " or end of line.
+# On main: "vwip".  On release: "v2.2.0-alpha.5" (full semver with v).
 # Examples:
-#   "Feature: CAMARA Quality On Demand API, vwip - Operation deleteSession"  → "vwip"
-#   "Feature: CAMARA QoD API, v0.2alpha2"                                    → "v0.2alpha2"
-_FEATURE_VERSION_RE = re.compile(r",\s*v([^\s-]+)")
+#   "Feature: CAMARA QoD API, vwip - Operation deleteSession"       → "vwip"
+#   "Feature: CAMARA QoD API, v2.2.0-alpha.5 - Operation create"    → "v2.2.0-alpha.5"
+#   "Feature: CAMARA QoD API, v1.0.0"                               → "v1.0.0"
+_FEATURE_VERSION_RE = re.compile(r",\s*(v\S+?)(?:\s+-\s| *$)")
 
 
 def _extract_feature_version(file_path: Path) -> Optional[str]:
     """Read the first line and extract the version segment.
 
-    Returns the version segment (e.g. ``"vwip"``, ``"v1"``) or ``None``
-    if no version could be parsed from the Feature line.
+    Returns the version string (e.g. ``"vwip"``, ``"v2.2.0-alpha.5"``)
+    or ``None`` if no version could be parsed from the Feature line.
     """
     try:
         with open(file_path, encoding="utf-8") as fh:
-            first_line = fh.readline()
+            first_line = fh.readline().rstrip()
     except (OSError, UnicodeDecodeError):
         return None
 
     m = _FEATURE_VERSION_RE.search(first_line)
     if m:
-        return f"v{m.group(1)}"
+        return m.group(1)
     return None
 
 
@@ -160,9 +161,10 @@ def check_test_file_version(
     if context.branch_type in ("main", "maintenance"):
         expected_segment = "vwip"
     elif context.branch_type == "release":
-        expected_segment = build_version_segment(api.target_api_version)
-        if expected_segment is None:
-            return []
+        # Snapshot transformer T1b produces "v{api_version}" in Feature
+        # lines.  api.target_api_version holds the full calculated
+        # version (incl. pre-release extension) from release-metadata.
+        expected_segment = f"v{api.target_api_version}"
     else:
         # Feature branches: no constraint.
         return []

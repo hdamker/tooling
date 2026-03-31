@@ -49,14 +49,14 @@ transformations:
     replacement: "/{url_version}"
 
   # T1b: Test definition API version in Feature line
-  # Replaces "vwip" with full api_version (e.g., "1.1.0") in Feature declarations
+  # Replaces "vwip" with "v{api_version}" (e.g., "v1.1.0") in Feature declarations
   # Handles variations: "CAMARA/Camara", "Operation/Operation:", comments before Feature
   - name: test_def_api_version
     description: Replace vwip in test definition Feature line
     type: regex
     file_pattern: "code/Test_definitions/*.feature"
     pattern: "(Feature: [^,]+, )vwip"
-    replacement: "\\g<1>{api_version}"
+    replacement: "\\g<1>v{api_version}"
 
   # T3: Commonalities reference in x-camara-commonalities
   - name: commonalities_ref
