@@ -192,7 +192,7 @@ jobs:
           && github.event_name == 'pull_request'
           && vars.VALIDATION_APP_ID != ''
         continue-on-error: true
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ vars.VALIDATION_APP_ID }}
           private-key: ${{ secrets.VALIDATION_APP_PRIVATE_KEY }}
