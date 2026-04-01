@@ -180,6 +180,12 @@ gap_rules:
     priority: low
     notes: "Hint level. Standard values: default 'http://localhost:9091', description 'API root, defined by the service provider, e.g. `api.example.com` or `api.example.com/somepath`'"
 
+  - audit_id: NEW-003
+    description: "Orphan API definitions: YAML files in code/API_definitions/ not listed in release-plan.yaml"
+    target_engine: python
+    priority: low
+    notes: "Compare filenames against release-plan.yaml APIs. Also detect missing files (declared but absent)."
+
 # ---------------------------------------------------------------------------
 # Fixes needed — implemented rules with incorrect behavior
 # ---------------------------------------------------------------------------
