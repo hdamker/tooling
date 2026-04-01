@@ -29,6 +29,7 @@ def _make_context(
         target_release_type=None,
         commonalities_release=None,
         icm_release=None,
+        base_ref=None,
         is_release_review_pr=False,
         release_plan_changed=None,
         pr_number=None,
@@ -162,19 +163,26 @@ class TestAnnotationContent:
         assert ann["start_line"] == 42
         assert ann["end_line"] == 42
 
-    def test_title_uses_rule_id(self):
-        findings = [_make_finding(rule_id="S-042")]
+    def test_title_uses_message(self):
+        findings = [_make_finding(rule_id="S-042", message="Bad pattern")]
         payload = generate_check_run_payload(
             _make_result(findings), _make_context(),
         )
-        assert payload.annotations[0]["title"] == "S-042"
+        assert payload.annotations[0]["title"] == "Bad pattern"
 
-    def test_title_falls_back_to_engine_rule(self):
-        findings = [_make_finding(engine_rule="my-check")]
+    def test_rule_id_in_message_body(self):
+        findings = [_make_finding(rule_id="S-042", message="Bad pattern")]
         payload = generate_check_run_payload(
             _make_result(findings), _make_context(),
         )
-        assert payload.annotations[0]["title"] == "my-check"
+        assert "[S-042] Bad pattern" in payload.annotations[0]["message"]
+
+    def test_rule_id_fallback_in_message_body(self):
+        findings = [_make_finding(engine_rule="my-check", message="Bad pattern")]
+        payload = generate_check_run_payload(
+            _make_result(findings), _make_context(),
+        )
+        assert "[my-check] Bad pattern" in payload.annotations[0]["message"]
 
     def test_message_content(self):
         findings = [_make_finding(message="Bad pattern")]

@@ -83,10 +83,11 @@ def _build_command(finding: dict) -> str:
     line = finding.get("line", 1)
     col = finding.get("column")
 
-    title = format_rule_label(finding)
+    rule_label = format_rule_label(finding)
 
-    # Message: main message + optional hint
-    message = finding.get("message", "")
+    # Title: human-readable message.  Rule ID in message body.
+    title = finding.get("message", "")
+    message = f"[{rule_label}] {title}"
     hint = finding.get("hint")
     if hint:
         message = f"{message} | Hint: {hint}"

@@ -110,6 +110,7 @@ class ValidationContext:
     icm_release: Optional[str]
 
     # PR-specific (None / False for non-PR triggers)
+    base_ref: Optional[str]
     is_release_review_pr: bool
     release_plan_changed: Optional[bool]
     pr_number: Optional[int]
@@ -337,6 +338,7 @@ def build_validation_context(
         target_release_type=target_release_type,
         commonalities_release=commonalities_release,
         icm_release=icm_release,
+        base_ref=base_ref or None,
         is_release_review_pr=is_review,
         release_plan_changed=release_plan_changed,
         pr_number=pr_number,

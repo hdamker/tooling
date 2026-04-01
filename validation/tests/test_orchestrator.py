@@ -94,6 +94,7 @@ def _make_context(**overrides):
         "target_release_type": None,
         "commonalities_release": None,
         "icm_release": None,
+        "base_ref": None,
         "is_release_review_pr": False,
         "release_plan_changed": False,
         "pr_number": 42,

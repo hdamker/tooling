@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import subprocess
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from validation.context import ValidationContext
 
@@ -22,15 +22,42 @@ _ALLOWED_PATHS = frozenset({"CHANGELOG.md", "README.md"})
 _ALLOWED_PREFIXES = ("CHANGELOG/",)
 
 
-def _get_changed_files(repo_path: Path) -> List[str]:
+def _get_changed_files(
+    repo_path: Path, base_ref: Optional[str] = None
+) -> List[str]:
     """Get files changed in the current PR via git diff.
 
-    Compares HEAD against the merge-base with the target branch.
-    Falls back to diffing HEAD~1 if git operations fail.
+    Uses three-dot diff against ``origin/{base_ref}`` when available
+    (merge-base comparison — works regardless of checkout merge strategy).
+    Falls back to ``HEAD~1`` when base_ref is not provided.
     """
+    # Primary: merge-base diff against the target branch
+    if base_ref:
+        try:
+            result = subprocess.run(
+                [
+                    "git", "diff", "--name-only", "--diff-filter=ACMR",
+                    f"origin/{base_ref}...HEAD",
+                ],
+                capture_output=True,
+                text=True,
+                cwd=str(repo_path),
+                timeout=30,
+            )
+            if result.returncode == 0:
+                return [
+                    f.strip() for f in result.stdout.strip().split("\n")
+                    if f.strip()
+                ]
+            logger.warning(
+                "Merge-base diff failed (rc=%d), falling back to HEAD~1",
+                result.returncode,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+            logger.warning("Merge-base diff error: %s, falling back to HEAD~1", exc)
+
+    # Fallback: diff against first parent (assumes merge commit)
     try:
-        # In a PR context, the diff against origin/base shows changed files.
-        # Use --diff-filter=ACMR to only show added/copied/modified/renamed.
         result = subprocess.run(
             ["git", "diff", "--name-only", "--diff-filter=ACMR", "HEAD~1"],
             capture_output=True,
@@ -73,7 +100,7 @@ def check_release_review_file_restriction(
     if not context.is_release_review_pr:
         return []
 
-    changed_files = _get_changed_files(repo_path)
+    changed_files = _get_changed_files(repo_path, context.base_ref)
     if not changed_files:
         return []
 

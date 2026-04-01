@@ -19,7 +19,10 @@ from validation.engines.python_checks.release_review_checks import (
 # ---------------------------------------------------------------------------
 
 
-def _make_context(is_release_review: bool = True) -> ValidationContext:
+def _make_context(
+    is_release_review: bool = True,
+    base_ref: str = "release-snapshot/r1.0",
+) -> ValidationContext:
     return ValidationContext(
         repository="TestRepo",
         branch_type="release",
@@ -29,6 +32,7 @@ def _make_context(is_release_review: bool = True) -> ValidationContext:
         target_release_type="public-release",
         commonalities_release=None,
         icm_release=None,
+        base_ref=base_ref,
         is_release_review_pr=is_release_review,
         release_plan_changed=None,
         pr_number=42,
