@@ -15,7 +15,7 @@ generated: 2026-03-26
 
 summary:
   total_implemented: 96
-  total_gap: 21
+  total_gap: 22
   total_manual: 25
   total_pending: 17
   total_tested: 0
@@ -151,6 +151,12 @@ gap_rules:
     description: README.md placeholder must be removed from API_definitions/ when spec files are present
     target_engine: python
     priority: medium
+
+  - audit_id: NEW-002
+    description: "apiRoot variable: default and description MUST match Design Guide values"
+    target_engine: spectral
+    priority: low
+    notes: "Hint level. Standard values: default 'http://localhost:9091', description 'API root, defined by the service provider, e.g. `api.example.com` or `api.example.com/somepath`'"
 
 # ---------------------------------------------------------------------------
 # Fixes needed — implemented rules with incorrect behavior
