@@ -103,6 +103,76 @@ def count_findings_by_engine(
 
 
 # ---------------------------------------------------------------------------
+# Deduplication
+# ---------------------------------------------------------------------------
+
+# Cap on the number of messages to concatenate when merging duplicates.
+_MAX_MERGED_MESSAGES = 3
+
+
+def deduplicate_findings(findings: List[dict]) -> List[dict]:
+    """Merge findings that share the same ``(path, line, engine_rule)`` key.
+
+    Spectral's ``oas3-schema`` (and similar meta-rules) can fire multiple
+    times on the same source line with different messages.  Merging them
+    reduces annotation noise without losing information.
+
+    For each group of duplicates:
+    - The highest severity (error > warn > hint) is kept.
+    - Distinct messages are concatenated with ``" | "``, capped at
+      :data:`_MAX_MERGED_MESSAGES` (extras noted as ``"... and N more"``).
+    - All other fields come from the first finding in the group.
+
+    Order of first occurrence is preserved.
+    """
+    groups: dict[tuple, List[dict]] = {}
+    order: list[tuple] = []
+
+    for f in findings:
+        key = (f.get("path", ""), f.get("line", 0), f.get("engine_rule", ""))
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(f)
+
+    result: List[dict] = []
+    for key in order:
+        group = groups[key]
+        if len(group) == 1:
+            result.append(group[0])
+            continue
+
+        merged = dict(group[0])
+
+        # Highest severity wins.
+        best_priority = min(
+            _LEVEL_PRIORITY.get(f.get("level", ""), 99) for f in group
+        )
+        for level_name, priority in _LEVEL_PRIORITY.items():
+            if priority == best_priority:
+                merged["level"] = level_name
+                break
+
+        # Concatenate distinct messages.
+        seen_messages: list[str] = []
+        for f in group:
+            msg = f.get("message", "")
+            if msg and msg not in seen_messages:
+                seen_messages.append(msg)
+
+        if len(seen_messages) <= _MAX_MERGED_MESSAGES:
+            merged["message"] = " | ".join(seen_messages)
+        else:
+            shown = " | ".join(seen_messages[:_MAX_MERGED_MESSAGES])
+            extra = len(seen_messages) - _MAX_MERGED_MESSAGES
+            merged["message"] = f"{shown} | ... and {extra} more"
+
+        result.append(merged)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Sorting
 # ---------------------------------------------------------------------------
 

@@ -178,12 +178,14 @@ class TestSelectRulesetPath:
         result = select_ruleset_path("r3.4", tmp_path)
         assert result.name == ".spectral-r3.4.yaml"
 
-    def test_none_defaults_to_latest(self, tmp_path):
-        (tmp_path / ".spectral-r4.yaml").touch()
+    def test_none_defaults_to_oldest(self, tmp_path):
+        """No release-plan.yaml → conservative default (r3.4)."""
+        (tmp_path / ".spectral-r3.4.yaml").touch()
         result = select_ruleset_path(None, tmp_path)
-        assert result.name == ".spectral-r4.yaml"
+        assert result.name == ".spectral-r3.4.yaml"
 
     def test_unrecognised_version_defaults_to_latest(self, tmp_path):
+        """Unknown version (likely newer) → latest available (r4)."""
         (tmp_path / ".spectral-r4.yaml").touch()
         result = select_ruleset_path("r99.0", tmp_path)
         assert result.name == ".spectral-r4.yaml"

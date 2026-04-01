@@ -21,7 +21,12 @@ from typing import List
 from validation.context import ValidationContext
 from validation.postfilter.engine import PostFilterResult
 
-from .formatting import count_findings, format_rule_label, sort_findings_by_priority
+from .formatting import (
+    count_findings,
+    deduplicate_findings,
+    format_rule_label,
+    sort_findings_by_priority,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +165,8 @@ def generate_check_run_payload(
         f"Trigger: {context.trigger_type}"
     )
 
-    sorted_findings = sort_findings_by_priority(findings)
+    deduped = deduplicate_findings(findings)
+    sorted_findings = sort_findings_by_priority(deduped)
     annotations = [_build_annotation(f) for f in sorted_findings]
 
     logger.info(
