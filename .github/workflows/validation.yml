@@ -378,6 +378,12 @@ jobs:
           for spec in code/API_definitions/*.yaml; do
             [ -f "$spec" ] || continue
             name=$(basename "$spec")
+            # Skip specs with no external $ref — bundling would only
+            # normalize formatting, producing a misleading diff artifact.
+            if ! grep -qE '\$ref:\s*["'"'"'][^#]' "$spec"; then
+              echo "Skipped (no external \$ref): $name"
+              continue
+            fi
             if err=$(redocly bundle "$spec" -o "validation-output/bundled/$name" 2>&1); then
               if ! diff -q "$spec" "validation-output/bundled/$name" > /dev/null 2>&1; then
                 BUNDLED=$((BUNDLED + 1))
