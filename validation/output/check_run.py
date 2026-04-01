@@ -81,9 +81,12 @@ def _build_annotation(finding: dict) -> dict:
 
     path = finding.get("path", "")
     line = finding.get("line", 1)
-    title = format_rule_label(finding)
+    rule_label = format_rule_label(finding)
 
-    message = finding.get("message", "")
+    # Title: human-readable message (rendered as bold heading in Check Run).
+    # Rule ID goes into the message body to reduce visual weight.
+    title = finding.get("message", "")
+    message = f"[{rule_label}] {title}"
     hint = finding.get("hint")
     if hint:
         message = f"{message}\n\nHint: {hint}"

@@ -212,6 +212,7 @@ class TestValidationContextToDict:
             target_release_type="pre-release-rc",
             commonalities_release="r4.1",
             icm_release=None,
+            base_ref="main",
             is_release_review_pr=False,
             release_plan_changed=True,
             pr_number=42,
@@ -234,8 +235,8 @@ class TestValidationContextToDict:
         expected_keys = {
             "repository", "branch_type", "trigger_type", "profile", "stage",
             "target_release_type", "commonalities_release", "icm_release",
-            "is_release_review_pr", "release_plan_changed", "pr_number",
-            "apis", "workflow_run_url", "tooling_ref",
+            "base_ref", "is_release_review_pr", "release_plan_changed",
+            "pr_number", "apis", "workflow_run_url", "tooling_ref",
         }
         assert set(d.keys()) == expected_keys
 

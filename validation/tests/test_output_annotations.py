@@ -114,15 +114,20 @@ class TestBuildCommand:
         cmd = _build_command(f)
         assert "col=" not in cmd
 
-    def test_title_uses_rule_id(self):
-        f = _make_finding(rule_id="S-042", engine_rule="some-spectral-rule")
+    def test_title_uses_message(self):
+        f = _make_finding(rule_id="S-042", message="Bad path")
         cmd = _build_command(f)
-        assert "title=S-042" in cmd
+        assert "title=Bad path" in cmd
 
-    def test_title_falls_back_to_engine_rule(self):
-        f = _make_finding(engine_rule="camara-path-casing")
+    def test_rule_id_in_message_body(self):
+        f = _make_finding(rule_id="S-042", message="Bad path")
         cmd = _build_command(f)
-        assert "title=camara-path-casing" in cmd
+        assert "[S-042] Bad path" in cmd
+
+    def test_rule_id_fallback_in_message_body(self):
+        f = _make_finding(engine_rule="camara-path-casing", message="Bad path")
+        cmd = _build_command(f)
+        assert "[camara-path-casing] Bad path" in cmd
 
     def test_hint_appended(self):
         f = _make_finding(message="Bad path", hint="Use kebab-case")

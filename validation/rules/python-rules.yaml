@@ -32,10 +32,6 @@
   engine_rule: check-server-url-version
   conditional_level:
     default: error
-    overrides:
-      - condition:
-          branch_types: [main, feature]
-        level: warn
 
 # P-005: check-server-url-api-name
 - id: P-005

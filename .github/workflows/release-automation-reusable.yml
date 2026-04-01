@@ -857,7 +857,7 @@ jobs:
           echo "success=false" >> "$GITHUB_OUTPUT"
           SUMMARY="${{ steps.validation.outputs.summary }}"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo "error_message=Pre-snapshot validation failed: ${SUMMARY}. See ${RUN_URL}" >> "$GITHUB_OUTPUT"
+          echo "error_message=Pre-snapshot validation failed: ${SUMMARY}. [View workflow logs](${RUN_URL})" >> "$GITHUB_OUTPUT"
           exit 1
 
       # ── Snapshot creation ─────────────────────────────────────────
