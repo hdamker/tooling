@@ -319,13 +319,12 @@ jobs:
               }
             }
 
-      # ── Step 11: Emit annotations and status (no write access) ─
+      # ── Step 11: Emit annotations (no write access) ────────────
       #
       # Fallback for fork PRs without app token: workflow command
-      # annotations (limited to ~10 per severity in PR view) and
-      # commit status via GITHUB_TOKEN (may fail for fork PRs with
-      # read-only token — fails gracefully).
-      - name: Emit annotations and status
+      # annotations (limited to ~10 per severity in PR view).
+      # The workflow exit status is the only pass/fail signal.
+      - name: Emit annotations
         if: >-
           always() && steps.validation.outcome == 'success'
           && github.event_name == 'pull_request'
@@ -352,25 +351,6 @@ jobs:
               '> — PR comment skipped, showing findings in workflow summary and annotations.',
             ].join('\n');
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, notice);
-
-            // ── Commit status (best effort) ───────────────────────
-            const statusPath = 'validation-output/commit-status.json';
-            if (fs.existsSync(statusPath)) {
-              try {
-                const payload = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
-                const sha = '${{ github.event.pull_request.head.sha || github.sha }}';
-                await github.rest.repos.createCommitStatus({
-                  ...context.repo, sha,
-                  state: payload.state,
-                  description: payload.description,
-                  context: payload.context,
-                  target_url: payload.target_url,
-                });
-                core.info(`Commit status: ${payload.state}`);
-              } catch (e) {
-                core.info(`Commit status skipped: ${e.message}`);
-              }
-            }
 
       # ── Step 14: Upload diagnostics ────────────────────────────────
       - name: Upload diagnostics
