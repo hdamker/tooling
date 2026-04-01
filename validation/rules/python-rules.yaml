@@ -94,12 +94,12 @@
   conditional_level:
     default: warn
 
-# P-011: check-license-commonalities-consistency
+# P-011: check-license-commonalities-consistency (muted — likely to be retired)
 - id: P-011
   engine: python
   engine_rule: check-license-commonalities-consistency
   conditional_level:
-    default: warn
+    default: muted
 
 # P-012: check-release-review-file-restriction
 - id: P-012
