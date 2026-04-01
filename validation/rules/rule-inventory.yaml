@@ -177,7 +177,7 @@ pending_rules:
   - source: tooling#95
     description: OWASP API security rules (17 rules)
     target_engine: spectral
-    notes: Parked per DEC-013. Introduce with v1 + bundling.
+    notes: Parked. Introduce with v1 + bundling.
     estimated_count: 17
 
 # ---------------------------------------------------------------------------

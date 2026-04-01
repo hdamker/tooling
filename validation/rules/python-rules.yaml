@@ -3,7 +3,7 @@
 # branch type, API maturity, and release context; applicability conditions
 # for release-review and release-plan-changed contexts.
 # Engine messages from make_finding() are preserved by default (design doc 8.4.1).
-# message_override and hint can be added per DEC-018 when engine messages are insufficient.
+# message_override and hint can be added when engine messages are insufficient.
 
 # P-001: check-filename-kebab-case
 - id: P-001

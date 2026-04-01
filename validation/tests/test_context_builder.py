@@ -74,7 +74,7 @@ class TestDeriveTriggerType:
 
 
 class TestSelectProfile:
-    """Profile selection tests per DEC-023: config-driven profiles."""
+    """Profile selection tests: config-driven profiles."""
 
     def test_dispatch_gets_advisory(self):
         """Dispatch always returns advisory regardless of config profiles."""

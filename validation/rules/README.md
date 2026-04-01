@@ -7,9 +7,9 @@ Schema: [../schemas/rule-metadata-schema.yaml](../schemas/rule-metadata-schema.y
 
 ## Files
 
-- `spectral-rules.yaml` — Spectral rule metadata (WP-06.14)
-- `gherkin-rules.yaml` — gherkin-lint rule metadata (WP-06.14)
-- `python-rules.yaml` — Python check rule metadata (WP-06.14)
+- `spectral-rules.yaml` — Spectral rule metadata
+- `gherkin-rules.yaml` — gherkin-lint rule metadata
+- `python-rules.yaml` — Python check rule metadata
 
 ## ID Assignment
 

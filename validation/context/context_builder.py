@@ -203,7 +203,7 @@ def select_profile(
 
     If *profile_override* is a valid profile name it takes precedence.
 
-    Profile selection (DEC-023):
+    Profile selection:
         dispatch / local              → advisory (hardcoded)
         release-automation            → release_profile from config
         pr + release + review         → release_profile from config

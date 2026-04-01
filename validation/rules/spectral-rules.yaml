@@ -2,7 +2,7 @@
 # S-001 through S-199: reserved for CAMARA custom rules
 # S-200 through S-xxx: Built-in OAS rules
 # All entries are identity-only initially, can be extended if needed.
-# Engine messages are preserved by default; message_override and hint can be added per DEC-018.
+# Engine messages are preserved by default; message_override and hint can be added as needed.
 
 # ===== CAMARA custom rules (S-001+) =====
 
