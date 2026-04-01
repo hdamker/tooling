@@ -15,7 +15,7 @@ from typing import List
 
 from validation.postfilter.engine import PostFilterResult
 
-from .formatting import format_rule_label, sort_findings_by_priority
+from .formatting import deduplicate_findings, format_rule_label, sort_findings_by_priority
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,8 @@ def generate_annotations(
     Returns:
         :class:`AnnotationResult` with workflow command strings.
     """
-    sorted_findings = sort_findings_by_priority(post_filter_result.findings)
+    deduped = deduplicate_findings(post_filter_result.findings)
+    sorted_findings = sort_findings_by_priority(deduped)
     total = len(sorted_findings)
 
     selected = sorted_findings[:ANNOTATION_LIMIT]

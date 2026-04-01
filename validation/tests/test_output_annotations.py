@@ -162,9 +162,9 @@ class TestGenerateAnnotations:
 
     def test_priority_ordering(self):
         findings = [
-            _make_finding(level="hint", path="a.yaml", line=1),
-            _make_finding(level="error", path="a.yaml", line=1),
-            _make_finding(level="warn", path="a.yaml", line=1),
+            _make_finding(level="hint", path="a.yaml", line=1, engine_rule="rule-a"),
+            _make_finding(level="error", path="a.yaml", line=1, engine_rule="rule-b"),
+            _make_finding(level="warn", path="a.yaml", line=1, engine_rule="rule-c"),
         ]
         result = generate_annotations(_make_result(findings))
         assert result.commands[0].startswith("::error ")
@@ -181,8 +181,8 @@ class TestGenerateAnnotations:
         assert result.truncated
 
     def test_limit_prioritises_errors(self):
-        errors = [_make_finding(level="error", line=i) for i in range(30)]
-        warnings = [_make_finding(level="warn", line=i) for i in range(30)]
+        errors = [_make_finding(level="error", line=i, engine_rule="err-rule") for i in range(30)]
+        warnings = [_make_finding(level="warn", line=i, engine_rule="warn-rule") for i in range(30)]
         findings = warnings + errors  # Interleave — warnings first in input
         result = generate_annotations(_make_result(findings))
         # All 30 errors should be in the first 30 commands

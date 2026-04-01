@@ -29,6 +29,8 @@ _RULES_DIR = _REPO_ROOT / "validation" / "rules"
 _LINTING_DIR = _REPO_ROOT / "linting" / "config"
 
 _SPECTRAL_CONFIG = _LINTING_DIR / ".spectral.yaml"
+_SPECTRAL_R34_CONFIG = _LINTING_DIR / ".spectral-r3.4.yaml"
+_SPECTRAL_R4_CONFIG = _LINTING_DIR / ".spectral-r4.yaml"
 _GHERKIN_CONFIG = _LINTING_DIR / ".gherkin-lintrc"
 _YAMLLINT_CONFIG = _LINTING_DIR / ".yamllint.yaml"
 
@@ -153,11 +155,12 @@ class TestStructuralIntegrity:
 class TestEngineCoverage:
     """Verify rule metadata covers all enabled engine rules."""
 
-    def _get_spectral_enabled_rules(self) -> set[str]:
-        """Extract enabled rules from .spectral.yaml."""
-        if not _SPECTRAL_CONFIG.is_file():
-            pytest.skip("Spectral config not found")
-        data = yaml.safe_load(_SPECTRAL_CONFIG.read_text(encoding="utf-8"))
+    @staticmethod
+    def _get_spectral_enabled_rules_from(config_path: Path) -> set[str]:
+        """Extract enabled rules from a Spectral config file."""
+        if not config_path.is_file():
+            pytest.skip(f"Spectral config not found: {config_path.name}")
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         rules = data.get("rules", {})
         enabled = set()
         for name, value in rules.items():
@@ -170,6 +173,10 @@ class TestEngineCoverage:
                 pass
             enabled.add(name)
         return enabled
+
+    def _get_spectral_enabled_rules(self) -> set[str]:
+        """Extract enabled rules from the fallback .spectral.yaml."""
+        return self._get_spectral_enabled_rules_from(_SPECTRAL_CONFIG)
 
     def _get_gherkin_enabled_rules(self) -> set[str]:
         """Extract enabled rules from .gherkin-lintrc."""
@@ -219,12 +226,30 @@ class TestEngineCoverage:
         return {c.name for c in CHECKS}
 
     def test_spectral_coverage(self, rule_index):
-        """Every enabled Spectral rule has a metadata entry."""
+        """Every enabled Spectral rule in the fallback ruleset has metadata."""
         enabled = self._get_spectral_enabled_rules()
         indexed = {er for (eng, er) in rule_index if eng == "spectral"}
         missing = enabled - indexed
         assert not missing, (
             f"Spectral rules without metadata: {sorted(missing)}"
+        )
+
+    def test_spectral_r34_coverage(self, rule_index):
+        """Every enabled Spectral rule in .spectral-r3.4.yaml has metadata."""
+        enabled = self._get_spectral_enabled_rules_from(_SPECTRAL_R34_CONFIG)
+        indexed = {er for (eng, er) in rule_index if eng == "spectral"}
+        missing = enabled - indexed
+        assert not missing, (
+            f"Spectral r3.4 rules without metadata: {sorted(missing)}"
+        )
+
+    def test_spectral_r4_coverage(self, rule_index):
+        """Every enabled Spectral rule in .spectral-r4.yaml has metadata."""
+        enabled = self._get_spectral_enabled_rules_from(_SPECTRAL_R4_CONFIG)
+        indexed = {er for (eng, er) in rule_index if eng == "spectral"}
+        missing = enabled - indexed
+        assert not missing, (
+            f"Spectral r4.x rules without metadata: {sorted(missing)}"
         )
 
     def test_gherkin_coverage(self, rule_index):

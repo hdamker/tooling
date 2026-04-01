@@ -18,6 +18,7 @@ summary:
   total_gap: 21
   total_manual: 25
   total_pending: 17
+  total_tested: 0
   by_engine:
     spectral: 46
     gherkin: 25
@@ -184,6 +185,18 @@ pending_rules:
 # Manual rules — require human judgment
 # ---------------------------------------------------------------------------
 # Source: private-dev-docs/validation-framework/reviews/testing-guidelines-audit.md
+
+# ---------------------------------------------------------------------------
+# Tested rules — verified via regression branches (Phase 1b)
+# ---------------------------------------------------------------------------
+# Updated as regression branches verify rules.
+# Format: rule_id: regression_branch (or list of branches)
+
+tested_rules: {}
+
+# ---------------------------------------------------------------------------
+# Manual rules — require human judgment
+# ---------------------------------------------------------------------------
 
 manual_rules:
   count: 25

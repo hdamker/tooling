@@ -7,6 +7,7 @@ from validation.output.formatting import (
     FindingCounts,
     count_findings,
     count_findings_by_api,
+    deduplicate_findings,
     format_finding_location,
     format_rule_label,
     sort_findings_by_priority,
@@ -43,6 +44,115 @@ def _make_finding(
     if column is not None:
         f["column"] = column
     return f
+
+
+# ---------------------------------------------------------------------------
+# deduplicate_findings
+# ---------------------------------------------------------------------------
+
+
+class TestDeduplicateFindings:
+    def test_no_duplicates_passthrough(self):
+        """Non-duplicate findings pass through unchanged."""
+        findings = [
+            _make_finding(path="a.yaml", line=10, engine_rule="rule-a"),
+            _make_finding(path="a.yaml", line=20, engine_rule="rule-a"),
+            _make_finding(path="a.yaml", line=10, engine_rule="rule-b"),
+        ]
+        result = deduplicate_findings(findings)
+        assert len(result) == 3
+
+    def test_same_rule_same_line_merged(self):
+        """Findings with same (path, line, engine_rule) are merged."""
+        f1 = _make_finding(path="a.yaml", line=10, engine_rule="oas3-schema")
+        f1["message"] = "type is not valid"
+        f2 = _make_finding(path="a.yaml", line=10, engine_rule="oas3-schema")
+        f2["message"] = "format is not valid"
+
+        result = deduplicate_findings([f1, f2])
+        assert len(result) == 1
+        assert "type is not valid" in result[0]["message"]
+        assert "format is not valid" in result[0]["message"]
+        assert " | " in result[0]["message"]
+
+    def test_different_lines_not_merged(self):
+        """Same rule on different lines stays separate."""
+        f1 = _make_finding(path="a.yaml", line=10, engine_rule="oas3-schema")
+        f1["message"] = "msg1"
+        f2 = _make_finding(path="a.yaml", line=20, engine_rule="oas3-schema")
+        f2["message"] = "msg2"
+
+        result = deduplicate_findings([f1, f2])
+        assert len(result) == 2
+
+    def test_different_rules_not_merged(self):
+        """Different rules on same line stay separate."""
+        f1 = _make_finding(path="a.yaml", line=10, engine_rule="rule-a")
+        f2 = _make_finding(path="a.yaml", line=10, engine_rule="rule-b")
+
+        result = deduplicate_findings([f1, f2])
+        assert len(result) == 2
+
+    def test_severity_promotion(self):
+        """Merged group gets the highest severity."""
+        f1 = _make_finding(
+            path="a.yaml", line=10, engine_rule="oas3-schema", level="hint",
+        )
+        f1["message"] = "msg1"
+        f2 = _make_finding(
+            path="a.yaml", line=10, engine_rule="oas3-schema", level="error",
+        )
+        f2["message"] = "msg2"
+
+        result = deduplicate_findings([f1, f2])
+        assert len(result) == 1
+        assert result[0]["level"] == "error"
+
+    def test_duplicate_messages_not_repeated(self):
+        """Identical messages within a group appear only once."""
+        f1 = _make_finding(path="a.yaml", line=10, engine_rule="oas3-schema")
+        f1["message"] = "same message"
+        f2 = _make_finding(path="a.yaml", line=10, engine_rule="oas3-schema")
+        f2["message"] = "same message"
+
+        result = deduplicate_findings([f1, f2])
+        assert len(result) == 1
+        assert result[0]["message"] == "same message"
+
+    def test_message_cap_at_three(self):
+        """More than 3 distinct messages are truncated."""
+        findings = []
+        for i in range(5):
+            f = _make_finding(path="a.yaml", line=10, engine_rule="oas3-schema")
+            f["message"] = f"msg{i}"
+            findings.append(f)
+
+        result = deduplicate_findings(findings)
+        assert len(result) == 1
+        assert "... and 2 more" in result[0]["message"]
+        assert "msg0" in result[0]["message"]
+        assert "msg1" in result[0]["message"]
+        assert "msg2" in result[0]["message"]
+
+    def test_empty_list(self):
+        assert deduplicate_findings([]) == []
+
+    def test_single_finding(self):
+        f = _make_finding()
+        result = deduplicate_findings([f])
+        assert result == [f]
+
+    def test_order_preserved(self):
+        """First occurrence order is preserved."""
+        f1 = _make_finding(path="b.yaml", line=5, engine_rule="rule-x")
+        f2 = _make_finding(path="a.yaml", line=1, engine_rule="rule-y")
+        f3 = _make_finding(path="b.yaml", line=5, engine_rule="rule-x")
+        f3["message"] = "extra msg"
+
+        result = deduplicate_findings([f1, f2, f3])
+        assert len(result) == 2
+        assert result[0]["path"] == "b.yaml"  # first occurrence
+        assert result[1]["path"] == "a.yaml"
 
 
 # ---------------------------------------------------------------------------

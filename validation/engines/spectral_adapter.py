@@ -47,7 +47,13 @@ _VERSION_RULESET_MAP: dict[str, str] = {
     "r4": ".spectral-r4.yaml",
 }
 
-# Latest version line used when commonalities_release is absent.
+# When commonalities_release is absent (no release-plan.yaml), default to the
+# oldest supported version line — conservative choice for repos that haven't
+# declared a Commonalities dependency yet.
+_DEFAULT_VERSION_LINE = "r3"
+
+# When commonalities_release is present but unrecognised (likely a newer version
+# than what we support), default to the latest available version line.
 _LATEST_VERSION_LINE = "r4"
 
 # Sentinel rule name for adapter-level errors.
@@ -103,9 +109,13 @@ def select_ruleset_path(
     Resolution order:
     1. Map *commonalities_release* prefix to a version-specific filename
        (e.g. ``r4.1`` -> ``.spectral-r4.yaml``).
-    2. If *commonalities_release* is absent or unrecognised, default to the
-       latest version line (currently r4).
-    3. If the version-specific file does not exist on disk, fall back to
+    2. If *commonalities_release* is ``None`` (no release-plan.yaml),
+       default to the oldest supported version line (currently r3 —
+       conservative choice for repos without a Commonalities dependency).
+    3. If *commonalities_release* is present but unrecognised (likely
+       newer than supported), default to the latest version line
+       (currently r4).
+    4. If the version-specific file does not exist on disk, fall back to
        ``.spectral.yaml``.
 
     Args:
@@ -117,8 +127,12 @@ def select_ruleset_path(
         Absolute path to the selected ruleset file.
     """
     # Determine target version line.
-    version_line = _LATEST_VERSION_LINE
-    if commonalities_release:
+    if commonalities_release is None:
+        # No release-plan.yaml or no commonalities dependency declared.
+        version_line = _DEFAULT_VERSION_LINE
+    else:
+        # Start with latest; override if a known prefix matches.
+        version_line = _LATEST_VERSION_LINE
         for prefix in _VERSION_RULESET_MAP:
             if commonalities_release.startswith(prefix):
                 version_line = prefix
