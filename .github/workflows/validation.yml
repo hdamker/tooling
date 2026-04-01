@@ -118,13 +118,13 @@ jobs:
 
             // Tier 3: Hardcoded fallback tag
             // ┌──────────────────────────────────────────────────────────┐
-            // │ TESTING ONLY — replace before production deployment:     │
-            // │   repo: camaraproject/tooling    ref: v1-rc             │
+            // │ PRE-RC: branch ref — replace with v1-rc tag after tagging │
+            // │   repo: camaraproject/tooling  ref: validation-framework│
             // └──────────────────────────────────────────────────────────┘
-            core.setOutput('tooling_checkout_repo', 'hdamker/tooling');
+            core.setOutput('tooling_checkout_repo', 'camaraproject/tooling');
             core.setOutput('tooling_checkout_ref', 'validation-framework');
             core.setOutput('tooling_ref_source', 'fallback_tag');
-            core.info('Tooling ref: fallback (TESTING) hdamker/tooling@validation-framework');
+            core.info('Tooling ref: fallback camaraproject/tooling@validation-framework');
 
       # ── Step 3: Checkout tooling (sparse) ──────────────────────────
       - name: Checkout tooling
