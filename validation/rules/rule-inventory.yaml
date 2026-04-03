@@ -14,13 +14,13 @@ version: 1
 generated: 2026-03-26
 
 summary:
-  total_implemented: 96
+  total_implemented: 116
   total_gap: 25
   total_manual: 25
-  total_pending: 17
+  total_pending: 0
   total_tested: 0
   by_engine:
-    spectral: 46
+    spectral: 66
     gherkin: 25
     python: 12
     yamllint: 13
@@ -209,11 +209,7 @@ fixes:
 # Source: tooling#95 (OWASP Spectral rules)
 
 pending_rules:
-  - source: tooling#95
-    description: OWASP API security rules (17 rules)
-    target_engine: spectral
-    notes: Parked. Introduce with v1 + bundling.
-    estimated_count: 17
+  # OWASP rules (tooling#95) implemented in WS07 Phase 1b — see spectral-rules.yaml S-300..S-319
 
 # ---------------------------------------------------------------------------
 # Manual rules — require human judgment

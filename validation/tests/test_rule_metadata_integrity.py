@@ -78,7 +78,7 @@ class TestStructuralIntegrity:
         for r in all_rules:
             counts[r.engine] = counts.get(r.engine, 0) + 1
         assert counts["python"] == 13
-        assert counts["spectral"] == 46
+        assert counts["spectral"] == 66
         assert counts["gherkin"] == 25
         assert counts["yamllint"] == 13
 
@@ -306,8 +306,8 @@ class TestMetadataQuality:
         """
         with_hints = [r.id for r in all_rules if r.hint is not None]
         with_overrides = [r.id for r in all_rules if r.message_override is not None]
-        assert len(with_hints) == 0, (
-            f"Expected 0 explicit hints (update test if adding hints): "
+        assert len(with_hints) == 7, (
+            f"Expected 7 explicit hints (update test if adding hints): "
             f"{with_hints}"
         )
         assert len(with_overrides) == 0, (

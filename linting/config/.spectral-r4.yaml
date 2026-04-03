@@ -12,7 +12,12 @@
 # - 12.01.2026: camara-discriminator-use deprecated
 
 
-extends: "spectral:oas"
+# Note: @stoplight/spectral-owasp-ruleset is installed via validation/package.json.
+# Spectral resolves this package via NODE_PATH (set in shared-actions/run-validation/action.yml)
+# because the ruleset file lives in linting/config/ while node_modules is in validation/.
+extends:
+  - "spectral:oas"
+  - "@stoplight/spectral-owasp-ruleset"
 functions:
   - camara-reserved-words
   - camara-language-avoid-telco
@@ -283,3 +288,56 @@ rules:
       functionOptions:
         match: "^(string|number|integer|boolean|array|object)$"
     recommended: true
+
+  # ===== OWASP API Security Top 10 2023 =====
+  # Source: Commonalities Linting-rules.md section 5
+  # Severity overrides per CAMARA agreement (Commonalities #539, #548, #551, #552)
+  # Target severity escalation for API4 resource consumption rules: warn → error in 2027
+
+  # --- API1: Broken Object Level Authorization ---
+  owasp:api1:2023-no-numeric-ids: error
+
+  # --- API2: Broken Authentication ---
+  owasp:api2:2023-auth-insecure-schemes: off      # OpenID used exclusively
+  owasp:api2:2023-jwt-best-practices: off          # OpenID handles JWT
+  owasp:api2:2023-no-api-keys-in-url: off          # No API keys — OpenID used
+  owasp:api2:2023-no-credentials-in-url: error
+  owasp:api2:2023-no-http-basic: off               # No HTTP basic — OpenID used
+  owasp:api2:2023-short-lived-access-tokens: error
+  owasp:api2:2023-write-restricted: error
+  owasp:api2:2023-read-restricted: warn
+
+  # --- API3: Broken Object Property Level Authorization ---
+  owasp:api3:2023-constrained-additionalProperties: warn   # OAS 3.0 only
+  owasp:api3:2023-constrained-unevaluatedProperties: warn  # OAS 3.1 only (no-op for 3.0.3)
+  owasp:api3:2023-no-additionalProperties: warn            # OAS 3.0 only
+  owasp:api3:2023-no-unevaluatedProperties: warn           # OAS 3.1 only (no-op for 3.0.3)
+
+  # --- API4: Unrestricted Resource Consumption ---
+  owasp:api4:2023-array-limit: warn                 # → error in 2027
+  owasp:api4:2023-integer-format: warn              # → error in 2027
+  owasp:api4:2023-integer-limit: off                # OAS 3.1 only; legacy covers 3.0
+  owasp:api4:2023-integer-limit-legacy: warn        # → error in 2027
+  owasp:api4:2023-rate-limit: off                   # Gateway-level
+  owasp:api4:2023-rate-limit-retry-after: off       # Gateway-level
+  owasp:api4:2023-rate-limit-responses-429: off     # Gateway-level
+  owasp:api4:2023-string-limit: warn                # → error in 2027
+  owasp:api4:2023-string-restricted: warn
+
+  # --- API5: Broken Function Level Authorization ---
+  owasp:api5:2023-admin-security-unique: error
+
+  # --- API7: Server Side Request Forgery ---
+  owasp:api7:2023-concerning-url-parameter: info
+
+  # --- API8: Security Misconfiguration ---
+  owasp:api8:2023-define-cors-origin: off           # Gateway/implementation-level
+  owasp:api8:2023-define-error-responses-401: error  # Elevated from upstream warn
+  owasp:api8:2023-define-error-responses-500: off    # Not recommended in CAMARA
+  owasp:api8:2023-define-error-validation: warn
+  owasp:api8:2023-no-scheme-http: error              # OAS 2 only (no-op for 3.0.3)
+  owasp:api8:2023-no-server-http: error
+
+  # --- API9: Improper Inventory Management ---
+  owasp:api9:2023-inventory-access: off             # x-internal not used
+  owasp:api9:2023-inventory-environment: off        # Environment terms not used

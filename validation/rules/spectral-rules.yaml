@@ -191,3 +191,92 @@
 - id: S-228
   engine: spectral
   engine_rule: typed-enum
+
+# ===== OWASP API Security Top 10 2023 (S-300+) =====
+
+- id: S-300
+  engine: spectral
+  engine_rule: "owasp:api1:2023-no-numeric-ids"
+  hint: "Use non-numeric (e.g. string) resource identifiers to prevent enumeration attacks."
+
+- id: S-301
+  engine: spectral
+  engine_rule: "owasp:api2:2023-no-credentials-in-url"
+
+- id: S-302
+  engine: spectral
+  engine_rule: "owasp:api2:2023-short-lived-access-tokens"
+
+- id: S-303
+  engine: spectral
+  engine_rule: "owasp:api2:2023-write-restricted"
+
+- id: S-304
+  engine: spectral
+  engine_rule: "owasp:api5:2023-admin-security-unique"
+
+- id: S-305
+  engine: spectral
+  engine_rule: "owasp:api8:2023-no-scheme-http"
+
+- id: S-306
+  engine: spectral
+  engine_rule: "owasp:api8:2023-no-server-http"
+
+- id: S-307
+  engine: spectral
+  engine_rule: "owasp:api8:2023-define-error-responses-401"
+  hint: "All secured operations must document a 401 Unauthorized response (CAMARA Design Guide section 3.2)."
+
+- id: S-308
+  engine: spectral
+  engine_rule: "owasp:api2:2023-read-restricted"
+
+- id: S-309
+  engine: spectral
+  engine_rule: "owasp:api4:2023-array-limit"
+  hint: "Add maxItems to constrain array size (CAMARA Design Guide section 2.2)."
+
+- id: S-310
+  engine: spectral
+  engine_rule: "owasp:api4:2023-integer-format"
+  hint: "Add format: int32 or int64 to integer properties (CAMARA Design Guide section 2.2)."
+
+- id: S-311
+  engine: spectral
+  engine_rule: "owasp:api4:2023-integer-limit-legacy"
+  hint: "Add minimum and maximum to integer properties (CAMARA Design Guide section 2.2)."
+
+- id: S-312
+  engine: spectral
+  engine_rule: "owasp:api4:2023-string-limit"
+  hint: "Add maxLength, enum, or const to string properties (CAMARA Design Guide section 2.2)."
+
+- id: S-313
+  engine: spectral
+  engine_rule: "owasp:api4:2023-string-restricted"
+
+- id: S-314
+  engine: spectral
+  engine_rule: "owasp:api3:2023-constrained-additionalProperties"
+
+- id: S-315
+  engine: spectral
+  engine_rule: "owasp:api3:2023-constrained-unevaluatedProperties"
+
+- id: S-316
+  engine: spectral
+  engine_rule: "owasp:api3:2023-no-additionalProperties"
+
+- id: S-317
+  engine: spectral
+  engine_rule: "owasp:api3:2023-no-unevaluatedProperties"
+
+- id: S-318
+  engine: spectral
+  engine_rule: "owasp:api8:2023-define-error-validation"
+  hint: "Document 400 or 422 error responses for input validation (CAMARA Design Guide section 3.2)."
+
+- id: S-319
+  engine: spectral
+  engine_rule: "owasp:api7:2023-concerning-url-parameter"
