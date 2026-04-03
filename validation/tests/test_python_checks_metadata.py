@@ -39,6 +39,7 @@ def _make_context(api_names: list[str]) -> ValidationContext:
         stage="enabled",
         target_release_type=None,
         commonalities_release=None,
+        commonalities_version=None,
         icm_release=None,
         base_ref=None,
         is_release_review_pr=False,

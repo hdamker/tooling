@@ -31,6 +31,7 @@ def _make_context(
         stage="enabled",
         target_release_type="public-release",
         commonalities_release=None,
+        commonalities_version=None,
         icm_release=None,
         base_ref=base_ref,
         is_release_review_pr=is_release_review,

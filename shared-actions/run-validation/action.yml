@@ -59,6 +59,35 @@ runs:
       run: npm ci --ignore-scripts
       working-directory: ${{ inputs.tooling_path }}/validation
 
+    - name: Resolve Commonalities version
+      id: resolve-commonalities
+      shell: bash
+      env:
+        REPO_PATH: ${{ inputs.repo_path }}
+      run: |
+        # Extract commonalities_release tag from release-plan.yaml (if present)
+        PLAN_FILE="${REPO_PATH}/release-plan.yaml"
+        if [ -f "$PLAN_FILE" ]; then
+          RELEASE_TAG=$(python3 -c "
+        import yaml, sys
+        try:
+            plan = yaml.safe_load(open('${PLAN_FILE}'))
+            tag = plan.get('dependencies', {}).get('commonalities_release', '')
+            print(tag)
+        except Exception:
+            print('')
+        ")
+          if [ -n "$RELEASE_TAG" ]; then
+            VERSION=$(gh api "repos/camaraproject/Commonalities/contents/VERSION.yaml?ref=${RELEASE_TAG}" \
+              --jq '.content' 2>/dev/null | base64 -d 2>/dev/null | \
+              python3 -c "import yaml,sys; print(yaml.safe_load(sys.stdin).get('version',''))" 2>/dev/null || echo "")
+            if [ -n "$VERSION" ]; then
+              echo "VALIDATION_COMMONALITIES_VERSION=$VERSION" >> "$GITHUB_ENV"
+              echo "Resolved commonalities_release ${RELEASE_TAG} -> version ${VERSION}"
+            fi
+          fi
+        fi
+
     - name: Run validation orchestrator
       id: run
       shell: bash
