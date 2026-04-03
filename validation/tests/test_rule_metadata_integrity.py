@@ -306,8 +306,8 @@ class TestMetadataQuality:
         """
         with_hints = [r.id for r in all_rules if r.hint is not None]
         with_overrides = [r.id for r in all_rules if r.message_override is not None]
-        assert len(with_hints) == 7, (
-            f"Expected 7 explicit hints (update test if adding hints): "
+        assert len(with_hints) == 9, (
+            f"Expected 9 explicit hints (update test if adding hints): "
             f"{with_hints}"
         )
         assert len(with_overrides) == 0, (
