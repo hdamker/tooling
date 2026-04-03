@@ -86,6 +86,7 @@ class OrchestratorArgs:
     workflow_run_url: str
     tooling_ref: str
     commit_sha: str
+    commonalities_version: Optional[str]
 
 
 def _env(name: str, default: str = "") -> str:
@@ -132,6 +133,7 @@ def parse_args() -> OrchestratorArgs:
         workflow_run_url=_env("WORKFLOW_RUN_URL"),
         tooling_ref=_env("TOOLING_REF"),
         commit_sha=_env("COMMIT_SHA"),
+        commonalities_version=_env("COMMONALITIES_VERSION") or None,
     )
 
 
@@ -429,6 +431,7 @@ def main() -> int:
         release_metadata_schema_path=paths.release_metadata_schema,
         workflow_run_url=args.workflow_run_url,
         tooling_ref=args.tooling_ref,
+        commonalities_version=args.commonalities_version,
     )
     logger.info(
         "Context: branch=%s trigger=%s profile=%s release_review=%s apis=%d",

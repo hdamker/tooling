@@ -211,6 +211,7 @@ class TestValidationContextToDict:
             stage="enabled",
             target_release_type="pre-release-rc",
             commonalities_release="r4.1",
+            commonalities_version=None,
             icm_release=None,
             base_ref="main",
             is_release_review_pr=False,
@@ -234,7 +235,8 @@ class TestValidationContextToDict:
         d = sample_context.to_dict()
         expected_keys = {
             "repository", "branch_type", "trigger_type", "profile", "stage",
-            "target_release_type", "commonalities_release", "icm_release",
+            "target_release_type", "commonalities_release",
+            "commonalities_version", "icm_release",
             "base_ref", "is_release_review_pr", "release_plan_changed",
             "pr_number", "apis", "workflow_run_url", "tooling_ref",
         }

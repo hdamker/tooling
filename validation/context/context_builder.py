@@ -107,6 +107,7 @@ class ValidationContext:
     # Release context (from release-plan.yaml; None if absent)
     target_release_type: Optional[str]
     commonalities_release: Optional[str]
+    commonalities_version: Optional[str]
     icm_release: Optional[str]
 
     # PR-specific (None / False for non-PR triggers)
@@ -262,6 +263,7 @@ def build_validation_context(
     release_metadata_schema_path: Optional[Path] = None,
     workflow_run_url: str = "",
     tooling_ref: str = "",
+    commonalities_version: Optional[str] = None,
 ) -> ValidationContext:
     """Assemble the unified validation context.
 
@@ -337,6 +339,7 @@ def build_validation_context(
         stage=stage,
         target_release_type=target_release_type,
         commonalities_release=commonalities_release,
+        commonalities_version=commonalities_version,
         icm_release=icm_release,
         base_ref=base_ref or None,
         is_release_review_pr=is_review,

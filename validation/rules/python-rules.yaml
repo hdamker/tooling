@@ -94,12 +94,14 @@
   conditional_level:
     default: warn
 
-# P-011: check-license-commonalities-consistency (muted — likely to be retired)
+# P-011: check-commonalities-version (DG-028 rewrite)
+# Validates info.x-camara-commonalities presence and version format.
+# Error for missing or invalid format; warn for version mismatch.
 - id: P-011
   engine: python
-  engine_rule: check-license-commonalities-consistency
+  engine_rule: check-commonalities-version
   conditional_level:
-    default: muted
+    default: error
 
 # P-012: check-release-review-file-restriction
 - id: P-012
@@ -114,5 +116,63 @@
 - id: P-013
   engine: python
   engine_rule: check-readme-placeholder-removal
+  conditional_level:
+    default: warn
+
+# P-014: check-subscription-filename (DG-088)
+# Explicit subscription API names must end with '-subscriptions'.
+- id: P-014
+  engine: python
+  engine_rule: check-subscription-filename
+  applicability:
+    api_pattern: [explicit-subscription]
+  conditional_level:
+    default: warn
+
+# P-015: check-event-type-format (DG-086)
+# Event types must follow org.camaraproject.<api-name>.<vN>.<event-name>.
+- id: P-015
+  engine: python
+  engine_rule: check-event-type-format
+  applicability:
+    api_pattern: [explicit-subscription, implicit-subscription]
+  conditional_level:
+    default: error
+
+# P-016: check-sinkcredential-not-in-response (DG-092)
+# sinkCredential must not appear in subscription 2xx response schemas.
+- id: P-016
+  engine: python
+  engine_rule: check-sinkcredential-not-in-response
+  applicability:
+    api_pattern: [explicit-subscription]
+  conditional_level:
+    default: error
+
+# P-017: check-conflict-deprecated (DG-018)
+# CONFLICT error code is deprecated in Commonalities r4.x.
+- id: P-017
+  engine: python
+  engine_rule: check-conflict-deprecated
+  applicability:
+    commonalities_release: ">=r4.0"
+  conditional_level:
+    default: warn
+
+# P-018: check-contextcode-format (DG-011)
+# contextCode enum values should follow SCREAMING_SNAKE_CASE.
+- id: P-018
+  engine: python
+  engine_rule: check-contextcode-format
+  applicability:
+    commonalities_release: ">=r4.0"
+  conditional_level:
+    default: hint
+
+# P-019: check-orphan-api-definitions (NEW-003)
+# YAML files in API_definitions not listed in release-plan.yaml.
+- id: P-019
+  engine: python
+  engine_rule: check-orphan-api-definitions
   conditional_level:
     default: warn

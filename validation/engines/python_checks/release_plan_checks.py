@@ -274,3 +274,58 @@ def check_release_plan_semantics(
     findings.extend(_check_file_existence(release_plan, repo_path))
 
     return findings
+
+
+# ---------------------------------------------------------------------------
+# P-019 (NEW-003): Orphan API definitions
+# ---------------------------------------------------------------------------
+
+
+def check_orphan_api_definitions(
+    repo_path: Path, context: ValidationContext
+) -> List[dict]:
+    """Detect YAML files in API_definitions not listed in release-plan.yaml.
+
+    Repo-level check.  Compares YAML file stems in
+    ``code/API_definitions/`` against API names declared in
+    ``release-plan.yaml``.  Files not in the release plan are flagged
+    as potential orphans or naming mismatches.
+    """
+    plan_path = repo_path / _RELEASE_PLAN_PATH
+    release_plan = load_yaml_safe(plan_path)
+    if release_plan is None:
+        return []
+
+    api_dir = repo_path / "code" / "API_definitions"
+    if not api_dir.is_dir():
+        return []
+
+    # Declared API names from release plan
+    apis = release_plan.get("apis", [])
+    declared_names = {
+        api.get("api_name")
+        for api in apis
+        if isinstance(api, dict) and api.get("api_name")
+    }
+
+    # YAML files on disk
+    existing_stems = {
+        f.stem for f in api_dir.iterdir()
+        if f.suffix == ".yaml" and f.is_file()
+    }
+
+    orphans = sorted(existing_stems - declared_names)
+
+    return [
+        make_finding(
+            engine_rule="check-orphan-api-definitions",
+            level="warn",
+            message=(
+                f"API definition file '{name}.yaml' is not listed in "
+                f"release-plan.yaml — possible orphan or naming mismatch"
+            ),
+            path=f"code/API_definitions/{name}.yaml",
+            line=1,
+        )
+        for name in orphans
+    ]
