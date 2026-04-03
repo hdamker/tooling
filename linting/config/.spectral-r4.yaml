@@ -10,6 +10,7 @@
 # - 09.01.2025: Updated info-contact rule
 # - 21.07.2025: Added camara-schema-type-check rule
 # - 12.01.2026: camara-discriminator-use deprecated
+# - 03.04.2026: Added OWASP API Security Top 10 2023 rules (Linting-rules.md section 5)
 
 
 # Note: @stoplight/spectral-owasp-ruleset is installed via validation/package.json.
