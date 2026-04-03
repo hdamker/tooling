@@ -24,6 +24,7 @@ functions:
   - camara-language-avoid-telco
   - camara-security-no-secrets-in-path-or-query-parameters
   - camara-schema-casing-convention
+  - camara-schema-type-check
 functionsDir: "./lint_function"
 rules:
   #  Built-in OpenAPI Specification ruleset. Each rule then can be enabled individually.
@@ -282,14 +283,15 @@ rules:
     recommended: true  # Set to true/false to enable/disable this rule
 
   camara-schema-type-check:
-    message: "Invalid type in schema definition."
+    description: >
+      Every schema node must declare a valid type (string, number, integer,
+      boolean, array, object) or use a combiner (allOf, anyOf, oneOf).
+      Recursively checks properties, items, and additionalProperties.
+    message: "{{error}}"
     severity: error
     given: "$.components.schemas.*"
     then:
-      field: type
-      function: pattern
-      functionOptions:
-        match: "^(string|number|integer|boolean|array|object)$"
+      function: camara-schema-type-check
     recommended: true
 
   # ===== OWASP API Security Top 10 2023 =====
