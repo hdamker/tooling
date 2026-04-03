@@ -65,6 +65,11 @@ runs:
       env:
         PYTHONPATH: ${{ inputs.tooling_path }}
         PATH_NODE_MODULES: ${{ inputs.tooling_path }}/validation/node_modules/.bin
+        # NODE_PATH: Spectral rulesets live in linting/config/ but npm packages
+        # (including @stoplight/spectral-owasp-ruleset) are installed in
+        # validation/node_modules/. NODE_PATH bridges this gap for Node's
+        # module resolution.
+        NODE_PATH: ${{ inputs.tooling_path }}/validation/node_modules
         VALIDATION_REPO_PATH: ${{ inputs.repo_path }}
         VALIDATION_TOOLING_PATH: ${{ inputs.tooling_path }}
         VALIDATION_OUTPUT_DIR: ${{ inputs.repo_path }}/validation-output
