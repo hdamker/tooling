@@ -204,9 +204,49 @@ fixes:
           level: warn
 
 # ---------------------------------------------------------------------------
+# Proposed changes — need upstream discussion before implementation
+# ---------------------------------------------------------------------------
+
+proposed_changes:
+  - rule_id: S-211
+    engine_rule: oas3-unused-component
+    current_level: warn
+    proposed_level: hint
+    reason: >
+      Spectral does not follow discriminator mappings — schemas referenced
+      only via discriminator appear as unused. False positives on subscription
+      event schemas (e.g. EventApiSpecific1, EventSubscriptionStarted).
+      Unused schemas are cosmetic, not harmful.
+    discuss_in: Commonalities
+
+  - rule_id: S-313
+    engine_rule: "owasp:api4:2023-string-restricted"
+    current_level: warn
+    proposed_level: hint
+    reason: >
+      Free-text string properties (ErrorInfo.message, CloudEvent.id,
+      SubscriptionId, *Description fields) cannot meaningfully have format
+      or pattern without risking backward-incompatibility (e.g. localized
+      messages). The resource consumption concern is already covered by
+      string-limit (maxLength). string-restricted adds noise on fields
+      where no actionable fix exists.
+    discuss_in: Commonalities
+
+  - engine_rule: camara-schema-casing-convention
+    rule_id: S-015
+    change: Add overrides for CloudEvents abbreviation prefixes (HTTP, JWT)
+    reason: >
+      CloudEvents convention uses uppercase protocol prefixes in schema names
+      (HTTPSettings, HTTPSubscriptionRequest, HTTPSubscriptionResponse).
+      PrivateKeyJWTCredential follows the same pattern. Renaming to HttpSettings
+      etc. would deviate from CloudEvents spec. Overrides for these 4 schemas
+      would suppress false positives while keeping PascalCase enforced for all
+      other schemas.
+    discuss_in: Commonalities
+
+# ---------------------------------------------------------------------------
 # Pending rules — in open PRs
 # ---------------------------------------------------------------------------
-# Source: tooling#95 (OWASP Spectral rules)
 
 pending_rules:
   # OWASP rules (tooling#95) implemented in WS07 Phase 1b — see spectral-rules.yaml S-300..S-319
