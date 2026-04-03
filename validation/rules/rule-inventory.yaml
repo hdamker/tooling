@@ -11,18 +11,18 @@
 #   pending     — in open PRs, not yet merged
 
 version: 1
-generated: 2026-03-26
+generated: 2026-04-03
 
 summary:
-  total_implemented: 116
-  total_gap: 25
+  total_implemented: 123
+  total_gap: 17
   total_manual: 25
   total_pending: 0
   total_tested: 0
   by_engine:
     spectral: 66
     gherkin: 25
-    python: 12
+    python: 19
     yamllint: 13
 
 # ---------------------------------------------------------------------------
@@ -77,16 +77,6 @@ gap_rules:
     priority: medium
     notes: Value check (not just presence). Spectral license-url only checks existence. Previously v0_6 (V6-006)
 
-  - audit_id: DG-028
-    description: x-camara-commonalities MUST specify valid version
-    target_engine: python
-    priority: medium
-    notes: >
-      Rewrite P-011. Presence check + value validation. On main: wip, tbd,
-      X.Y (e.g. 0.7), or X.Y.Z (e.g. 0.7.0) allowed — if X.Y/X.Y.Z then
-      must match declared commonalities_release. On release: real version
-      required, must match commonalities_release. Previously v0_6 (V6-007)
-
   - audit_id: DG-015
     description: "API-specific error: API_NAME.SPECIFIC_CODE format"
     target_engine: spectral
@@ -137,42 +127,57 @@ gap_rules:
     priority: low
     notes: api_pattern subscription only
 
-  # Python gaps (new checks needed)
+  # Python gaps — implemented in Phase 2b
   - audit_id: DG-011
     description: contextCode SCREAMING_SNAKE_CASE format (r4.x)
     target_engine: python
-    priority: low
+    status: implemented
+    rule_id: P-018
 
   - audit_id: DG-018
     description: CONFLICT error code deprecated (r4.x)
     target_engine: python
-    priority: low
+    status: implemented
+    rule_id: P-017
+
+  - audit_id: DG-028
+    description: x-camara-commonalities MUST specify valid version
+    target_engine: python
+    status: implemented
+    rule_id: P-011
+    notes: Rewrite of original P-011 (license/commonalities consistency)
 
   - audit_id: DG-086
     description: Event type format org.camaraproject validation (subscription)
     target_engine: python
-    priority: medium
+    status: implemented
+    rule_id: P-015
 
   - audit_id: DG-088
     description: Subscription API filename convention
     target_engine: python
-    priority: medium
+    status: implemented
+    rule_id: P-014
 
   - audit_id: DG-092
     description: sinkCredential not in responses
     target_engine: python
-    priority: medium
+    status: implemented
+    rule_id: P-016
 
+  # Python gaps — deferred
   - audit_id: DG-095
     description: Event version independence from API version
     target_engine: python
-    priority: low
+    status: deferred
+    notes: "No actionable static check — event version format already validated by P-015 (DG-086)"
 
   # New rules (not from audit — identified during implementation)
   - audit_id: NEW-001
     description: README.md placeholder must be removed from API_definitions/ when spec files are present
     target_engine: python
-    priority: medium
+    status: implemented
+    rule_id: P-013
 
   - audit_id: NEW-002
     description: "apiRoot variable: default and description MUST match Design Guide values"
@@ -183,8 +188,8 @@ gap_rules:
   - audit_id: NEW-003
     description: "Orphan API definitions: YAML files in code/API_definitions/ not listed in release-plan.yaml"
     target_engine: python
-    priority: low
-    notes: "Compare filenames against release-plan.yaml APIs. Also detect missing files (declared but absent)."
+    status: implemented
+    rule_id: P-019
 
 # ---------------------------------------------------------------------------
 # Fixes needed — implemented rules with incorrect behavior
