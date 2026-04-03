@@ -351,6 +351,37 @@ class TestParseSpectralOutput:
         findings = parse_spectral_output(raw, repo_root="/runner/work")
         assert findings[0]["path"] == "code/API_definitions/quality-on-demand.yaml"
 
+    def test_string_restricted_phantom_dropped(self):
+        """Phantom string-restricted findings (no source, range 0:0) are dropped."""
+        phantom = {
+            "code": "owasp:api4:2023-string-restricted",
+            "message": "Schema of type string should specify a format.",
+            "severity": 1,
+            "source": "",
+            "path": ["components", "schemas", "Foo", "properties", "bar"],
+            "range": {"start": {"line": 0, "character": 0},
+                      "end": {"line": 0, "character": 0}},
+        }
+        raw = json.dumps([SAMPLE_SPECTRAL_FINDING, phantom])
+        findings = parse_spectral_output(raw)
+        assert len(findings) == 1
+        assert findings[0]["engine_rule"] == "camara-parameter-casing-convention"
+
+    def test_other_rule_sourceless_not_dropped(self):
+        """Sourceless findings from other rules are kept (only string-restricted filtered)."""
+        other = {
+            "code": "owasp:api4:2023-string-limit",
+            "message": "Schema of type string must specify maxLength.",
+            "severity": 1,
+            "source": "",
+            "path": ["components", "schemas", "Foo", "properties", "bar"],
+            "range": {"start": {"line": 0, "character": 0},
+                      "end": {"line": 0, "character": 0}},
+        }
+        raw = json.dumps([other])
+        findings = parse_spectral_output(raw)
+        assert len(findings) == 1
+
     def test_external_file_findings_downgraded_to_hint(self):
         """Findings from common schemas (followed via $ref) become hints."""
         common_finding = {
