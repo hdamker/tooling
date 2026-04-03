@@ -94,12 +94,14 @@
   conditional_level:
     default: warn
 
-# P-011: check-license-commonalities-consistency (muted — likely to be retired)
+# P-011: check-commonalities-version (DG-028 rewrite)
+# Validates info.x-camara-commonalities presence and version format.
+# Error for missing or invalid format; warn for version mismatch.
 - id: P-011
   engine: python
-  engine_rule: check-license-commonalities-consistency
+  engine_rule: check-commonalities-version
   conditional_level:
-    default: muted
+    default: error
 
 # P-012: check-release-review-file-restriction
 - id: P-012
