@@ -13,6 +13,7 @@ from validation.engines.python_checks.release_plan_checks import (
     _check_file_existence,
     _check_release_type_consistency,
     _check_track_consistency,
+    check_orphan_api_definitions,
     check_release_plan_semantics,
 )
 
@@ -254,3 +255,60 @@ class TestCheckReleasePlanSemantics:
         findings = check_release_plan_semantics(tmp_path, ctx)
         # meta_release missing (track) + draft in public-release (type) = 2
         assert len(findings) >= 2
+
+
+# ---------------------------------------------------------------------------
+# P-019: check-orphan-api-definitions
+# ---------------------------------------------------------------------------
+
+
+class TestCheckOrphanApiDefinitions:
+    def test_no_orphans(self, tmp_path: Path):
+        plan = _make_plan(apis=[{"api_name": "qod", "target_api_status": "alpha"}])
+        _write_release_plan(tmp_path, plan)
+        api_dir = tmp_path / "code" / "API_definitions"
+        api_dir.mkdir(parents=True)
+        (api_dir / "qod.yaml").touch()
+        findings = check_orphan_api_definitions(tmp_path, _make_context())
+        assert findings == []
+
+    def test_orphan_file_warn(self, tmp_path: Path):
+        plan = _make_plan(apis=[{"api_name": "qod", "target_api_status": "alpha"}])
+        _write_release_plan(tmp_path, plan)
+        api_dir = tmp_path / "code" / "API_definitions"
+        api_dir.mkdir(parents=True)
+        (api_dir / "qod.yaml").touch()
+        (api_dir / "old-api.yaml").touch()
+        findings = check_orphan_api_definitions(tmp_path, _make_context())
+        assert len(findings) == 1
+        assert findings[0]["level"] == "warn"
+        assert "old-api" in findings[0]["message"]
+
+    def test_multiple_orphans(self, tmp_path: Path):
+        plan = _make_plan(apis=[{"api_name": "qod", "target_api_status": "alpha"}])
+        _write_release_plan(tmp_path, plan)
+        api_dir = tmp_path / "code" / "API_definitions"
+        api_dir.mkdir(parents=True)
+        (api_dir / "qod.yaml").touch()
+        (api_dir / "orphan-a.yaml").touch()
+        (api_dir / "orphan-b.yaml").touch()
+        findings = check_orphan_api_definitions(tmp_path, _make_context())
+        assert len(findings) == 2
+
+    def test_no_release_plan(self, tmp_path: Path):
+        assert check_orphan_api_definitions(tmp_path, _make_context()) == []
+
+    def test_no_api_definitions_dir(self, tmp_path: Path):
+        plan = _make_plan(apis=[{"api_name": "qod", "target_api_status": "alpha"}])
+        _write_release_plan(tmp_path, plan)
+        assert check_orphan_api_definitions(tmp_path, _make_context()) == []
+
+    def test_non_yaml_files_ignored(self, tmp_path: Path):
+        plan = _make_plan(apis=[{"api_name": "qod", "target_api_status": "alpha"}])
+        _write_release_plan(tmp_path, plan)
+        api_dir = tmp_path / "code" / "API_definitions"
+        api_dir.mkdir(parents=True)
+        (api_dir / "qod.yaml").touch()
+        (api_dir / "README.md").touch()
+        findings = check_orphan_api_definitions(tmp_path, _make_context())
+        assert findings == []
