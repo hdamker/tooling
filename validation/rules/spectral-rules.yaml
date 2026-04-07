@@ -74,6 +74,93 @@
   engine: spectral
   engine_rule: camara-security-no-secrets-in-path-or-query-parameters
 
+# ===== Phase 2a gap rules (S-018+) =====
+
+- id: S-018
+  engine: spectral
+  engine_rule: camara-license-name
+
+- id: S-019
+  engine: spectral
+  engine_rule: camara-license-url-value
+
+- id: S-020
+  engine: spectral
+  engine_rule: camara-no-contact
+
+- id: S-021
+  engine: spectral
+  engine_rule: camara-tag-name-title-case
+
+- id: S-022
+  engine: spectral
+  engine_rule: camara-api-root-default
+
+- id: S-023
+  engine: spectral
+  engine_rule: camara-api-root-description
+
+- id: S-024
+  engine: spectral
+  engine_rule: camara-response-403
+  hint: "All operations must document a 403 Forbidden response (CAMARA Design Guide section 3.2)."
+
+- id: S-025
+  engine: spectral
+  engine_rule: camara-error-code-not-numeric
+
+- id: S-026
+  engine: spectral
+  engine_rule: camara-error-code-screaming-snake-case
+  applicability:
+    commonalities_release: ">=r4.0"
+
+- id: S-027
+  engine: spectral
+  engine_rule: camara-error-code-api-specific-format
+
+- id: S-028
+  engine: spectral
+  engine_rule: camara-datetime-rfc3339-description
+
+- id: S-029
+  engine: spectral
+  engine_rule: camara-duration-rfc3339-description
+
+- id: S-030
+  engine: spectral
+  engine_rule: camara-required-properties-exist
+
+- id: S-031
+  engine: spectral
+  engine_rule: camara-array-items-description
+  applicability:
+    commonalities_release: ">=r4.0"
+
+- id: S-032
+  engine: spectral
+  engine_rule: camara-cloudevent-specversion
+  applicability:
+    api_pattern: [implicit-subscription, explicit-subscription]
+
+- id: S-033
+  engine: spectral
+  engine_rule: camara-subscription-protocol-http
+  applicability:
+    api_pattern: [implicit-subscription, explicit-subscription]
+
+- id: S-034
+  engine: spectral
+  engine_rule: camara-subscription-sink-https
+  applicability:
+    api_pattern: [implicit-subscription, explicit-subscription]
+
+- id: S-035
+  engine: spectral
+  engine_rule: camara-notification-content-type
+  applicability:
+    api_pattern: [implicit-subscription, explicit-subscription]
+
 # ===== Built-in OAS rules (S-200+) =====
 
 - id: S-200
