@@ -10,6 +10,7 @@
 # - 09.01.2025: Updated info-contact rule
 # - 21.07.2025: Added camara-schema-type-check rule
 # - 12.01.2026: camara-discriminator-use deprecated
+# - 03.04.2026: Added OWASP API Security Top 10 2023 rules (Linting-rules.md section 5)
 
 
 # Note: @stoplight/spectral-owasp-ruleset is installed via validation/package.json.
@@ -22,6 +23,8 @@ functions:
   - camara-reserved-words
   - camara-language-avoid-telco
   - camara-security-no-secrets-in-path-or-query-parameters
+  - camara-schema-casing-convention
+  - camara-schema-type-check
 functionsDir: "./lint_function"
 rules:
   #  Built-in OpenAPI Specification ruleset. Each rule then can be enabled individually.
@@ -257,14 +260,15 @@ rules:
     recommended: true  # Set to true/false to enable/disable this rule
 
   camara-schema-casing-convention:
-    description: This rule checks schema should follow a specific case convention pascal case.
-    message: "{{property}} should be pascal case (UppperCamelCase)"
+    description: >
+      Schema names must be PascalCase (UpperCamelCase). CloudEvents schema names
+      (HTTPSettings, HTTPSubscriptionRequest, HTTPSubscriptionResponse,
+      PrivateKeyJWTCredential) are allowed as explicit exceptions.
+    message: "{{error}}"
     severity: warn
     given: $.components.schemas[*]~
     then:
-      function: casing
-      functionOptions:
-        type: pascal
+      function: camara-schema-casing-convention
     recommended: true  # Set to true/false to enable/disable this rule
 
   camara-parameter-casing-convention:
@@ -279,14 +283,15 @@ rules:
     recommended: true  # Set to true/false to enable/disable this rule
 
   camara-schema-type-check:
-    message: "Invalid type in schema definition."
+    description: >
+      Every schema node must declare a valid type (string, number, integer,
+      boolean, array, object) or use a combiner (allOf, anyOf, oneOf).
+      Recursively checks properties, items, and additionalProperties.
+    message: "{{error}}"
     severity: error
     given: "$.components.schemas.*"
     then:
-      field: type
-      function: pattern
-      functionOptions:
-        match: "^(string|number|integer|boolean|array|object)$"
+      function: camara-schema-type-check
     recommended: true
 
   # ===== OWASP API Security Top 10 2023 =====

@@ -196,6 +196,17 @@ gap_rules:
 # ---------------------------------------------------------------------------
 
 fixes:
+  - rule_id: S-016
+    engine_rule: camara-schema-type-check
+    status: done
+    issue: >
+      Original inline rule only checked top-level schemas. Did not recurse
+      into properties, items, or nested schemas. Did not handle combiners.
+    fix: >
+      Replaced with custom JS function in .spectral-r4.yaml. Recursive
+      traversal, combiner-aware, validates type values. Original inline
+      rule preserved in r3.4 and fallback rulesets.
+
   - rule_id: P-007
     engine_rule: check-test-file-version
     status: suppressed
@@ -209,9 +220,47 @@ fixes:
           level: warn
 
 # ---------------------------------------------------------------------------
+# Proposed changes — need upstream discussion before implementation
+# ---------------------------------------------------------------------------
+
+proposed_changes:
+  - rule_id: S-211
+    engine_rule: oas3-unused-component
+    change: Keep Spectral severity (warn), add conditional_level default=hint in metadata
+    reason: >
+      Spectral does not follow discriminator mappings — schemas referenced
+      only via discriminator appear as unused. False positives on subscription
+      event schemas (e.g. EventApiSpecific1, EventSubscriptionStarted).
+      Unused schemas are cosmetic, not harmful.
+    status: done
+
+  - rule_id: S-313
+    engine_rule: "owasp:api4:2023-string-restricted"
+    change: Keep Spectral severity (warn), add conditional_level default=hint + hint text in metadata
+    hint: "Acceptable if free-form field or implementation-dependent — no fix needed."
+    reason: >
+      Free-text string properties (ErrorInfo.message, CloudEvent.id,
+      SubscriptionId, *Description fields) cannot meaningfully have format
+      or pattern without risking backward-incompatibility (e.g. localized
+      messages). The resource consumption concern is already covered by
+      string-limit (maxLength). string-restricted adds noise on fields
+      where no actionable fix exists.
+    status: done
+
+  - rule_id: S-015
+    engine_rule: camara-schema-casing-convention
+    change: >
+      Custom JS function replaces built-in casing: pascal. Exact exception
+      list for 4 CloudEvents schema names (HTTPSettings, HTTPSubscriptionRequest,
+      HTTPSubscriptionResponse, PrivateKeyJWTCredential). r4 ruleset only.
+    reason: >
+      CloudEvents convention uses uppercase protocol prefixes in schema names.
+      Renaming would deviate from CloudEvents spec.
+    status: done
+
+# ---------------------------------------------------------------------------
 # Pending rules — in open PRs
 # ---------------------------------------------------------------------------
-# Source: tooling#95 (OWASP Spectral rules)
 
 pending_rules:
   # OWASP rules (tooling#95) implemented in WS07 Phase 1b — see spectral-rules.yaml S-300..S-319

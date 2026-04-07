@@ -123,6 +123,9 @@
 - id: S-211
   engine: spectral
   engine_rule: oas3-unused-component
+  hint: "Spectral does not follow discriminator mappings — verify the schema is truly unused."
+  conditional_level:
+    default: hint
 
 - id: S-212
   engine: spectral
@@ -255,6 +258,9 @@
 - id: S-313
   engine: spectral
   engine_rule: "owasp:api4:2023-string-restricted"
+  hint: "Acceptable if free-form field or implementation-dependent — no fix needed."
+  conditional_level:
+    default: hint
 
 - id: S-314
   engine: spectral
