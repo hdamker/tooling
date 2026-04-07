@@ -11,16 +11,16 @@
 #   pending     — in open PRs, not yet merged
 
 version: 1
-generated: 2026-04-03
+generated: 2026-04-07
 
 summary:
-  total_implemented: 123
-  total_gap: 17
+  total_implemented: 141
+  total_gap: 0
   total_manual: 25
   total_pending: 0
   total_tested: 0
   by_engine:
-    spectral: 66
+    spectral: 84
     gherkin: 25
     python: 19
     yamllint: 13
@@ -38,94 +38,102 @@ summary:
 # Source: private-dev-docs/validation-framework/reviews/commonalities-design-guide-audit.md
 
 gap_rules:
-  # Spectral gaps (new rules needed)
+  # Spectral gaps — implemented in Phase 2a
   - audit_id: DG-003
     description: date-time description RFC 3339 format
     target_engine: spectral
-    priority: low
+    status: implemented
+    rule_id: S-028
 
   - audit_id: DG-004
     description: duration description RFC 3339 format
     target_engine: spectral
-    priority: low
+    status: implemented
+    rule_id: S-029
 
   - audit_id: DG-008
     description: "Object: required properties MUST exist in properties"
     target_engine: spectral
-    priority: medium
+    status: implemented
+    rule_id: S-030
 
   - audit_id: DG-013
     description: Error code MUST NOT be numeric
     target_engine: spectral
-    priority: medium
+    status: implemented
+    rule_id: S-025
 
   - audit_id: DG-014
     description: Error code MUST be SCREAMING_SNAKE_CASE (r4.x)
     target_engine: spectral
-    priority: medium
-    notes: commonalities_release >=r4.0
-
-  - audit_id: DG-026
-    description: "info.license.name MUST be 'Apache 2.0'"
-    target_engine: spectral
-    priority: medium
-    notes: Static value check, previously v0_6 only (V6-005)
-
-  - audit_id: DG-027
-    description: info.license.url MUST be Apache License URL
-    target_engine: spectral
-    priority: medium
-    notes: Value check (not just presence). Spectral license-url only checks existence. Previously v0_6 (V6-006)
+    status: implemented
+    rule_id: S-026
 
   - audit_id: DG-015
     description: "API-specific error: API_NAME.SPECIFIC_CODE format"
     target_engine: spectral
-    priority: medium
+    status: implemented
+    rule_id: S-027
 
   - audit_id: DG-017
     description: All APIs MUST document 403 response
     target_engine: spectral
-    priority: medium
+    status: implemented
+    rule_id: S-024
+
+  - audit_id: DG-026
+    description: "info.license.name MUST be 'Apache 2.0'"
+    target_engine: spectral
+    status: implemented
+    rule_id: S-018
+
+  - audit_id: DG-027
+    description: info.license.url MUST be Apache License URL
+    target_engine: spectral
+    status: implemented
+    rule_id: S-019
 
   - audit_id: DG-032
     description: info.contact MUST be absent
     target_engine: spectral
-    priority: low
+    status: implemented
+    rule_id: S-020
 
   - audit_id: DG-041
     description: Tag names Title Case convention
     target_engine: spectral
-    priority: low
+    status: implemented
+    rule_id: S-021
 
   - audit_id: DG-058
     description: Array items MUST have description (r4.x)
     target_engine: spectral
-    priority: medium
-    notes: commonalities_release >=r4.0
+    status: implemented
+    rule_id: S-031
 
   - audit_id: DG-087
     description: "specversion MUST be '1.0' (subscription)"
     target_engine: spectral
-    priority: low
-    notes: api_pattern subscription only
+    status: implemented
+    rule_id: S-032
 
   - audit_id: DG-090
     description: "protocol MUST be 'HTTP' (subscription)"
     target_engine: spectral
-    priority: low
-    notes: api_pattern subscription only
+    status: implemented
+    rule_id: S-033
 
   - audit_id: DG-091
     description: sink MUST use HTTPS (subscription)
     target_engine: spectral
-    priority: low
-    notes: api_pattern subscription only
+    status: implemented
+    rule_id: S-034
 
   - audit_id: DG-094
     description: Notification content-type cloudevents+json (subscription)
     target_engine: spectral
-    priority: low
-    notes: api_pattern subscription only
+    status: implemented
+    rule_id: S-035
 
   # Python gaps — implemented in Phase 2b
   - audit_id: DG-011
@@ -182,8 +190,8 @@ gap_rules:
   - audit_id: NEW-002
     description: "apiRoot variable: default and description MUST match Design Guide values"
     target_engine: spectral
-    priority: low
-    notes: "Hint level. Standard values: default 'http://localhost:9091', description 'API root, defined by the service provider, e.g. `api.example.com` or `api.example.com/somepath`'"
+    status: implemented
+    rule_id: S-022, S-023
 
   - audit_id: NEW-003
     description: "Orphan API definitions: YAML files in code/API_definitions/ not listed in release-plan.yaml"

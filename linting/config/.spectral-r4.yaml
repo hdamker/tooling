@@ -11,6 +11,9 @@
 # - 21.07.2025: Added camara-schema-type-check rule
 # - 12.01.2026: camara-discriminator-use deprecated
 # - 03.04.2026: Added OWASP API Security Top 10 2023 rules (Linting-rules.md section 5)
+# - 07.04.2026: Added Phase 2a gap rules (S-018..S-035): license, contact, tags,
+#   apiRoot, 403, error codes, subscription, format descriptions, required props,
+#   array items description, notification content-type
 
 
 # Note: @stoplight/spectral-owasp-ruleset is installed via validation/package.json.
@@ -25,6 +28,11 @@ functions:
   - camara-security-no-secrets-in-path-or-query-parameters
   - camara-schema-casing-convention
   - camara-schema-type-check
+  - camara-format-description-check
+  - camara-error-code-dot-format
+  - camara-required-properties-exist
+  - camara-array-items-description
+  - camara-notification-content-type
 functionsDir: "./lint_function"
 rules:
   #  Built-in OpenAPI Specification ruleset. Each rule then can be enabled individually.
@@ -292,6 +300,212 @@ rules:
     given: "$.components.schemas.*"
     then:
       function: camara-schema-type-check
+    recommended: true
+
+  # ===== Phase 2a Gap Rules (Design Guide + Subscription Guide) =====
+
+  # --- Group A: Simple field checks ---
+
+  camara-license-name:
+    description: "info.license.name MUST be 'Apache 2.0'."
+    message: "License name must be exactly 'Apache 2.0', got '{{value}}'."
+    severity: error
+    given: $.info.license.name
+    then:
+      function: pattern
+      functionOptions:
+        match: "^Apache 2\\.0$"
+    recommended: true
+
+  camara-license-url-value:
+    description: "info.license.url MUST be the Apache 2.0 license URL."
+    message: "License URL must be 'https://www.apache.org/licenses/LICENSE-2.0.html', got '{{value}}'."
+    severity: error
+    given: $.info.license.url
+    then:
+      function: pattern
+      functionOptions:
+        match: "^https://www\\.apache\\.org/licenses/LICENSE-2\\.0\\.html$"
+    recommended: true
+
+  camara-no-contact:
+    description: "info.contact MUST NOT be present in CAMARA API specifications."
+    message: "info.contact must not be present. CAMARA APIs do not use individual contact information."
+    severity: warn
+    given: $.info
+    then:
+      field: contact
+      function: falsy
+    recommended: true
+
+  camara-tag-name-title-case:
+    description: "Tag names SHOULD follow Title Case convention (each word capitalized, separated by spaces)."
+    message: "Tag name '{{value}}' is not Title Case. Use e.g. 'Quality On Demand' instead of 'quality-on-demand'."
+    severity: hint
+    given: $.tags[*].name
+    then:
+      function: pattern
+      functionOptions:
+        match: "^[A-Z][a-zA-Z0-9]*(\\s[A-Z][a-zA-Z0-9]*)*$"
+    recommended: true
+
+  camara-api-root-default:
+    description: "apiRoot variable default SHOULD be 'http://localhost:9091'."
+    message: "apiRoot default should be 'http://localhost:9091', got '{{value}}'."
+    severity: hint
+    given: $.servers[*].variables.apiRoot.default
+    then:
+      function: pattern
+      functionOptions:
+        match: "^http://localhost:9091$"
+    recommended: true
+
+  camara-api-root-description:
+    description: "apiRoot variable description SHOULD match the standard CAMARA text."
+    message: "apiRoot description does not match the standard CAMARA text."
+    severity: hint
+    given: $.servers[*].variables.apiRoot.description
+    then:
+      function: pattern
+      functionOptions:
+        match: "^API root, defined by the service provider, e\\.g\\. `api\\.example\\.com` or `api\\.example\\.com/somepath`$"
+    recommended: true
+
+  camara-response-403:
+    description: "All API operations MUST document a 403 Forbidden response."
+    message: "Operation is missing a 403 response definition."
+    severity: warn
+    given: "$.paths[*][get,put,post,delete,patch].responses"
+    then:
+      field: "403"
+      function: truthy
+    recommended: true
+
+  # --- Group B: Error code checks ---
+
+  camara-error-code-not-numeric:
+    description: "Error code enum values MUST NOT be purely numeric."
+    message: "Error code '{{value}}' must not be numeric. Use descriptive string codes like INVALID_ARGUMENT."
+    severity: error
+    given:
+      - "$.paths.*.*.responses.*.content.*.schema.allOf[*].properties.code.enum[*]"
+      - "$.components.responses.*.content.*.schema.allOf[*].properties.code.enum[*]"
+    then:
+      function: pattern
+      functionOptions:
+        notMatch: "^\\d+$"
+    recommended: true
+
+  camara-error-code-screaming-snake-case:
+    description: "Error code enum values MUST be SCREAMING_SNAKE_CASE, optionally with API_NAME prefix separated by dot."
+    message: "Error code '{{value}}' is not SCREAMING_SNAKE_CASE (optionally API_NAME.CODE)."
+    severity: warn
+    given:
+      - "$.paths.*.*.responses.*.content.*.schema.allOf[*].properties.code.enum[*]"
+      - "$.components.responses.*.content.*.schema.allOf[*].properties.code.enum[*]"
+    then:
+      function: pattern
+      functionOptions:
+        match: "^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*(\\.[A-Z][A-Z0-9]*(_[A-Z0-9]+)*)?$"
+    recommended: true
+
+  camara-error-code-api-specific-format:
+    description: "API-specific error codes with dots MUST follow API_NAME.SPECIFIC_CODE format."
+    message: "{{error}}"
+    severity: warn
+    given:
+      - "$.paths.*.*.responses.*.content.*.schema.allOf[*].properties.code.enum[*]"
+      - "$.components.responses.*.content.*.schema.allOf[*].properties.code.enum[*]"
+    then:
+      function: camara-error-code-dot-format
+    recommended: true
+
+  # --- Group C: Subscription schema checks ---
+
+  camara-cloudevent-specversion:
+    description: "CloudEvent specversion MUST be constrained to enum ['1.0']."
+    message: "specversion must be '1.0', got '{{value}}'."
+    severity: hint
+    given: "$.components.schemas.*.properties.specversion.enum[0]"
+    then:
+      function: pattern
+      functionOptions:
+        match: "^1\\.0$"
+    recommended: true
+
+  camara-subscription-protocol-http:
+    description: "Protocol enum MUST contain only 'HTTP' (only HTTP is allowed for now)."
+    message: "Protocol enum should contain only 'HTTP'. Found '{{value}}'."
+    severity: hint
+    given: "$.components.schemas.Protocol.enum[*]"
+    then:
+      function: pattern
+      functionOptions:
+        match: "^HTTP$"
+    recommended: true
+
+  camara-subscription-sink-https:
+    description: "The 'sink' property MUST have a pattern enforcing HTTPS."
+    message: "sink property must have a pattern enforcing HTTPS (e.g. '^https:\\/\\/.+$')."
+    severity: warn
+    given: "$.components.schemas.*.properties.sink.pattern"
+    then:
+      function: pattern
+      functionOptions:
+        match: "https"
+    recommended: true
+
+  camara-notification-content-type:
+    description: "Notification callback request body MUST use 'application/cloudevents+json' content type."
+    message: "{{error}}"
+    severity: warn
+    given: "$.paths.*.*.callbacks.*.*.post.requestBody.content"
+    then:
+      function: camara-notification-content-type
+    recommended: true
+
+  # --- Group D: Custom JS function rules ---
+
+  camara-datetime-rfc3339-description:
+    description: "Properties with format 'date-time' MUST have a description mentioning RFC 3339."
+    message: "{{error}}"
+    severity: hint
+    given: "$.components.schemas.*"
+    then:
+      function: camara-format-description-check
+      functionOptions:
+        format: "date-time"
+        requiredText: "RFC\\s*3339"
+    recommended: true
+
+  camara-duration-rfc3339-description:
+    description: "Properties with format 'duration' MUST have a description mentioning RFC 3339."
+    message: "{{error}}"
+    severity: hint
+    given: "$.components.schemas.*"
+    then:
+      function: camara-format-description-check
+      functionOptions:
+        format: "duration"
+        requiredText: "RFC\\s*3339"
+    recommended: true
+
+  camara-required-properties-exist:
+    description: "Every property listed in 'required' MUST be defined in 'properties'."
+    message: "{{error}}"
+    severity: warn
+    given: "$.components.schemas.*"
+    then:
+      function: camara-required-properties-exist
+    recommended: true
+
+  camara-array-items-description:
+    description: "Array 'items' MUST have a description when defined inline (not $ref)."
+    message: "{{error}}"
+    severity: warn
+    given: "$.components.schemas.*"
+    then:
+      function: camara-array-items-description
     recommended: true
 
   # ===== OWASP API Security Top 10 2023 =====
