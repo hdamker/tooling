@@ -11,6 +11,7 @@ Design doc references:
 
 from __future__ import annotations
 
+import glob as glob_mod
 import json
 import logging
 import os
@@ -253,20 +254,6 @@ def parse_spectral_output(
     findings = []
     for item in data:
         try:
-            # The OWASP string-restricted rule uses a deep recursive JSONPath
-            # that can traverse Spectral's internally-resolved $ref copies,
-            # producing phantom findings with no source file and range 0:0.
-            # Drop these — they duplicate real findings on the actual source.
-            if (
-                item.get("code") == "owasp:api4:2023-string-restricted"
-                and not item.get("source")
-            ):
-                start = item.get("range", {}).get("start", {})
-                if start.get("line", 0) == 0 and start.get("character", 0) == 0:
-                    logger.debug(
-                        "Dropping phantom string-restricted finding (resolved $ref)"
-                    )
-                    continue
             findings.append(normalize_finding(item, repo_root=repo_root))
         except (KeyError, TypeError) as exc:
             logger.warning("Skipping malformed Spectral finding: %s", exc)
@@ -388,6 +375,38 @@ def _make_error_finding(message: str) -> dict:
     }
 
 
+def _resolve_spec_files(patterns: List[str], cwd: Path) -> List[str]:
+    """Resolve glob patterns to individual file paths (relative to *cwd*).
+
+    Returns a sorted, deduplicated list of relative POSIX-style paths.
+    """
+    files: List[str] = []
+    for pattern in patterns:
+        matched = sorted(glob_mod.glob(str(cwd / pattern)))
+        for abspath in matched:
+            rel = str(PurePosixPath(Path(abspath).relative_to(cwd)))
+            if rel not in files:
+                files.append(rel)
+    return files
+
+
+def _deduplicate_findings(findings: List[dict]) -> List[dict]:
+    """Drop duplicate findings from per-file Spectral runs.
+
+    When the same external schema is resolved independently by multiple
+    input files, identical findings appear once per invocation.  Keep
+    only the first occurrence based on ``(path, line, engine_rule)``.
+    """
+    seen: set[tuple] = set()
+    result: List[dict] = []
+    for f in findings:
+        key = (f.get("path", ""), f.get("line", 0), f.get("engine_rule", ""))
+        if key not in seen:
+            seen.add(key)
+            result.append(f)
+    return result
+
+
 def run_spectral_engine(
     repo_path: Path,
     config_dir: Path,
@@ -396,10 +415,19 @@ def run_spectral_engine(
 ) -> List[dict]:
     """Top-level entry point for the orchestrator.
 
-    Selects the appropriate ruleset, invokes Spectral, and returns a list
-    of findings conforming to the common findings model.  On adapter-level
-    errors (Spectral not installed, runtime error) a single error finding
-    is returned instead of raising.
+    Selects the appropriate ruleset, invokes Spectral **per file**, and
+    returns a deduplicated list of findings conforming to the common
+    findings model.
+
+    Per-file invocation works around a Spectral document-inventory caching
+    bug (`stoplightio/spectral#2640
+    <https://github.com/stoplightio/spectral/issues/2640>`_) that causes
+    source attribution loss when multiple input files share external
+    ``$ref`` targets.
+
+    On adapter-level errors (Spectral not installed, runtime error) an
+    error finding is emitted for the affected file and processing
+    continues with the remaining files.
 
     Args:
         repo_path: Root of the repository being validated.
@@ -417,11 +445,29 @@ def run_spectral_engine(
     ruleset = select_ruleset_path(commonalities_release, config_dir)
     logger.info("Using Spectral ruleset: %s", ruleset)
 
-    result = run_spectral(ruleset, spec_patterns, cwd=repo_path)
+    spec_files = _resolve_spec_files(spec_patterns, repo_path)
+    if not spec_files:
+        logger.warning("No spec files matched patterns: %s", spec_patterns)
+        return []
 
-    if not result.success:
-        logger.error("Spectral engine error: %s", result.error_message)
-        return [_make_error_finding(result.error_message)]
+    all_findings: List[dict] = []
+    for spec_file in spec_files:
+        result = run_spectral(ruleset, [spec_file], cwd=repo_path)
+        if not result.success:
+            logger.error("Spectral error on %s: %s", spec_file, result.error_message)
+            all_findings.append(_make_error_finding(
+                f"{result.error_message} ({spec_file})"
+            ))
+            continue
+        logger.info("Spectral: %s — %d finding(s)", spec_file, len(result.findings))
+        all_findings.extend(result.findings)
 
-    logger.info("Spectral produced %d finding(s)", len(result.findings))
-    return result.findings
+    deduped = _deduplicate_findings(all_findings)
+    if len(deduped) < len(all_findings):
+        logger.info(
+            "Spectral dedup: %d → %d finding(s) (dropped %d cross-file duplicates)",
+            len(all_findings), len(deduped), len(all_findings) - len(deduped),
+        )
+    logger.info("Spectral produced %d finding(s) across %d file(s)",
+                len(deduped), len(spec_files))
+    return deduped
