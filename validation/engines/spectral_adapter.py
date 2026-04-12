@@ -253,18 +253,20 @@ def parse_spectral_output(
     findings = []
     for item in data:
         try:
-            # Spectral's $ref resolution can produce phantom findings with
-            # no source file — the rule fires on internally-resolved copies
-            # rather than actual source files.  These duplicate real findings
-            # that have proper source paths.  Drop any finding without a
-            # source, regardless of line number.
-            if not item.get("source"):
-                logger.debug(
-                    "Dropping phantom finding without source file: %s line %s",
-                    item.get("code", "?"),
-                    item.get("range", {}).get("start", {}).get("line", "?"),
-                )
-                continue
+            # The OWASP string-restricted rule uses a deep recursive JSONPath
+            # that can traverse Spectral's internally-resolved $ref copies,
+            # producing phantom findings with no source file and range 0:0.
+            # Drop these — they duplicate real findings on the actual source.
+            if (
+                item.get("code") == "owasp:api4:2023-string-restricted"
+                and not item.get("source")
+            ):
+                start = item.get("range", {}).get("start", {})
+                if start.get("line", 0) == 0 and start.get("character", 0) == 0:
+                    logger.debug(
+                        "Dropping phantom string-restricted finding (resolved $ref)"
+                    )
+                    continue
             findings.append(normalize_finding(item, repo_root=repo_root))
         except (KeyError, TypeError) as exc:
             logger.warning("Skipping malformed Spectral finding: %s", exc)

@@ -351,8 +351,8 @@ class TestParseSpectralOutput:
         findings = parse_spectral_output(raw, repo_root="/runner/work")
         assert findings[0]["path"] == "code/API_definitions/quality-on-demand.yaml"
 
-    def test_sourceless_phantom_dropped(self):
-        """Phantom findings without a source file are dropped regardless of rule."""
+    def test_string_restricted_phantom_dropped(self):
+        """Phantom string-restricted findings (no source, range 0:0) are dropped."""
         phantom = {
             "code": "owasp:api4:2023-string-restricted",
             "message": "Schema of type string should specify a format.",
@@ -367,23 +367,8 @@ class TestParseSpectralOutput:
         assert len(findings) == 1
         assert findings[0]["engine_rule"] == "camara-parameter-casing-convention"
 
-    def test_sourceless_nonzero_line_also_dropped(self):
-        """Sourceless findings with non-zero lines are still dropped (resolved $ref copies)."""
-        phantom = {
-            "code": "owasp:api4:2023-string-restricted",
-            "message": "Schema of type string should specify a format.",
-            "severity": 1,
-            "source": "",
-            "path": ["components", "schemas", "Foo", "properties", "bar"],
-            "range": {"start": {"line": 233, "character": 14},
-                      "end": {"line": 233, "character": 40}},
-        }
-        raw = json.dumps([phantom])
-        findings = parse_spectral_output(raw)
-        assert len(findings) == 0
-
-    def test_sourceless_other_rule_also_dropped(self):
-        """Sourceless findings from any rule are dropped — not just string-restricted."""
+    def test_other_rule_sourceless_not_dropped(self):
+        """Sourceless findings from other rules are kept (only string-restricted filtered)."""
         other = {
             "code": "owasp:api4:2023-string-limit",
             "message": "Schema of type string must specify maxLength.",
@@ -395,7 +380,7 @@ class TestParseSpectralOutput:
         }
         raw = json.dumps([other])
         findings = parse_spectral_output(raw)
-        assert len(findings) == 0
+        assert len(findings) == 1
 
     def test_external_file_findings_downgraded_to_hint(self):
         """Findings from common schemas (followed via $ref) become hints."""
