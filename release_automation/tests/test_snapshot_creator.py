@@ -22,7 +22,7 @@ from release_automation.scripts.snapshot_creator import (
     InvalidStateError,
     TransformationError,
 )
-from release_automation.scripts.state_manager import ReleaseState
+from release_automation.scripts.state_manager import ReleaseInfoResult, ReleaseState
 from release_automation.scripts.mechanical_transformer import TransformationResult
 from release_automation.scripts.git_operations import PullRequestInfo, GitOperationsError
 
@@ -89,7 +89,9 @@ def mock_metadata_generator():
 def mock_state_manager():
     """Create a mock ReleaseStateManager."""
     mgr = Mock()
-    mgr.derive_state.return_value = ReleaseState.PLANNED
+    mgr.derive_state.return_value = ReleaseInfoResult(
+        success=True, state=ReleaseState.PLANNED,
+        release_tag="r4.1", source="release-plan.yaml")
     return mgr
 
 
@@ -267,9 +269,16 @@ class TestGenerateSnapshotId:
 class TestValidatePreconditions:
     """Tests for precondition validation."""
 
+    def _make_result(self, state):
+        """Helper to create a ReleaseInfoResult for a given state."""
+        return ReleaseInfoResult(
+            success=True, state=state,
+            release_tag="r4.1", source="release-plan.yaml")
+
     def test_valid_planned_state(self, snapshot_creator, mock_state_manager):
         """Test validation passes for PLANNED state."""
-        mock_state_manager.derive_state.return_value = ReleaseState.PLANNED
+        mock_state_manager.derive_state.return_value = self._make_result(
+            ReleaseState.PLANNED)
 
         errors = snapshot_creator.validate_preconditions("r4.1")
 
@@ -277,7 +286,8 @@ class TestValidatePreconditions:
 
     def test_invalid_published_state(self, snapshot_creator, mock_state_manager):
         """Test validation fails for PUBLISHED state."""
-        mock_state_manager.derive_state.return_value = ReleaseState.PUBLISHED
+        mock_state_manager.derive_state.return_value = self._make_result(
+            ReleaseState.PUBLISHED)
 
         errors = snapshot_creator.validate_preconditions("r4.1")
 
@@ -286,7 +296,8 @@ class TestValidatePreconditions:
 
     def test_invalid_snapshot_active_state(self, snapshot_creator, mock_state_manager):
         """Test validation fails for SNAPSHOT_ACTIVE state."""
-        mock_state_manager.derive_state.return_value = ReleaseState.SNAPSHOT_ACTIVE
+        mock_state_manager.derive_state.return_value = self._make_result(
+            ReleaseState.SNAPSHOT_ACTIVE)
 
         errors = snapshot_creator.validate_preconditions("r4.1")
 
@@ -295,7 +306,8 @@ class TestValidatePreconditions:
 
     def test_invalid_draft_ready_state(self, snapshot_creator, mock_state_manager):
         """Test validation fails for DRAFT_READY state."""
-        mock_state_manager.derive_state.return_value = ReleaseState.DRAFT_READY
+        mock_state_manager.derive_state.return_value = self._make_result(
+            ReleaseState.DRAFT_READY)
 
         errors = snapshot_creator.validate_preconditions("r4.1")
 
@@ -304,12 +316,28 @@ class TestValidatePreconditions:
 
     def test_invalid_not_planned_state(self, snapshot_creator, mock_state_manager):
         """Test validation fails for NOT_PLANNED state."""
-        mock_state_manager.derive_state.return_value = ReleaseState.NOT_PLANNED
+        mock_state_manager.derive_state.return_value = self._make_result(
+            ReleaseState.NOT_PLANNED)
 
         errors = snapshot_creator.validate_preconditions("r4.1")
 
         assert len(errors) == 1
         assert "not planned" in errors[0]
+
+    def test_config_error_returns_error(self, snapshot_creator, mock_state_manager):
+        """Test that config errors from derive_state() are surfaced."""
+        from release_automation.scripts.state_manager import ConfigurationError
+        mock_state_manager.derive_state.return_value = ReleaseInfoResult(
+            success=False,
+            config_error=ConfigurationError(
+                error_type="missing_file",
+                message="No release-plan.yaml found",
+                file_path="release-plan.yaml"))
+
+        errors = snapshot_creator.validate_preconditions("r4.1")
+
+        assert len(errors) == 1
+        assert "Configuration error" in errors[0]
 
 
 # --- Tests for create_snapshot ---
@@ -374,7 +402,9 @@ class TestCreateSnapshot:
         sample_release_plan,
     ):
         """Test that validation failure returns early without creating snapshot."""
-        mock_state_manager.derive_state.return_value = ReleaseState.PUBLISHED
+        mock_state_manager.derive_state.return_value = ReleaseInfoResult(
+            success=True, state=ReleaseState.PUBLISHED,
+            release_tag="r4.1", source="tag")
 
         config = SnapshotConfig(release_tag="r4.1")
         result = snapshot_creator.create_snapshot(sample_release_plan, config)

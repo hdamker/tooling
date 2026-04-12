@@ -179,7 +179,7 @@ class ReleaseState(Enum):
 
 - `ReleaseStateManager` — Derives state and reads snapshot metadata from artifacts
 - `SnapshotInfo` — Data read from `release-metadata.yaml` on the snapshot branch (snapshot ID, branches, APIs with calculated versions, dependencies)
-- `ReleaseInfoResult` — Return type from `get_current_release_info()`, includes either state data or a `ConfigurationError`
+- `ReleaseInfoResult` — Return type from `derive_state()`, includes either state data or a `ConfigurationError`
 
 ### 2.2 Version Calculator (`version_calculator.py`)
 
