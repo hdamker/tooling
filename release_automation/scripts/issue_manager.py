@@ -2,40 +2,14 @@
 Issue manager for CAMARA release automation.
 
 This module provides functionality for managing Release Issue content,
-including updating reserved sections, maintaining snapshot history,
-and generating standardized titles.
+including updating reserved sections and generating standardized titles.
 """
 
 import re
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from . import config
-
-
-@dataclass
-class SnapshotHistoryEntry:
-    """
-    Represents an entry in the snapshot history table.
-
-    Note: HISTORY section is deferred to backlog (not MVP).
-    This dataclass is preserved for future implementation.
-
-    Attributes:
-        snapshot_id: Unique identifier (e.g., "r4.1-abc1234")
-        status: Either "Current" or "Discarded"
-        created_at: ISO timestamp when snapshot was created
-        discarded_at: ISO timestamp when discarded (if applicable)
-        reason: Reason for discarding (if applicable)
-        release_review_branch: The release-review branch name
-    """
-    snapshot_id: str
-    status: str  # "Current" or "Discarded"
-    created_at: str
-    discarded_at: Optional[str] = None
-    reason: Optional[str] = None
-    release_review_branch: str = ""
 
 
 class IssueManager:
@@ -52,9 +26,6 @@ class IssueManager:
         - STATE: Current release state, timestamp, and active artifact links
         - CONFIG: Release configuration (APIs, dependencies)
         - ACTIONS: Valid actions for the current state
-
-    Note: HISTORY section has been deferred to backlog (not MVP).
-    The comment trail serves as the audit log.
     """
 
     # Pattern for matching sections (use .format(name=section_name))
@@ -112,103 +83,6 @@ class IssueManager:
         pattern = self.SECTION_PATTERN.format(name=section)
         match = re.search(pattern, body, flags=re.DOTALL)
         return match.group(1) if match else None
-
-    def append_to_history(self, body: str, entry: SnapshotHistoryEntry) -> str:
-        """
-        Add a new entry to the snapshot history table.
-
-        Note: HISTORY section is deferred to backlog (not MVP).
-        This method is preserved for future implementation.
-
-        The entry is inserted after the table header row.
-
-        Args:
-            body: The current issue body
-            entry: Snapshot history entry to add
-
-        Returns:
-            Updated issue body with new history row
-        """
-        # Format the new row
-        discarded = entry.discarded_at or "—"
-        reason = entry.reason or "—"
-
-        new_row = (
-            f"| `{entry.snapshot_id}` | **{entry.status}** | "
-            f"{entry.created_at} | {discarded} | {reason} | "
-            f"`{entry.release_review_branch}` |"
-        )
-
-        # Find the HISTORY section and the table header
-        # Table format:
-        # | Snapshot | Status | Created | Discarded | Reason | Review Branch |
-        # |----------|--------|---------|-----------|--------|---------------|
-        # | ... rows ... |
-
-        history_content = self.get_section_content(body, "HISTORY")
-        if history_content is None:
-            return body
-
-        # Find the header separator line (|---...|) and insert after it
-        lines = history_content.split('\n')
-        insert_index = None
-
-        for i, line in enumerate(lines):
-            # Look for the separator line (contains |---|)
-            if re.match(r'\s*\|[-|]+\|\s*$', line):
-                insert_index = i + 1
-                break
-
-        if insert_index is None:
-            # No table found, just append at the end
-            new_content = history_content.rstrip() + '\n' + new_row
-        else:
-            # Insert the new row after the separator
-            lines.insert(insert_index, new_row)
-            new_content = '\n'.join(lines)
-
-        return self.update_section(body, "HISTORY", new_content)
-
-    def mark_snapshot_discarded(
-        self,
-        body: str,
-        snapshot_id: str,
-        reason: str
-    ) -> str:
-        """
-        Update an existing snapshot entry from 'Current' to 'Discarded'.
-
-        Note: HISTORY section is deferred to backlog (not MVP).
-        This method is preserved for future implementation.
-
-        Finds the row with the matching snapshot_id and updates:
-        - Status: Current → Discarded
-        - Discarded: — → current timestamp
-        - Reason: — → provided reason
-
-        Args:
-            body: The current issue body
-            snapshot_id: The snapshot ID to update
-            reason: Reason for discarding
-
-        Returns:
-            Updated issue body with modified history row
-        """
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
-
-        # Pattern to match the specific row
-        # | `snapshot_id` | **Current** | created_at | — | — | `branch` |
-        pattern = (
-            rf"\| `{re.escape(snapshot_id)}` \| \*\*Current\*\* \| "
-            rf"([^|]+) \| — \| — \| ([^|]+) \|"
-        )
-
-        replacement = (
-            f"| `{snapshot_id}` | Discarded | "
-            f"\\1| {timestamp} | {reason} | \\2|"
-        )
-
-        return re.sub(pattern, replacement, body)
 
     def generate_title(
         self,
@@ -422,7 +296,6 @@ class IssueManager:
         Generate a complete issue body template for a new Release Issue.
 
         This creates the initial structure with all reserved sections.
-        The HISTORY section has been deferred to backlog (not MVP).
 
         Args:
             release_tag: Release tag (e.g., "r4.1")

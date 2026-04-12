@@ -8,43 +8,7 @@ import pytest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from release_automation.scripts.issue_manager import (
-    IssueManager,
-    SnapshotHistoryEntry,
-)
-
-
-class TestSnapshotHistoryEntry:
-    """Tests for SnapshotHistoryEntry dataclass."""
-
-    def test_create_current_entry(self):
-        """Test creating an entry for a current snapshot."""
-        entry = SnapshotHistoryEntry(
-            snapshot_id="r4.1-abc1234",
-            status="Current",
-            created_at="2026-01-30 10:00",
-            release_review_branch="release-review/r4.1-abc1234"
-        )
-
-        assert entry.snapshot_id == "r4.1-abc1234"
-        assert entry.status == "Current"
-        assert entry.discarded_at is None
-        assert entry.reason is None
-
-    def test_create_discarded_entry(self):
-        """Test creating an entry for a discarded snapshot."""
-        entry = SnapshotHistoryEntry(
-            snapshot_id="r4.1-abc1234",
-            status="Discarded",
-            created_at="2026-01-30 10:00",
-            discarded_at="2026-01-30 12:00",
-            reason="API validation failed",
-            release_review_branch="release-review/r4.1-abc1234"
-        )
-
-        assert entry.status == "Discarded"
-        assert entry.discarded_at == "2026-01-30 12:00"
-        assert entry.reason == "API validation failed"
+from release_automation.scripts.issue_manager import IssueManager
 
 
 class TestIssueManagerUpdateSection:
@@ -144,107 +108,6 @@ class TestIssueManagerGetSectionContent:
         content = manager.get_section_content(body, "STATE")
 
         assert content is None
-
-
-class TestIssueManagerAppendToHistory:
-    """Tests for append_to_history method."""
-
-    def test_append_first_entry(self):
-        """Test appending the first entry to an empty history table."""
-        manager = IssueManager()
-
-        body = """<!-- BEGIN:HISTORY -->
-| Snapshot | Status | Created | Discarded | Reason | Review Branch |
-|----------|--------|---------|-----------|--------|---------------|
-<!-- END:HISTORY -->"""
-
-        entry = SnapshotHistoryEntry(
-            snapshot_id="r4.1-abc1234",
-            status="Current",
-            created_at="2026-01-30 10:00",
-            release_review_branch="release-review/r4.1-abc1234"
-        )
-
-        result = manager.append_to_history(body, entry)
-
-        assert "`r4.1-abc1234`" in result
-        assert "**Current**" in result
-        assert "2026-01-30 10:00" in result
-        assert "`release-review/r4.1-abc1234`" in result
-
-    def test_append_second_entry(self):
-        """Test appending a second entry (newest at top)."""
-        manager = IssueManager()
-
-        body = """<!-- BEGIN:HISTORY -->
-| Snapshot | Status | Created | Discarded | Reason | Review Branch |
-|----------|--------|---------|-----------|--------|---------------|
-| `r4.1-abc1234` | Discarded | 2026-01-29 10:00 | 2026-01-29 12:00 | Failed | `release-review/r4.1-abc1234` |
-<!-- END:HISTORY -->"""
-
-        entry = SnapshotHistoryEntry(
-            snapshot_id="r4.1-def5678",
-            status="Current",
-            created_at="2026-01-30 10:00",
-            release_review_branch="release-review/r4.1-def5678"
-        )
-
-        result = manager.append_to_history(body, entry)
-
-        # New entry should be present
-        assert "`r4.1-def5678`" in result
-        # Old entry should still be present
-        assert "`r4.1-abc1234`" in result
-        # New entry should appear before old entry
-        new_pos = result.find("r4.1-def5678")
-        old_pos = result.find("r4.1-abc1234")
-        assert new_pos < old_pos
-
-    def test_append_with_defaults_for_optional_fields(self):
-        """Test that optional fields default to em-dash."""
-        manager = IssueManager()
-
-        body = """<!-- BEGIN:HISTORY -->
-| Snapshot | Status | Created | Discarded | Reason | Review Branch |
-|----------|--------|---------|-----------|--------|---------------|
-<!-- END:HISTORY -->"""
-
-        entry = SnapshotHistoryEntry(
-            snapshot_id="r4.1-abc1234",
-            status="Current",
-            created_at="2026-01-30 10:00",
-            release_review_branch="release-review/r4.1-abc1234"
-            # discarded_at and reason are None
-        )
-
-        result = manager.append_to_history(body, entry)
-
-        # Should have em-dashes for discarded and reason
-        assert "| — |" in result
-
-
-class TestIssueManagerMarkSnapshotDiscarded:
-    """Tests for mark_snapshot_discarded method."""
-
-    @patch('release_automation.scripts.issue_manager.datetime')
-    def test_mark_discarded(self, mock_datetime):
-        """Test marking a snapshot as discarded."""
-        mock_datetime.now.return_value = datetime(2026, 1, 30, 12, 0, tzinfo=timezone.utc)
-
-        manager = IssueManager()
-
-        body = """| `r4.1-abc1234` | **Current** | 2026-01-30 10:00 | — | — | `release-review/r4.1-abc1234` |"""
-
-        result = manager.mark_snapshot_discarded(
-            body,
-            snapshot_id="r4.1-abc1234",
-            reason="Validation failed"
-        )
-
-        assert "Discarded" in result
-        assert "2026-01-30 12:00" in result
-        assert "Validation failed" in result
-        assert "**Current**" not in result
 
 
 class TestIssueManagerGenerateTitle:
@@ -514,25 +377,6 @@ old
         result = manager.update_section(body, "STATE", new_content)
 
         assert new_content in result
-
-    def test_history_without_table_structure(self):
-        """Test appending to history when table structure is missing."""
-        manager = IssueManager()
-
-        body = """<!-- BEGIN:HISTORY -->
-Some malformed content without table
-<!-- END:HISTORY -->"""
-
-        entry = SnapshotHistoryEntry(
-            snapshot_id="r4.1-abc1234",
-            status="Current",
-            created_at="2026-01-30 10:00",
-            release_review_branch="release-review/r4.1-abc1234"
-        )
-
-        # Should not crash, just append
-        result = manager.append_to_history(body, entry)
-        assert "`r4.1-abc1234`" in result
 
     def test_get_section_with_nested_comments(self):
         """Test getting section that might have nested HTML comments."""
