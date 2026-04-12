@@ -193,11 +193,12 @@ runs:
                 f.write(f"commonalities_release={snapshot.commonalities_release}\n")
                 f.write(f"identity_consent_management_release={snapshot.identity_consent_management_release}\n")
             else:
-                # No snapshot — use plan data (already read above) for PLANNED state context
+                # No snapshot — read plan data for PLANNED state context
                 plan_apis = []
                 plan_commonalities = ""
                 plan_icm = ""
                 plan_rtype = release_info.release_type or ""
+                plan, _ = manager._read_release_plan_with_validation()
                 if plan:
                     for api in plan.get("apis", []):
                         plan_apis.append({
