@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import List, Optional
@@ -292,10 +294,13 @@ def run_spectral(
 ) -> SpectralResult:
     """Invoke Spectral CLI and capture structured output.
 
-    Uses ``--format json`` for machine-readable output.  The default
-    ``--fail-severity error`` means exit 0 for warnings-only and exit 1
-    when errors are present — both are normal operation with valid JSON
-    on stdout.
+    Uses ``--format json`` for machine-readable output.  Output is written
+    to a temporary file via Spectral's ``--output`` flag to avoid Node.js
+    stdout pipe truncation on large result sets (>64 KB).
+
+    The default ``--fail-severity error`` means exit 0 for warnings-only
+    and exit 1 when errors are present — both are normal operation with
+    valid JSON in the output file.
 
     Args:
         ruleset_path: Path to the Spectral ruleset file.
@@ -307,48 +312,67 @@ def run_spectral(
     Returns:
         :class:`SpectralResult` with parsed findings and status.
     """
-    cmd = [
-        "spectral",
-        "lint",
-        "--format", "json",
-        "--quiet",
-        "--ruleset", str(ruleset_path),
-        *spec_patterns,
-    ]
-
+    # Create a temp file for Spectral JSON output.  Placed in cwd to stay
+    # on the same filesystem.  delete=False so we control cleanup.
+    fd, output_path = tempfile.mkstemp(suffix=".json", dir=str(cwd))
+    output_file = Path(output_path)
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            cwd=str(cwd),
-            timeout=300,
-        )
-    except FileNotFoundError:
+        # Close the fd immediately — Spectral will open the file by name.
+        os.close(fd)
+
+        cmd = [
+            "spectral",
+            "lint",
+            "--format", "json",
+            "--quiet",
+            "--output", str(output_file),
+            "--ruleset", str(ruleset_path),
+            *spec_patterns,
+        ]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                cwd=str(cwd),
+                timeout=300,
+            )
+        except FileNotFoundError:
+            return SpectralResult(
+                findings=[],
+                success=False,
+                error_message="Spectral CLI not found — is @stoplight/spectral-cli installed?",
+            )
+        except subprocess.TimeoutExpired:
+            return SpectralResult(
+                findings=[],
+                success=False,
+                error_message="Spectral timed out after 300 seconds",
+            )
+
+        # Exit 0 or 1: normal operation (findings may or may not exist).
+        if result.returncode in (0, 1):
+            if output_file.exists() and output_file.stat().st_size > 0:
+                json_text = output_file.read_text(encoding="utf-8")
+            else:
+                logger.warning(
+                    "Spectral output file is empty or missing (exit %d)",
+                    result.returncode,
+                )
+                json_text = ""
+            findings = parse_spectral_output(json_text, repo_root=str(cwd))
+            return SpectralResult(findings=findings, success=True)
+
+        # Exit 2+: Spectral runtime error.
+        stderr = result.stderr.strip() if result.stderr else "unknown error"
         return SpectralResult(
             findings=[],
             success=False,
-            error_message="Spectral CLI not found — is @stoplight/spectral-cli installed?",
+            error_message=f"Spectral exited with code {result.returncode}: {stderr}",
         )
-    except subprocess.TimeoutExpired:
-        return SpectralResult(
-            findings=[],
-            success=False,
-            error_message="Spectral timed out after 300 seconds",
-        )
-
-    # Exit 0 or 1: normal operation (findings may or may not exist).
-    if result.returncode in (0, 1):
-        findings = parse_spectral_output(result.stdout, repo_root=str(cwd))
-        return SpectralResult(findings=findings, success=True)
-
-    # Exit 2+: Spectral runtime error.
-    stderr = result.stderr.strip() if result.stderr else "unknown error"
-    return SpectralResult(
-        findings=[],
-        success=False,
-        error_message=f"Spectral exited with code {result.returncode}: {stderr}",
-    )
+    finally:
+        output_file.unlink(missing_ok=True)
 
 
 def _make_error_finding(message: str) -> dict:

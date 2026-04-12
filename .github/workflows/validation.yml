@@ -182,11 +182,11 @@ jobs:
         if: >-
           always() && steps.validation.outcome == 'success'
           && github.event_name == 'pull_request'
-          && vars.VALIDATION_APP_ID != ''
+          && vars.VALIDATION_APP_CLIENT_ID != ''
         continue-on-error: true
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.VALIDATION_APP_ID }}
+          client-id: ${{ vars.VALIDATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.VALIDATION_APP_PRIVATE_KEY }}
 
       # ── Step 9: Resolve write access ───────────────────────────

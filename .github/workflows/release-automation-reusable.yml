@@ -422,10 +422,10 @@ jobs:
 
       - name: Generate App Token
         id: app-token
-        if: steps.decide.outputs.action == 'post_comment' && vars.RELEASE_APP_ID != ''
+        if: steps.decide.outputs.action == 'post_comment' && vars.RELEASE_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Checkout tooling (for slash command)
@@ -798,10 +798,10 @@ jobs:
     steps:
       - name: Generate App Token
         id: app-token
-        if: vars.RELEASE_APP_ID != ''
+        if: vars.RELEASE_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Checkout tooling
@@ -922,10 +922,10 @@ jobs:
     steps:
       - name: Generate App Token
         id: app-token
-        if: vars.RELEASE_APP_ID != ''
+        if: vars.RELEASE_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Discard Snapshot
@@ -1032,10 +1032,10 @@ jobs:
     steps:
       - name: Generate App Token
         id: app-token
-        if: vars.RELEASE_APP_ID != ''
+        if: vars.RELEASE_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Delete Draft Release
@@ -1160,10 +1160,10 @@ jobs:
     steps:
       - name: Generate App Token
         id: app-token
-        if: vars.RELEASE_APP_ID != ''
+        if: vars.RELEASE_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Checkout tooling
@@ -1239,10 +1239,10 @@ jobs:
 
       - name: Generate App Token
         id: app-token
-        if: vars.RELEASE_APP_ID != ''
+        if: vars.RELEASE_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Execute Publish Flow
@@ -1377,10 +1377,10 @@ jobs:
 
       - name: Generate App Token
         id: app-token
-        if: vars.RELEASE_APP_ID != ''
+        if: vars.RELEASE_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Copy README release info from tag
@@ -1596,10 +1596,10 @@ jobs:
     steps:
       - name: Generate App Token
         id: app-token
-        if: vars.RELEASE_APP_ID != ''
+        if: vars.RELEASE_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Extract CHANGELOG release notes
@@ -1837,10 +1837,10 @@ jobs:
     steps:
       - name: Generate App Token
         id: app-token
-        if: vars.RELEASE_APP_ID != ''
+        if: vars.RELEASE_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Checkout tooling
@@ -1946,10 +1946,10 @@ jobs:
     steps:
       - name: Generate App Token
         id: app-token
-        if: vars.RELEASE_APP_ID != ''
+        if: vars.RELEASE_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Checkout tooling
@@ -2117,10 +2117,10 @@ jobs:
     steps:
       - name: Generate App Token
         id: app-token
-        if: vars.RELEASE_APP_ID != ''
+        if: vars.RELEASE_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Checkout tooling
