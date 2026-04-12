@@ -13,7 +13,9 @@ from validation.engines.spectral_adapter import (
     DEFAULT_RULESET,
     ENGINE_NAME,
     SpectralResult,
+    _deduplicate_findings,
     _normalize_path,
+    _resolve_spec_files,
     derive_api_name,
     map_severity,
     normalize_finding,
@@ -351,9 +353,10 @@ class TestParseSpectralOutput:
         findings = parse_spectral_output(raw, repo_root="/runner/work")
         assert findings[0]["path"] == "code/API_definitions/quality-on-demand.yaml"
 
-    def test_string_restricted_phantom_dropped(self):
-        """Phantom string-restricted findings (no source, range 0:0) are dropped."""
-        phantom = {
+    def test_sourceless_findings_pass_through(self):
+        """Sourceless findings are not filtered — per-file invocation
+        avoids the shared-cache bug that caused them (spectral#2640)."""
+        sourceless = {
             "code": "owasp:api4:2023-string-restricted",
             "message": "Schema of type string should specify a format.",
             "severity": 1,
@@ -362,25 +365,9 @@ class TestParseSpectralOutput:
             "range": {"start": {"line": 0, "character": 0},
                       "end": {"line": 0, "character": 0}},
         }
-        raw = json.dumps([SAMPLE_SPECTRAL_FINDING, phantom])
+        raw = json.dumps([SAMPLE_SPECTRAL_FINDING, sourceless])
         findings = parse_spectral_output(raw)
-        assert len(findings) == 1
-        assert findings[0]["engine_rule"] == "camara-parameter-casing-convention"
-
-    def test_other_rule_sourceless_not_dropped(self):
-        """Sourceless findings from other rules are kept (only string-restricted filtered)."""
-        other = {
-            "code": "owasp:api4:2023-string-limit",
-            "message": "Schema of type string must specify maxLength.",
-            "severity": 1,
-            "source": "",
-            "path": ["components", "schemas", "Foo", "properties", "bar"],
-            "range": {"start": {"line": 0, "character": 0},
-                      "end": {"line": 0, "character": 0}},
-        }
-        raw = json.dumps([other])
-        findings = parse_spectral_output(raw)
-        assert len(findings) == 1
+        assert len(findings) == 2
 
     def test_external_file_findings_downgraded_to_hint(self):
         """Findings from common schemas (followed via $ref) become hints."""
@@ -556,56 +543,188 @@ class TestRunSpectral:
 # ---------------------------------------------------------------------------
 
 
-class TestRunSpectralEngine:
-    @patch("validation.engines.spectral_adapter.run_spectral")
-    def test_normal_execution(self, mock_run, tmp_path):
-        findings = [{"engine": "spectral", "engine_rule": "r1", "level": "warn",
-                      "message": "m", "path": "f.yaml", "line": 1}]
-        mock_run.return_value = SpectralResult(findings=findings, success=True)
-        (tmp_path / ".spectral.yaml").touch()
+class TestResolveSpecFiles:
+    def test_glob_resolves_to_individual_files(self, tmp_path):
+        api_dir = tmp_path / "code" / "API_definitions"
+        api_dir.mkdir(parents=True)
+        (api_dir / "alpha.yaml").touch()
+        (api_dir / "beta.yaml").touch()
 
-        result = run_spectral_engine(tmp_path, tmp_path, commonalities_release="r4.1")
-        assert result == findings
+        files = _resolve_spec_files(["code/API_definitions/*.yaml"], tmp_path)
+        assert files == [
+            "code/API_definitions/alpha.yaml",
+            "code/API_definitions/beta.yaml",
+        ]
 
-    @patch("validation.engines.spectral_adapter.run_spectral")
-    def test_spectral_error_returns_error_finding(self, mock_run, tmp_path):
-        mock_run.return_value = SpectralResult(
-            findings=[], success=False, error_message="CLI not found",
+    def test_no_matches_returns_empty(self, tmp_path):
+        assert _resolve_spec_files(["nonexistent/*.yaml"], tmp_path) == []
+
+    def test_deduplicates_overlapping_patterns(self, tmp_path):
+        api_dir = tmp_path / "code" / "API_definitions"
+        api_dir.mkdir(parents=True)
+        (api_dir / "api.yaml").touch()
+
+        files = _resolve_spec_files(
+            ["code/API_definitions/*.yaml", "code/API_definitions/api.yaml"],
+            tmp_path,
         )
-        (tmp_path / ".spectral.yaml").touch()
+        assert files == ["code/API_definitions/api.yaml"]
 
-        result = run_spectral_engine(tmp_path, tmp_path)
+    def test_multiple_patterns(self, tmp_path):
+        api_dir = tmp_path / "code" / "API_definitions"
+        bundled_dir = tmp_path / "bundled"
+        api_dir.mkdir(parents=True)
+        bundled_dir.mkdir()
+        (api_dir / "api.yaml").touch()
+        (bundled_dir / "bundled.yaml").touch()
+
+        files = _resolve_spec_files(
+            ["code/API_definitions/*.yaml", "bundled/*.yaml"], tmp_path,
+        )
+        assert "code/API_definitions/api.yaml" in files
+        assert "bundled/bundled.yaml" in files
+
+
+# ---------------------------------------------------------------------------
+# TestDeduplicateFindings
+# ---------------------------------------------------------------------------
+
+
+class TestDeduplicateFindings:
+    def test_identical_findings_deduped(self):
+        f1 = {"path": "common.yaml", "line": 72, "engine_rule": "rule-a",
+               "level": "hint", "message": "msg"}
+        f2 = {"path": "common.yaml", "line": 72, "engine_rule": "rule-a",
+               "level": "hint", "message": "msg"}
+        assert len(_deduplicate_findings([f1, f2])) == 1
+
+    def test_different_lines_kept(self):
+        f1 = {"path": "common.yaml", "line": 72, "engine_rule": "rule-a"}
+        f2 = {"path": "common.yaml", "line": 76, "engine_rule": "rule-a"}
+        assert len(_deduplicate_findings([f1, f2])) == 2
+
+    def test_different_rules_kept(self):
+        f1 = {"path": "common.yaml", "line": 72, "engine_rule": "rule-a"}
+        f2 = {"path": "common.yaml", "line": 72, "engine_rule": "rule-b"}
+        assert len(_deduplicate_findings([f1, f2])) == 2
+
+    def test_different_files_kept(self):
+        f1 = {"path": "api-a.yaml", "line": 10, "engine_rule": "rule-a"}
+        f2 = {"path": "api-b.yaml", "line": 10, "engine_rule": "rule-a"}
+        assert len(_deduplicate_findings([f1, f2])) == 2
+
+    def test_preserves_order(self):
+        findings = [
+            {"path": "b.yaml", "line": 1, "engine_rule": "r1"},
+            {"path": "a.yaml", "line": 1, "engine_rule": "r1"},
+            {"path": "b.yaml", "line": 1, "engine_rule": "r1"},  # dup
+        ]
+        result = _deduplicate_findings(findings)
+        assert len(result) == 2
+        assert result[0]["path"] == "b.yaml"
+        assert result[1]["path"] == "a.yaml"
+
+    def test_empty_list(self):
+        assert _deduplicate_findings([]) == []
+
+
+# ---------------------------------------------------------------------------
+# TestRunSpectralEngine
+# ---------------------------------------------------------------------------
+
+
+class TestRunSpectralEngine:
+    def _make_spec_files(self, tmp_path, names):
+        """Create spec files and return the tmp_path for use as repo_path."""
+        api_dir = tmp_path / "code" / "API_definitions"
+        api_dir.mkdir(parents=True)
+        for name in names:
+            (api_dir / name).touch()
+        (tmp_path / ".spectral.yaml").touch()
+        return tmp_path
+
+    @patch("validation.engines.spectral_adapter.run_spectral")
+    def test_invokes_spectral_per_file(self, mock_run, tmp_path):
+        """Each spec file gets its own Spectral invocation."""
+        repo = self._make_spec_files(tmp_path, ["alpha.yaml", "beta.yaml"])
+        mock_run.return_value = SpectralResult(findings=[], success=True)
+
+        run_spectral_engine(repo, repo)
+        assert mock_run.call_count == 2
+        # Each call gets a single-element list.
+        calls = [c[0][1] for c in mock_run.call_args_list]
+        assert ["code/API_definitions/alpha.yaml"] in calls
+        assert ["code/API_definitions/beta.yaml"] in calls
+
+    @patch("validation.engines.spectral_adapter.run_spectral")
+    def test_merges_findings_across_files(self, mock_run, tmp_path):
+        repo = self._make_spec_files(tmp_path, ["a.yaml", "b.yaml"])
+
+        def per_file(ruleset, patterns, cwd):
+            name = patterns[0].split("/")[-1]
+            return SpectralResult(
+                findings=[{"engine": "spectral", "engine_rule": "r1",
+                           "level": "warn", "message": name,
+                           "path": patterns[0], "line": 1}],
+                success=True,
+            )
+        mock_run.side_effect = per_file
+
+        result = run_spectral_engine(repo, repo)
+        assert len(result) == 2
+
+    @patch("validation.engines.spectral_adapter.run_spectral")
+    def test_deduplicates_common_file_findings(self, mock_run, tmp_path):
+        """Findings from shared code/common/ schemas are deduped across files."""
+        repo = self._make_spec_files(tmp_path, ["a.yaml", "b.yaml"])
+        common_finding = {"engine": "spectral", "engine_rule": "owasp-rule",
+                          "level": "hint", "message": "msg",
+                          "path": "code/common/CAMARA_common.yaml", "line": 72}
+
+        mock_run.return_value = SpectralResult(
+            findings=[common_finding], success=True,
+        )
+
+        result = run_spectral_engine(repo, repo)
+        # Same finding from two files → kept once.
         assert len(result) == 1
-        assert result[0]["level"] == "error"
-        assert result[0]["engine_rule"] == "spectral-execution-error"
-        assert "CLI not found" in result[0]["message"]
 
     @patch("validation.engines.spectral_adapter.run_spectral")
-    def test_default_spec_patterns(self, mock_run, tmp_path):
-        mock_run.return_value = SpectralResult(findings=[], success=True)
-        (tmp_path / ".spectral.yaml").touch()
+    def test_error_on_one_file_continues_others(self, mock_run, tmp_path):
+        repo = self._make_spec_files(tmp_path, ["good.yaml", "bad.yaml"])
+        good_finding = {"engine": "spectral", "engine_rule": "r1",
+                        "level": "warn", "message": "m",
+                        "path": "code/API_definitions/good.yaml", "line": 1}
 
-        run_spectral_engine(tmp_path, tmp_path)
-        call_args = mock_run.call_args
-        assert call_args[0][1] == ["code/API_definitions/*.yaml"]
+        def per_file(ruleset, patterns, cwd):
+            if "bad.yaml" in patterns[0]:
+                return SpectralResult(findings=[], success=False,
+                                      error_message="CLI not found")
+            return SpectralResult(findings=[good_finding], success=True)
+        mock_run.side_effect = per_file
+
+        result = run_spectral_engine(repo, repo)
+        # One real finding + one error finding for the bad file.
+        assert len(result) == 2
+        error_findings = [f for f in result if f["level"] == "error"]
+        assert len(error_findings) == 1
+        assert "bad.yaml" in error_findings[0]["message"]
 
     @patch("validation.engines.spectral_adapter.run_spectral")
-    def test_custom_spec_patterns(self, mock_run, tmp_path):
-        mock_run.return_value = SpectralResult(findings=[], success=True)
+    def test_no_matching_files_returns_empty(self, mock_run, tmp_path):
         (tmp_path / ".spectral.yaml").touch()
-
-        custom = ["bundled/*.yaml"]
-        run_spectral_engine(tmp_path, tmp_path, spec_patterns=custom)
-        call_args = mock_run.call_args
-        assert call_args[0][1] == custom
+        # No spec files created.
+        result = run_spectral_engine(tmp_path, tmp_path)
+        assert result == []
+        mock_run.assert_not_called()
 
     @patch("validation.engines.spectral_adapter.run_spectral")
     def test_ruleset_selection_uses_commonalities(self, mock_run, tmp_path):
         """Verifies that the correct ruleset is selected and passed."""
-        mock_run.return_value = SpectralResult(findings=[], success=True)
+        repo = self._make_spec_files(tmp_path, ["api.yaml"])
         r4 = tmp_path / ".spectral-r4.yaml"
         r4.touch()
+        mock_run.return_value = SpectralResult(findings=[], success=True)
 
-        run_spectral_engine(tmp_path, tmp_path, commonalities_release="r4.2")
-        call_args = mock_run.call_args
-        assert call_args[0][0] == r4
+        run_spectral_engine(repo, repo, commonalities_release="r4.2")
+        assert mock_run.call_args[0][0] == r4
