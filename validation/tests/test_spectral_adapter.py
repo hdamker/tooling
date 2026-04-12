@@ -401,12 +401,30 @@ class TestParseSpectralOutput:
 # ---------------------------------------------------------------------------
 
 
+def _spectral_side_effect(
+    json_content: str,
+    returncode: int = 0,
+    stderr: str = "",
+):
+    """Create a subprocess.run side_effect that writes JSON to the --output file.
+
+    Simulates Spectral's behaviour: it writes results to the file specified
+    by ``--output`` and exits with the given return code.
+    """
+    def side_effect(cmd, **kwargs):
+        output_idx = cmd.index("--output")
+        output_path = Path(cmd[output_idx + 1])
+        output_path.write_text(json_content, encoding="utf-8")
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=returncode, stdout="", stderr=stderr,
+        )
+    return side_effect
+
+
 class TestRunSpectral:
     @patch("validation.engines.spectral_adapter.subprocess.run")
     def test_exit_0_no_findings(self, mock_run, tmp_path):
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="[]", stderr="",
-        )
+        mock_run.side_effect = _spectral_side_effect("[]", returncode=0)
         result = run_spectral(
             tmp_path / ".spectral.yaml", ["*.yaml"], cwd=tmp_path,
         )
@@ -416,11 +434,8 @@ class TestRunSpectral:
 
     @patch("validation.engines.spectral_adapter.subprocess.run")
     def test_exit_1_with_findings(self, mock_run, tmp_path):
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=1,
-            stdout=json.dumps([SAMPLE_SPECTRAL_FINDING]),
-            stderr="",
+        mock_run.side_effect = _spectral_side_effect(
+            json.dumps([SAMPLE_SPECTRAL_FINDING]), returncode=1,
         )
         result = run_spectral(
             tmp_path / ".spectral.yaml", ["*.yaml"], cwd=tmp_path,
@@ -431,8 +446,8 @@ class TestRunSpectral:
 
     @patch("validation.engines.spectral_adapter.subprocess.run")
     def test_exit_2_runtime_error(self, mock_run, tmp_path):
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=2, stdout="", stderr="Error: invalid ruleset",
+        mock_run.side_effect = _spectral_side_effect(
+            "", returncode=2, stderr="Error: invalid ruleset",
         )
         result = run_spectral(
             tmp_path / ".spectral.yaml", ["*.yaml"], cwd=tmp_path,
@@ -465,9 +480,8 @@ class TestRunSpectral:
             **SAMPLE_SPECTRAL_FINDING,
             "source": f"{tmp_path}/code/API_definitions/quality-on-demand.yaml",
         }
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=1,
-            stdout=json.dumps([abs_finding]), stderr="",
+        mock_run.side_effect = _spectral_side_effect(
+            json.dumps([abs_finding]), returncode=1,
         )
         result = run_spectral(
             tmp_path / ".spectral.yaml", ["*.yaml"], cwd=tmp_path,
@@ -476,19 +490,65 @@ class TestRunSpectral:
         assert result.findings[0]["path"] == "code/API_definitions/quality-on-demand.yaml"
 
     @patch("validation.engines.spectral_adapter.subprocess.run")
-    def test_command_includes_ruleset_and_patterns(self, mock_run, tmp_path):
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="[]", stderr="",
-        )
+    def test_command_includes_output_flag_and_patterns(self, mock_run, tmp_path):
+        mock_run.side_effect = _spectral_side_effect("[]", returncode=0)
         ruleset = tmp_path / ".spectral-r4.yaml"
         run_spectral(ruleset, ["code/API_definitions/*.yaml"], cwd=tmp_path)
         call_args = mock_run.call_args
         cmd = call_args[0][0]
         assert "--ruleset" in cmd
         assert "--quiet" in cmd
+        assert "--output" in cmd
         assert str(ruleset) in cmd
         assert "code/API_definitions/*.yaml" in cmd
         assert call_args[1]["cwd"] == str(tmp_path)
+
+    @patch("validation.engines.spectral_adapter.subprocess.run")
+    def test_temp_file_cleaned_up_on_success(self, mock_run, tmp_path):
+        """Temp output file is removed after successful invocation."""
+        mock_run.side_effect = _spectral_side_effect("[]", returncode=0)
+        run_spectral(tmp_path / ".spectral.yaml", ["*.yaml"], cwd=tmp_path)
+        # No leftover .json files in the working directory.
+        remaining = list(tmp_path.glob("*.json"))
+        assert remaining == []
+
+    @patch("validation.engines.spectral_adapter.subprocess.run")
+    def test_temp_file_cleaned_up_on_error(self, mock_run, tmp_path):
+        """Temp output file is removed even when Spectral fails."""
+        mock_run.side_effect = _spectral_side_effect(
+            "", returncode=2, stderr="boom",
+        )
+        run_spectral(tmp_path / ".spectral.yaml", ["*.yaml"], cwd=tmp_path)
+        remaining = list(tmp_path.glob("*.json"))
+        assert remaining == []
+
+    @patch("validation.engines.spectral_adapter.subprocess.run")
+    def test_temp_file_cleaned_up_on_timeout(self, mock_run, tmp_path):
+        """Temp output file is removed when Spectral times out."""
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="spectral", timeout=300)
+        run_spectral(tmp_path / ".spectral.yaml", ["*.yaml"], cwd=tmp_path)
+        remaining = list(tmp_path.glob("*.json"))
+        assert remaining == []
+
+    @patch("validation.engines.spectral_adapter.subprocess.run")
+    def test_large_output_over_64kb(self, mock_run, tmp_path):
+        """Output larger than 64 KB is correctly read from file (the original bug)."""
+        # Generate >64 KB of JSON findings.
+        findings_data = []
+        for i in range(200):
+            findings_data.append({
+                **SAMPLE_SPECTRAL_FINDING,
+                "message": f"Finding {i}: {'x' * 300}",
+            })
+        large_json = json.dumps(findings_data)
+        assert len(large_json) > 65536, "Test data must exceed 64 KB"
+
+        mock_run.side_effect = _spectral_side_effect(large_json, returncode=1)
+        result = run_spectral(
+            tmp_path / ".spectral.yaml", ["*.yaml"], cwd=tmp_path,
+        )
+        assert result.success is True
+        assert len(result.findings) == 200
 
 
 # ---------------------------------------------------------------------------
