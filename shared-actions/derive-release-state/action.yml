@@ -10,12 +10,6 @@ description: |
   - SNAPSHOT_ACTIVE/DRAFT_READY: from release-metadata.yaml on snapshot branch
   - PUBLISHED: from the git tag
 
-inputs:
-  release_tag:
-    description: "Release tag to check - DEPRECATED: leave empty to auto-derive from repository artifacts"
-    required: false
-    default: ""
-
 outputs:
   release_tag:
     description: "Release tag from authoritative source (release-plan.yaml or release-metadata.yaml)"
@@ -90,7 +84,6 @@ runs:
       env:
         GITHUB_TOKEN: ${{ github.token }}
         GITHUB_SERVER_URL: ${{ github.server_url }}
-        RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
         REPO: ${{ github.repository }}
         SCRIPTS_PATH: ${{ github.action_path }}/../../release_automation/scripts
       run: |
@@ -112,14 +105,13 @@ runs:
         # Initialize clients
         repo = os.environ['REPO']
         token = os.environ.get('GITHUB_TOKEN')
-        release_tag_input = os.environ.get('RELEASE_TAG_INPUT', '').strip()
         server_url = os.environ.get('GITHUB_SERVER_URL', 'https://github.com')
 
         gh = GitHubClient(repo=repo, token=token)
         manager = ReleaseStateManager(github_client=gh)
 
-        # Get release info from repository artifacts (authoritative source)
-        release_info = manager.get_current_release_info()
+        # Derive state from repository artifacts (authoritative source)
+        release_info = manager.derive_state()
         output_file = os.environ['GITHUB_OUTPUT']
 
         # Handle configuration errors
@@ -172,11 +164,7 @@ runs:
         if snapshot and snapshot.src_commit_sha:
             src_commit_sha_short = snapshot.src_commit_sha[:7]
             
-        # Read meta_release from release-plan.yaml (raw cycle name, e.g., "Sync26")
-        meta_release = ""
-        plan = manager._read_release_plan()
-        if plan:
-            meta_release = plan.get("repository", {}).get("meta_release", "") or ""
+        meta_release = release_info.meta_release or ""
 
         # Write outputs to GITHUB_OUTPUT
         with open(output_file, 'a') as f:

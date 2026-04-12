@@ -147,11 +147,20 @@ class IssueSyncManager:
         self.ensure_labels_exist()
 
         # Derive current state
-        state = state_override or self.state_manager.derive_state(
-            release_tag,
-            retry_draft_release=True,
-        )
-        context_source = "override" if state_override else "re-derived"
+        if state_override:
+            state = state_override
+            context_source = "override"
+        else:
+            release_info = self.state_manager.derive_state(
+                retry_draft_release=True,
+            )
+            if not release_info.success:
+                return SyncResult(
+                    action="none",
+                    reason=f"config_error: {release_info.config_error.message}",
+                )
+            state = release_info.state
+            context_source = "re-derived"
         print(
             f"Issue sync effective context: source={context_source}, "
             f"state={state.value}, "

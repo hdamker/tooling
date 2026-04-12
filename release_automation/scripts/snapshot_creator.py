@@ -480,7 +480,13 @@ class SnapshotCreator:
         errors = []
 
         # Check current state
-        state = self.state_manager.derive_state(release_tag)
+        release_info = self.state_manager.derive_state()
+        if not release_info.success:
+            errors.append(
+                f"Configuration error: {release_info.config_error.message}"
+            )
+            return errors
+        state = release_info.state
 
         if state == ReleaseState.PUBLISHED:
             errors.append(

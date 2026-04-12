@@ -13,7 +13,7 @@ from release_automation.scripts.issue_sync import (
     WORKFLOW_MARKER,
     REQUIRED_LABELS,
 )
-from release_automation.scripts.state_manager import ReleaseState
+from release_automation.scripts.state_manager import ReleaseInfoResult, ReleaseState
 
 
 class TestSyncResult:
@@ -181,7 +181,9 @@ class TestSyncReleaseIssue:
             }
         }
 
-        state_manager.derive_state.return_value = ReleaseState.PLANNED
+        state_manager.derive_state.return_value = ReleaseInfoResult(
+            success=True, state=ReleaseState.PLANNED,
+            release_tag="r4.1", source="release-plan.yaml")
         gh.search_issues.return_value = []
         gh.create_issue.return_value = {"number": 1, "title": "Release r4.1 (RC)"}
         issue_manager.generate_title.return_value = "Release r4.1 (RC) — Sync26"
@@ -204,7 +206,9 @@ class TestSyncReleaseIssue:
             }
         }
 
-        state_manager.derive_state.return_value = ReleaseState.PLANNED
+        state_manager.derive_state.return_value = ReleaseInfoResult(
+            success=True, state=ReleaseState.PLANNED,
+            release_tag="r4.1", source="release-plan.yaml")
         gh.search_issues.return_value = [
             {
                 "number": 1,
@@ -234,7 +238,9 @@ class TestSyncReleaseIssue:
             }
         }
 
-        state_manager.derive_state.return_value = ReleaseState.SNAPSHOT_ACTIVE
+        state_manager.derive_state.return_value = ReleaseInfoResult(
+            success=True, state=ReleaseState.SNAPSHOT_ACTIVE,
+            release_tag="r4.1", source="release-metadata.yaml")
         gh.search_issues.return_value = [
             {
                 "number": 1,
@@ -265,7 +271,9 @@ class TestSyncReleaseIssue:
             }
         }
 
-        state_manager.derive_state.return_value = ReleaseState.NOT_PLANNED
+        state_manager.derive_state.return_value = ReleaseInfoResult(
+            success=True, state=ReleaseState.NOT_PLANNED,
+            release_tag="r4.1", source="release-plan.yaml")
         gh.search_issues.return_value = []
 
         result = manager.sync_release_issue(release_plan)
@@ -708,7 +716,9 @@ class TestSyncReleaseIssueWithLabels:
         gh = MagicMock()
         state_manager = MagicMock()
         gh.get_label.return_value = None  # All labels missing
-        state_manager.derive_state.return_value = ReleaseState.NOT_PLANNED
+        state_manager.derive_state.return_value = ReleaseInfoResult(
+            success=True, state=ReleaseState.NOT_PLANNED,
+            release_tag="r4.1", source="release-plan.yaml")
         gh.search_issues.return_value = []
 
         manager = IssueSyncManager(gh, state_manager, MagicMock(), MagicMock())
