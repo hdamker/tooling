@@ -131,6 +131,14 @@
 
 # P-015: check-event-type-format (DG-086)
 # Event types must follow org.camaraproject.<api-name>.<vN>.<event-name>.
+#
+# Level is conditional on api_pattern:
+#   - explicit-subscription: error (named EventType schema expected today)
+#   - implicit-subscription: warn (r4.1-era specs often inline the enum at
+#     CloudEvent.properties.type.enum, which the detector cannot see; the
+#     r4.2 migration path replaces inline CloudEvent with a $ref to
+#     CAMARA_event_common.yaml and a named ApiEventType schema, at which
+#     point this rule detects the event type correctly).
 - id: P-015
   engine: python
   engine_rule: check-event-type-format
@@ -138,6 +146,16 @@
     api_pattern: [explicit-subscription, implicit-subscription]
   conditional_level:
     default: error
+    overrides:
+      - condition:
+          api_pattern: [implicit-subscription]
+        level: warn
+  hint: >-
+    Define a named event type schema (e.g. ApiEventType) that constrains
+    the CloudEvent `type` value via allOf, rather than inlining the enum
+    directly in CloudEvent.properties.type.enum. See the implicit-events
+    API template in Commonalities artifacts/api-templates/ (tracked in
+    camaraproject/Commonalities#608).
 
 # P-016: check-sinkcredential-not-in-response (DG-092)
 # sinkCredential must not appear in subscription 2xx response schemas.

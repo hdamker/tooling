@@ -306,11 +306,32 @@ class TestMetadataQuality:
         """
         with_hints = [r.id for r in all_rules if r.hint is not None]
         with_overrides = [r.id for r in all_rules if r.message_override is not None]
-        assert len(with_hints) == 10, (
-            f"Expected 10 explicit hints (update test if adding hints): "
+        assert len(with_hints) == 11, (
+            f"Expected 11 explicit hints (update test if adding hints): "
             f"{with_hints}"
         )
         assert len(with_overrides) == 0, (
             f"Expected 0 message overrides (update test if adding overrides): "
             f"{with_overrides}"
         )
+
+    def test_p015_conditional_on_api_pattern(self, rule_index):
+        """P-015 stays error on explicit-subscription, warn on implicit.
+
+        Implicit-subscription APIs using the r4.1-era inline CloudEvent
+        pattern (enum at CloudEvent.properties.type.enum) cannot be
+        detected by the check, so the rule downgrades to warn until the
+        r4.2 migration to $ref + named ApiEventType schema is complete.
+        """
+        rule = rule_index[("python", "check-event-type-format")]
+        assert rule.id == "P-015"
+        assert rule.conditional_level is not None
+        assert rule.conditional_level.default == "error"
+        overrides = rule.conditional_level.overrides
+        assert len(overrides) == 1
+        assert overrides[0].condition == {
+            "api_pattern": ["implicit-subscription"],
+        }
+        assert overrides[0].level == "warn"
+        assert rule.hint is not None
+        assert "Commonalities#608" in rule.hint
