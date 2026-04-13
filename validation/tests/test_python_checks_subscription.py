@@ -1,4 +1,4 @@
-"""Unit tests for subscription checks (P-014, P-015, P-016)."""
+"""Unit tests for subscription checks (P-014, P-015, P-016, P-020)."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import yaml
 
 from validation.context import ApiContext, ValidationContext
 from validation.engines.python_checks.subscription_checks import (
+    check_cloudevent_via_ref,
     check_event_type_format,
     check_sinkcredential_not_in_response,
     check_subscription_filename,
@@ -392,3 +393,104 @@ class TestCheckSinkCredentialNotInResponse:
         ctx = _make_context(api_name=api_name)
         findings = check_sinkcredential_not_in_response(tmp_path, ctx)
         assert len(findings) == 1
+
+
+# ---------------------------------------------------------------------------
+# P-020: check-cloudevent-via-ref
+# ---------------------------------------------------------------------------
+
+
+def _spec_with_cloudevent(cloudevent_schema: dict) -> dict:
+    """Build a minimal subscription spec with a CloudEvent schema."""
+    return {
+        "openapi": "3.0.3",
+        "info": {"title": "Test", "version": "wip"},
+        "paths": {"/subscriptions": {"post": {"responses": {"201": {}}}}},
+        "components": {"schemas": {"CloudEvent": cloudevent_schema}},
+    }
+
+
+class TestCheckCloudEventViaRef:
+    def test_inline_cloudevent_warns(self, tmp_path: Path):
+        api_name = "device-status-subscriptions"
+        spec = _spec_with_cloudevent({
+            "type": "object",
+            "required": ["id", "type"],
+            "properties": {
+                "id": {"type": "string"},
+                "type": {
+                    "type": "string",
+                    "enum": [f"org.camaraproject.{api_name}.v0.status-changed"],
+                },
+            },
+        })
+        _write_spec(tmp_path, api_name=api_name, spec_content=spec)
+        ctx = _make_context(api_name=api_name)
+        findings = check_cloudevent_via_ref(tmp_path, ctx)
+        assert len(findings) == 1
+        assert findings[0]["level"] == "warn"
+        assert findings[0]["engine_rule"] == "check-cloudevent-via-ref"
+        assert "inline" in findings[0]["message"]
+        assert findings[0]["api_name"] == api_name
+
+    def test_ref_only_cloudevent_ok(self, tmp_path: Path):
+        api_name = "device-status-subscriptions"
+        spec = _spec_with_cloudevent({
+            "$ref": "./CAMARA_event_common.yaml#/components/schemas/CloudEvent",
+        })
+        _write_spec(tmp_path, api_name=api_name, spec_content=spec)
+        ctx = _make_context(api_name=api_name)
+        assert check_cloudevent_via_ref(tmp_path, ctx) == []
+
+    def test_allof_with_ref_ok(self, tmp_path: Path):
+        """allOf + $ref migration form has no top-level properties — no finding."""
+        api_name = "device-status-subscriptions"
+        spec = _spec_with_cloudevent({
+            "allOf": [
+                {"$ref": "./CAMARA_event_common.yaml#/components/schemas/CloudEvent"},
+            ],
+        })
+        _write_spec(tmp_path, api_name=api_name, spec_content=spec)
+        ctx = _make_context(api_name=api_name)
+        assert check_cloudevent_via_ref(tmp_path, ctx) == []
+
+    def test_no_cloudevent_schema_ok(self, tmp_path: Path):
+        api_name = "device-status-subscriptions"
+        spec = {
+            "openapi": "3.0.3",
+            "info": {"title": "Test", "version": "wip"},
+            "paths": {"/subscriptions": {"post": {"responses": {"201": {}}}}},
+            "components": {"schemas": {"OtherSchema": {"type": "object"}}},
+        }
+        _write_spec(tmp_path, api_name=api_name, spec_content=spec)
+        ctx = _make_context(api_name=api_name)
+        assert check_cloudevent_via_ref(tmp_path, ctx) == []
+
+    def test_implicit_subscription_inline_warns(self, tmp_path: Path):
+        api_name = "device-status"
+        spec = _spec_with_cloudevent({
+            "type": "object",
+            "properties": {
+                "type": {"type": "string", "enum": ["foo"]},
+            },
+        })
+        _write_spec(tmp_path, api_name=api_name, spec_content=spec)
+        ctx = _make_context(api_name=api_name, api_pattern="implicit-subscription")
+        findings = check_cloudevent_via_ref(tmp_path, ctx)
+        assert len(findings) == 1
+        assert findings[0]["level"] == "warn"
+
+    def test_request_response_skip(self, tmp_path: Path):
+        """Request-response APIs do not define CloudEvent — skip even if inline."""
+        api_name = "device-status"
+        spec = _spec_with_cloudevent({
+            "type": "object",
+            "properties": {"type": {"type": "string"}},
+        })
+        _write_spec(tmp_path, api_name=api_name, spec_content=spec)
+        ctx = _make_context(api_name=api_name, api_pattern="request-response")
+        assert check_cloudevent_via_ref(tmp_path, ctx) == []
+
+    def test_missing_spec_file(self, tmp_path: Path):
+        ctx = _make_context()
+        assert check_cloudevent_via_ref(tmp_path, ctx) == []

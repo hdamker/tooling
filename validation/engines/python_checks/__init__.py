@@ -14,6 +14,7 @@ from .readme_checks import check_readme_placeholder_removal
 from .release_plan_checks import check_orphan_api_definitions, check_release_plan_semantics
 from .release_review_checks import check_release_review_file_restriction
 from .subscription_checks import (
+    check_cloudevent_via_ref,
     check_event_type_format,
     check_sinkcredential_not_in_response,
     check_subscription_filename,
@@ -44,6 +45,7 @@ CHECKS: list[CheckDescriptor] = [
     CheckDescriptor("check-subscription-filename", CheckScope.API, check_subscription_filename),
     CheckDescriptor("check-event-type-format", CheckScope.API, check_event_type_format),
     CheckDescriptor("check-sinkcredential-not-in-response", CheckScope.API, check_sinkcredential_not_in_response),
+    CheckDescriptor("check-cloudevent-via-ref", CheckScope.API, check_cloudevent_via_ref),
     CheckDescriptor("check-conflict-deprecated", CheckScope.API, check_conflict_deprecated),
     CheckDescriptor("check-contextcode-format", CheckScope.API, check_contextcode_format),
     # --- Repo-level checks (run once) ---
