@@ -5,7 +5,7 @@
 version: 1
 
 defaults:
-  stage: disabled
+  stage: advisory
 
 fork_owners:
   - hdamker
