@@ -18,7 +18,7 @@ summary:
   total_gap: 0
   total_manual: 25
   total_pending: 0
-  total_tested: 0
+  total_tested: 5
   by_engine:
     spectral: 84
     gherkin: 25
@@ -285,12 +285,19 @@ pending_rules:
 # Source: private-dev-docs/validation-framework/reviews/testing-guidelines-audit.md
 
 # ---------------------------------------------------------------------------
-# Tested rules — verified via regression branches (Phase 1b)
+# Tested rules — verified via regression branches (WS07 Phase 3)
 # ---------------------------------------------------------------------------
-# Updated as regression branches verify rules.
-# Format: rule_id: regression_branch (or list of branches)
+# Updated as regression branches verify rules. Each rule lists the branches
+# where its expected behaviour is pinned by a regression-expected.yaml
+# fixture. Populated by scripts/regression_runner.py runs (capture mode).
+# Format: rule_id: [branch, ...]
 
-tested_rules: {}
+tested_rules:
+  P-006: [regression/r4.1-main-baseline]
+  S-211: [regression/r4.1-main-baseline]
+  S-313: [regression/r4.1-main-baseline]
+  S-314: [regression/r4.1-main-baseline]
+  S-316: [regression/r4.1-main-baseline]
 
 # ---------------------------------------------------------------------------
 # Manual rules — require human judgment

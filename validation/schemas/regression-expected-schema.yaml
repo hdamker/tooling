@@ -1,0 +1,127 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+title: CAMARA Validation Regression Expected Findings
+description: |
+  Schema for regression-expected.yaml fixtures committed to regression/* branches
+  of test repositories. Each fixture declares the expected validation findings for
+  a specific themed branch; the regression runner dispatches the validation
+  framework against the branch, downloads the findings, and diffs them against
+  this file.
+
+  Match semantics are set-based on (rule_id, path, level) tuples, with per-key
+  "at least N" count thresholds. Line numbers and finding messages are NOT part
+  of the match key - they drift as specs evolve.
+
+type: object
+additionalProperties: false
+required:
+  - schema_version
+  - branch
+  - findings
+
+properties:
+  schema_version:
+    type: integer
+    enum: [1]
+    description: Schema version for forward compatibility.
+
+  branch:
+    type: string
+    description: >
+      The regression branch this fixture pins. Informational; the runner
+      resolves the branch from its filter arguments, not from this field.
+
+  description:
+    type: string
+    description: Human-readable summary of what this branch tests.
+
+  captured_at:
+    type: string
+    format: date-time
+    description: ISO-8601 timestamp when the fixture was last captured.
+
+  captured_from_run:
+    type: string
+    description: URL of the workflow run that produced this fixture.
+
+  tooling_ref:
+    type: string
+    description: >
+      40-character SHA of the tooling commit that produced the expected findings.
+      For dispatches from API repositories, this is the SHA that v1-rc pointed
+      at during capture. If v1-rc moves, the fixture must be recaptured.
+    pattern: "^[0-9a-f]{40}$"
+
+  match_mode:
+    type: string
+    enum: [exact, subset]
+    default: exact
+    description: >
+      exact  - any actual finding whose match key is not in `findings` causes
+               FAIL. Count surpluses also cause FAIL.
+      subset - extra actual findings are allowed; only missing expected findings
+               cause FAIL. Use as an escape hatch for flaky rules.
+
+  summary:
+    type: object
+    additionalProperties: false
+    description: >
+      Expected aggregate counts across all findings. Compared against
+      summary.json.counts before per-finding diffing. A mismatch here causes
+      FAIL even if no per-finding mismatch exists.
+    properties:
+      errors:
+        type: integer
+        minimum: 0
+      warnings:
+        type: integer
+        minimum: 0
+      hints:
+        type: integer
+        minimum: 0
+
+  findings:
+    type: array
+    description: >
+      Expected findings. Each entry identifies a unique (rule_id, path, level)
+      tuple (or (engine/engine_rule, path, level) fallback). Duplicate match
+      keys within a file are rejected - collapse them into a single entry with
+      `count`.
+    items:
+      type: object
+      additionalProperties: false
+      required:
+        - path
+        - level
+      properties:
+        rule_id:
+          type: string
+          pattern: "^[A-Z]-[0-9]{3}$"
+          description: Framework rule ID (e.g. S-042, P-015).
+        engine:
+          type: string
+          enum: [spectral, yamllint, gherkin, python]
+          description: >
+            Validation engine that produced the finding. Required only when
+            rule_id is absent.
+        engine_rule:
+          type: string
+          description: >
+            Native rule identifier within the engine. Required only when
+            rule_id is absent.
+        path:
+          type: string
+          description: Repository-relative file path (exact match, no globs).
+        level:
+          type: string
+          enum: [error, warn, hint]
+        count:
+          type: integer
+          minimum: 1
+          default: 1
+          description: >
+            Minimum number of matching findings required. "At least N" semantics
+            in both exact and subset modes. A spec fix that removes one of three
+            duplicate hints is not a regression.
+      oneOf:
+        - required: [rule_id]
+        - required: [engine, engine_rule]
