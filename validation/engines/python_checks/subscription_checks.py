@@ -220,3 +220,62 @@ def check_sinkcredential_not_in_response(
             )
 
     return findings
+
+
+# ---------------------------------------------------------------------------
+# P-020: check-cloudevent-via-ref
+# ---------------------------------------------------------------------------
+
+
+def check_cloudevent_via_ref(
+    repo_path: Path, context: ValidationContext
+) -> List[dict]:
+    """Warn when CloudEvent is defined inline instead of via $ref.
+
+    Subscription APIs should consume the shared CloudEvent schema from
+    CAMARA_event_common.yaml via ``$ref`` (or ``allOf`` + ``$ref``) rather
+    than maintaining a local inline copy. Inline copies drift from the
+    Commonalities source and block bundling-based reuse.
+
+    Detection: the rule fires when ``components.schemas.CloudEvent`` is
+    present and has a top-level ``properties`` key. The ``$ref``-only
+    form and the ``allOf: [{$ref: ...}]`` migration form have no
+    top-level ``properties`` and are not flagged.
+    """
+    api = context.apis[0]
+
+    if api.api_pattern not in ("explicit-subscription", "implicit-subscription"):
+        return []
+
+    if api.spec_file.endswith("CAMARA_event_common.yaml"):
+        return []
+
+    spec = load_yaml_safe(repo_path / api.spec_file)
+    if spec is None:
+        return []
+
+    schemas = spec.get("components", {}).get("schemas", {})
+    if not isinstance(schemas, dict):
+        return []
+
+    cloudevent = schemas.get("CloudEvent")
+    if not isinstance(cloudevent, dict):
+        return []
+
+    if "properties" not in cloudevent:
+        return []
+
+    return [
+        make_finding(
+            engine_rule="check-cloudevent-via-ref",
+            level="warn",
+            message=(
+                f"CloudEvent is defined inline in {api.spec_file}. "
+                f"Consume the shared schema from CAMARA_event_common.yaml "
+                f"via $ref instead of maintaining a local copy."
+            ),
+            path=api.spec_file,
+            line=1,
+            api_name=api.api_name,
+        )
+    ]

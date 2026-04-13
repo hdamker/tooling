@@ -14,7 +14,7 @@ version: 1
 generated: 2026-04-07
 
 summary:
-  total_implemented: 141
+  total_implemented: 142
   total_gap: 0
   total_manual: 25
   total_pending: 0
@@ -22,7 +22,7 @@ summary:
   by_engine:
     spectral: 84
     gherkin: 25
-    python: 19
+    python: 20
     yamllint: 13
 
 # ---------------------------------------------------------------------------
@@ -198,6 +198,12 @@ gap_rules:
     target_engine: python
     status: implemented
     rule_id: P-019
+
+  - audit_id: NEW-004
+    description: "CloudEvent schema should be consumed via $ref to CAMARA_event_common.yaml, not maintained as a local inline copy"
+    target_engine: python
+    status: implemented
+    rule_id: P-020
 
 # ---------------------------------------------------------------------------
 # Fixes needed — implemented rules with incorrect behavior

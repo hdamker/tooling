@@ -41,6 +41,11 @@
     default: error
 
 # P-006: check-test-files-exist
+#
+# Severity is a function of API maturity and release type:
+#   - default (alpha, wip, any non-rc release): hint
+#   - initial (0.x) + rc/public release: warn
+#   - stable  (>=1.x) + rc/public release: error
 - id: P-006
   engine: python
   engine_rule: check-test-files-exist
@@ -50,7 +55,17 @@
       - condition:
           target_api_maturity: [stable]
           target_release_type: [pre-release-rc, public-release]
+        level: error
+      - condition:
+          target_api_maturity: [initial]
+          target_release_type: [pre-release-rc, public-release]
         level: warn
+  hint: >-
+    Test files are optional for alpha releases but expected before the
+    first release candidate. On stable (>=1.x) APIs they are required
+    at rc and public release; on initial (0.x) APIs they are strongly
+    recommended. See CAMARA Testing Guidelines for the expected file
+    layout.
 
 # P-007: check-test-file-version
 # Parses the Feature line of .feature files to extract the version
@@ -194,3 +209,23 @@
   engine_rule: check-orphan-api-definitions
   conditional_level:
     default: warn
+
+# P-020: check-cloudevent-via-ref
+# Subscription APIs should consume CloudEvent via $ref to
+# CAMARA_event_common.yaml rather than maintaining a local inline copy.
+# Detection: components.schemas.CloudEvent exists with top-level
+# `properties`. The $ref-only and `allOf: [{$ref: ...}]` forms have no
+# top-level `properties` and are not flagged.
+- id: P-020
+  engine: python
+  engine_rule: check-cloudevent-via-ref
+  applicability:
+    api_pattern: [explicit-subscription, implicit-subscription]
+  conditional_level:
+    default: warn
+  hint: >-
+    Replace the local CloudEvent schema with
+    `$ref: './CAMARA_event_common.yaml#/components/schemas/CloudEvent'`,
+    or an allOf combining the $ref with an API-specific ApiEventType
+    schema. See implicit-events API template in Commonalities
+    artifacts/api-templates/.
