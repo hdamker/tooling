@@ -86,7 +86,7 @@ jobs:
 
       - name: release-plan.yaml validation result
         if: always() && steps.exclusivity.outcome != 'failure'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const changed = '${{ steps.changes.outputs.release_plan_any_changed }}' === 'true';
