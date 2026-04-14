@@ -301,7 +301,7 @@ jobs:
           fi
 
       - name: Upload Detailed Report
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         id: upload-detailed-report
         if: always() && steps.find-report.outputs.report_path != ''
         with:
@@ -398,7 +398,7 @@ jobs:
           fi
 
       - name: Upload Summary
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: api-review-summary-${{ inputs.repo_name }}-${{ inputs.issue_number != '0' && format('comment{0}', inputs.issue_number) || 'manual' }}-${{ inputs.commonalities_version }}
