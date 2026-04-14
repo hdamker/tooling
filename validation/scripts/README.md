@@ -19,16 +19,23 @@ Dispatches the validation framework against `regression/*` branches of a test
 repository, downloads findings, and diffs them against the committed
 `.regression/regression-expected.yaml` fixture on each branch.
 
+For motivation, the canary model, the fixture format, and day-to-day
+workflows (capture, verify, recapture, adding new branches), see the manual:
+**[../docs/regression-testing.md](../docs/regression-testing.md)**.
+
+This file is the CLI reference only.
+
 ### Prerequisites
 
 - Python 3.11+ with `pyyaml` and `jsonschema`
 - `gh` CLI installed and authenticated (`gh auth status` must be green)
-- The test repo must have the Validation Framework caller workflow installed
-  (`.github/workflows/camara-validation.yml`)
-- Each `regression/*` branch must contain `.regression/regression-expected.yaml`
-  conforming to `validation/schemas/regression-expected-schema.yaml`
+- The test repo must have the validation framework caller workflow installed
+  at `.github/workflows/camara-validation.yml`
+- For verify mode: each `regression/*` branch must contain
+  `.regression/regression-expected.yaml` conforming to
+  [../schemas/regression-expected-schema.yaml](../schemas/regression-expected-schema.yaml)
 
-### Run
+### Verify mode
 
 ```
 python3 validation/scripts/regression_runner.py \
@@ -36,76 +43,34 @@ python3 validation/scripts/regression_runner.py \
     [--branch-filter 'regression/r4.1-*'] \
     [--workflow-file camara-validation.yml] \
     [--poll-interval 15] [--poll-timeout 1800] \
-    [--summary-file regression-summary.md]
+    [--summary-file regression-summary.md] \
+    [-v|--verbose]
 ```
 
-Exit codes:
+Default `--branch-filter` is `regression/*`. Default `--workflow-file` is
+`camara-validation.yml`.
 
-| Code | Meaning |
-|---|---|
-| 0 | all branches PASS |
-| 1 | one or more branches FAIL (diff mismatch) |
-| 2 | infrastructure failure (gh error, timeout, missing artifact, schema invalid) |
-
-### Capture a new fixture
+### Capture mode
 
 ```
 python3 validation/scripts/regression_runner.py \
     --repo camaraproject/ReleaseTest \
     --capture regression/r4.1-main-baseline \
     --out /tmp/expected.yaml \
-    [--capture-description "baseline"]
+    [--capture-description "baseline - ReleaseTest main, unmodified"]
 ```
 
-Review the generated file, commit it to the branch at
-`.regression/regression-expected.yaml`, then re-run the runner without
-`--capture` to verify PASS.
+Writes a fresh `regression-expected.yaml` to `--out`. Review, commit to the
+branch at `.regression/regression-expected.yaml`, and re-run in verify mode
+to confirm PASS. See the manual for the full add-a-new-branch flow.
 
-### Fixture match semantics
+### Exit codes
 
-- Match key is `(rule_id, path, level)` — or `(engine/engine_rule, path, level)`
-  when the framework has no `rule_id` for the rule.
-- Line numbers and messages are **not** part of the match key.
-- `count` means "at least N" in both `exact` and `subset` modes.
-- `match_mode: exact` (default) fails on unexpected extra findings;
-  `match_mode: subset` allows extras and only fails on missing expected findings.
-- The optional top-level `summary` block is checked against
-  `summary.json.counts` before per-finding diffing; any mismatch there is a
-  separate failure axis.
-
-### Tooling ref the run actually used
-
-Each test repo's caller workflow hardcodes the tooling ref it consumes, and
-does not forward `workflow_dispatch` inputs. A local `gh workflow run` can't
-override which tooling SHA runs server-side; OIDC inside the reusable
-inherits `job_workflow_ref` from the caller's hardcoded reference.
-
-Two cases in the wild:
-
-- **Dark / production API repos** — caller targets
-  `camaraproject/tooling/.github/workflows/validation.yml@v1-rc`. Each run
-  pins to whatever commit `v1-rc` currently points at; the SHA only changes
-  when the tag is moved (a deliberate, repo-wide release event).
-- **`camaraproject/ReleaseTest` (canary)** — caller targets
-  `...@validation-framework`. Each run pins to the current HEAD of the
-  `validation-framework` branch. Every push to that branch can change what
-  the runner sees here, *before* `v1-rc` is moved for the rest of the org.
-  This is the intentional canary surface for changes under development.
-
-The runner records the **actually used** SHA into the captured fixture by
-reading `tooling_ref` from `context.json` in the diagnostics artifact. That
-field comes from the orchestrator's own resolved context, so it's correct
-regardless of which ref the caller targeted.
-
-Implications for fixture maintenance:
-
-- For ReleaseTest fixtures: any merge to `validation-framework` that changes
-  findings against the same specs will produce a FAIL on the next runner
-  invocation. That's the canary working as designed. Triage the diff:
-  - Intended rule/engine change → recapture the fixture (`--capture`),
-    review the new findings, commit.
-  - Unintended regression → fix the code on `validation-framework`, re-run.
-- For dark-repo fixtures (none today): only stale after `v1-rc` moves.
+| Code | Meaning |
+|---|---|
+| 0 | All branches PASS (or capture succeeded) |
+| 1 | One or more branches FAIL (diff mismatch) |
+| 2 | Infrastructure failure (gh error, timeout, missing artifact, schema invalid) |
 
 ### Troubleshooting
 
@@ -117,5 +82,6 @@ Implications for fixture maintenance:
   probably failed before the output step. Check the run URL printed in
   the log.
 - **Capture-then-verify fails on immediate re-run** — the validation output
-  is non-deterministic for this branch. Treat as a framework bug, not a
-  runner bug; stop and investigate.
+  is non-deterministic for this branch. That's a framework bug, not a
+  runner bug; stop and investigate. See the "Sharp edges" section of the
+  manual.
