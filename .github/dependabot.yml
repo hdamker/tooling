@@ -3,9 +3,23 @@
 
 version: 2
 updates:
-  # GitHub Actions - check weekly for updates
+  # GitHub Actions on main - check weekly for updates
   - package-ecosystem: "github-actions"
     directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    open-pull-requests-limit: 5
+
+  # GitHub Actions on validation-framework - until it merges into main
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "validation-framework"
     schedule:
       interval: "weekly"
       day: "monday"
