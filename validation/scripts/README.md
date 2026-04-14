@@ -73,16 +73,39 @@ Review the generated file, commit it to the branch at
   `summary.json.counts` before per-finding diffing; any mismatch there is a
   separate failure axis.
 
-### Tooling ref pinning (known constraint)
+### Tooling ref the run actually used
 
-The caller workflow hardcodes `uses: camaraproject/tooling/.github/workflows/validation.yml@v1-rc`
-and does not forward `workflow_dispatch` inputs to the reusable. OIDC
-resolution inside the reusable therefore locks to whatever commit `v1-rc`
-currently points at — a local `gh workflow run` cannot override this.
+Each test repo's caller workflow hardcodes the tooling ref it consumes, and
+does not forward `workflow_dispatch` inputs. A local `gh workflow run` can't
+override which tooling SHA runs server-side; OIDC inside the reusable
+inherits `job_workflow_ref` from the caller's hardcoded reference.
 
-Fixtures are implicitly pinned to that ref. Record the current `v1-rc` SHA in
-each branch's `REGRESSION.md` (`gh api repos/camaraproject/tooling/git/refs/tags/v1-rc --jq '.object.sha'`).
-If `v1-rc` moves, recapture the fixtures.
+Two cases in the wild:
+
+- **Dark / production API repos** — caller targets
+  `camaraproject/tooling/.github/workflows/validation.yml@v1-rc`. Each run
+  pins to whatever commit `v1-rc` currently points at; the SHA only changes
+  when the tag is moved (a deliberate, repo-wide release event).
+- **`camaraproject/ReleaseTest` (canary)** — caller targets
+  `...@validation-framework`. Each run pins to the current HEAD of the
+  `validation-framework` branch. Every push to that branch can change what
+  the runner sees here, *before* `v1-rc` is moved for the rest of the org.
+  This is the intentional canary surface for changes under development.
+
+The runner records the **actually used** SHA into the captured fixture by
+reading `tooling_ref` from `context.json` in the diagnostics artifact. That
+field comes from the orchestrator's own resolved context, so it's correct
+regardless of which ref the caller targeted.
+
+Implications for fixture maintenance:
+
+- For ReleaseTest fixtures: any merge to `validation-framework` that changes
+  findings against the same specs will produce a FAIL on the next runner
+  invocation. That's the canary working as designed. Triage the diff:
+  - Intended rule/engine change → recapture the fixture (`--capture`),
+    review the new findings, commit.
+  - Unintended regression → fix the code on `validation-framework`, re-run.
+- For dark-repo fixtures (none today): only stale after `v1-rc` moves.
 
 ### Troubleshooting
 

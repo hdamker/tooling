@@ -466,39 +466,6 @@ def fetch_expected(repo: str, branch: str) -> dict[str, Any]:
     return load_expected(text)
 
 
-def _resolve_tooling_ref(repo: str, tag: str) -> str:
-    """Dereference *tag* on *repo* to the underlying commit SHA.
-
-    Handles both lightweight tags (object.type == "commit") and annotated
-    tags (object.type == "tag", requiring one more dereference through
-    git/tags/{sha}).
-    """
-    ref = gh(
-        [
-            "api", f"repos/{repo}/git/refs/tags/{tag}",
-            "--jq", "[.object.type, .object.sha] | @tsv",
-        ]
-    ).strip()
-    if not ref or "\t" not in ref:
-        raise InfrastructureError(f"{repo}@{tag}: unexpected refs response: {ref!r}")
-    obj_type, obj_sha = ref.split("\t", 1)
-    if obj_type == "commit":
-        return obj_sha
-    if obj_type == "tag":
-        commit_sha = gh(
-            [
-                "api", f"repos/{repo}/git/tags/{obj_sha}",
-                "--jq", ".object.sha",
-            ]
-        ).strip()
-        if not re.match(r"^[0-9a-f]{40}$", commit_sha):
-            raise InfrastructureError(
-                f"{repo}@{tag}: dereferenced commit sha invalid: {commit_sha!r}"
-            )
-        return commit_sha
-    raise InfrastructureError(f"{repo}@{tag}: unsupported object type {obj_type!r}")
-
-
 def branch_tip_sha(repo: str, branch: str) -> str:
     """Return the current tip SHA of *branch* on *repo*."""
     data = gh(
@@ -615,11 +582,13 @@ def download_findings(
     run_id: str,
     workdir: Path,
     artifact_name: str = "validation-diagnostics",
-) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-    """Download the validation-diagnostics artifact and load findings + summary.
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, dict[str, Any] | None]:
+    """Download the validation-diagnostics artifact and load findings, summary, context.
 
-    Returns (findings_list, summary_dict_or_None). Raises InfrastructureError
-    if the artifact is missing or findings.json is not parseable.
+    Returns (findings_list, summary_dict_or_None, context_dict_or_None).
+    Raises InfrastructureError if the artifact is missing or findings.json is
+    not parseable. Summary and context are best-effort: if they fail to load,
+    the corresponding return value is None.
     """
     workdir.mkdir(parents=True, exist_ok=True)
     gh(
@@ -652,14 +621,19 @@ def download_findings(
             f"findings.json root is not a list (got {type(findings).__name__})"
         )
 
-    summary_path = findings_path.parent / "summary.json"
-    summary: dict[str, Any] | None = None
-    if summary_path.exists():
+    def _load_optional(name: str) -> dict[str, Any] | None:
+        path = findings_path.parent / name
+        if not path.exists():
+            return None
         try:
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            summary = None
-    return findings, summary
+            return None
+        return data if isinstance(data, dict) else None
+
+    summary = _load_optional("summary.json")
+    context = _load_optional("context.json")
+    return findings, summary, context
 
 
 # ---------------------------------------------------------------------------
@@ -692,7 +666,7 @@ def run_branch(
     with tempfile.TemporaryDirectory(prefix="vf-regression-") as td:
         workdir = Path(td)
         logger.info("[%s] downloading diagnostics into %s", branch, workdir)
-        actual, summary = download_findings(repo, run_id, workdir)
+        actual, summary, _context = download_findings(repo, run_id, workdir)
 
     report = diff_findings(expected, actual, actual_summary=summary)
     report.branch = branch
@@ -721,15 +695,18 @@ def capture_branch(
 
     with tempfile.TemporaryDirectory(prefix="vf-capture-") as td:
         workdir = Path(td)
-        actual, _summary = download_findings(repo, run_id, workdir)
+        actual, _summary, context = download_findings(repo, run_id, workdir)
 
-    # Resolve the tooling_ref the run used. Best-effort: dereference the
-    # current v1-rc tag to the underlying commit SHA. v1-rc is annotated, so
-    # the ref returns a tag object that must be dereferenced once more.
-    tooling_ref: str | None
-    try:
-        tooling_ref = _resolve_tooling_ref("camaraproject/tooling", "v1-rc")
-    except InfrastructureError:
+    # The actually-used tooling SHA comes from the validation context
+    # written by the orchestrator. This is the canonical answer and works
+    # regardless of which ref the caller targets (@v1-rc on dark repos,
+    # @validation-framework HEAD on the ReleaseTest canary, etc.).
+    tooling_ref: str | None = (context or {}).get("tooling_ref") or None
+    if tooling_ref and not re.match(r"^[0-9a-f]{40}$", tooling_ref):
+        logger.warning(
+            "context.json tooling_ref is not a 40-char SHA: %r — omitting from fixture",
+            tooling_ref,
+        )
         tooling_ref = None
 
     run_url = f"https://github.com/{repo}/actions/runs/{run_id}"
