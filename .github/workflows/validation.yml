@@ -355,7 +355,7 @@ jobs:
       # ── Step 14: Upload diagnostics ────────────────────────────────
       - name: Upload diagnostics
         if: always() && steps.validation.outcome == 'success'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: validation-diagnostics
           path: validation-output/diagnostics/
@@ -400,7 +400,7 @@ jobs:
       # ── Step 16: Upload bundled specs ──────────────────────────────
       - name: Upload bundled specs
         if: always() && steps.validation.outcome == 'success'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: validation-bundled-specs
           path: validation-output/bundled/
