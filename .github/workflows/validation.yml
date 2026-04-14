@@ -57,7 +57,7 @@ jobs:
       # ── Step 2: Resolve tooling ref (OIDC → override → fallback) ──
       - name: Resolve tooling ref
         id: resolve-ref
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           TOOLING_REF_OVERRIDE: ${{ inputs.tooling_ref_override }}
         with:
@@ -201,7 +201,7 @@ jobs:
         if: >-
           always() && steps.validation.outcome == 'success'
           && github.event_name == 'pull_request'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const mintOutcome = '${{ steps.mint-token.outcome }}';
@@ -237,7 +237,7 @@ jobs:
           always() && steps.validation.outcome == 'success'
           && github.event_name == 'pull_request'
           && steps.write-access.outputs.has_write == 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           github-token: ${{ steps.mint-token.outputs.token || github.token }}
           script: |
@@ -329,7 +329,7 @@ jobs:
           always() && steps.validation.outcome == 'success'
           && github.event_name == 'pull_request'
           && steps.write-access.outputs.has_write != 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
