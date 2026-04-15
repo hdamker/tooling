@@ -180,6 +180,11 @@ def normalize_finding(raw: dict, repo_root: Optional[str] = None) -> dict:
     Critical field mapping:
     - ``raw["source"]`` -> ``finding["path"]`` (file path, NOT ``raw["path"]``
       which is the JSONPath within the document).
+    - ``raw["path"]`` (JSONPath array) -> ``finding["schema_path"]``
+      (dot-joined string).  Spectral emits this as the canonical path
+      within the source file, already source-mapped for $ref-followed
+      findings.  Consumed by the post-filter ``suppress_schema_paths``
+      mechanism.
     - ``raw["range"]["start"]["line"]`` is 0-indexed; add 1 for the framework.
     - ``raw["range"]["start"]["character"]`` is 0-indexed; add 1.
 
@@ -207,12 +212,20 @@ def normalize_finding(raw: dict, repo_root: Optional[str] = None) -> dict:
 
     level = "hint" if from_external else map_severity(raw.get("severity", 1))
 
+    raw_schema_path = raw.get("path")
+    schema_path: Optional[str]
+    if isinstance(raw_schema_path, list) and raw_schema_path:
+        schema_path = ".".join(str(segment) for segment in raw_schema_path)
+    else:
+        schema_path = None
+
     finding: dict = {
         "engine": ENGINE_NAME,
         "engine_rule": raw.get("code", "unknown"),
         "level": level,
         "message": raw.get("message", ""),
         "path": source,
+        "schema_path": schema_path,
         "line": line,
         "api_name": derive_api_name(source),
     }

@@ -60,6 +60,27 @@ def _is_engine_error_finding(finding: dict) -> bool:
     return finding.get("engine_rule", "").endswith("-execution-error")
 
 
+def _is_suppressed_by_schema_path(finding: dict, rule: RuleMetadata) -> bool:
+    """Return ``True`` when a finding's ``schema_path`` matches an entry in
+    ``rule.suppress_schema_paths``.
+
+    A match is an exact path equality OR a prefix with a dot boundary, so
+    ``components.schemas.ErrorInfo`` does NOT false-match a sibling like
+    ``components.schemas.ErrorInfoExtended``.  Findings without a
+    ``schema_path`` field (e.g. from yamllint or gherkin) can never be
+    suppressed by this mechanism and fall through unchanged.
+    """
+    if not rule.suppress_schema_paths:
+        return False
+    schema_path = finding.get("schema_path")
+    if not isinstance(schema_path, str) or not schema_path:
+        return False
+    for entry in rule.suppress_schema_paths:
+        if schema_path == entry or schema_path.startswith(entry + "."):
+            return True
+    return False
+
+
 def _resolve_api_context(
     finding: dict,
     context: ValidationContext,
@@ -232,6 +253,11 @@ def run_post_filter(
         if rule is not None:
             # Step 3: Mapped rule
             api_ctx = _resolve_api_context(finding, context)
+
+            # Per-path suppression — drop findings on known-unactionable
+            # locations before any further processing.
+            if _is_suppressed_by_schema_path(finding, rule):
+                continue
 
             # Applicability check — remove if not applicable
             if not is_applicable(rule.applicability, context, api_ctx):

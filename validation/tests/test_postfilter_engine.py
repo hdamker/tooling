@@ -11,10 +11,12 @@ from validation.context import ApiContext, ValidationContext
 from validation.postfilter.engine import (
     PostFilterResult,
     _is_engine_error_finding,
+    _is_suppressed_by_schema_path,
     _resolve_api_context,
     compute_overall_result,
     run_post_filter,
 )
+from validation.postfilter.metadata_loader import RuleMetadata
 
 
 # ---------------------------------------------------------------------------
@@ -573,3 +575,174 @@ class TestRunPostFilter:
         f = result.findings[0]
         assert f["message"] == "Better description."
         assert f["hint"] == "Fix by doing X."
+
+
+# ---------------------------------------------------------------------------
+# TestSuppressSchemaPaths — per-path suppression (unit + integration)
+# ---------------------------------------------------------------------------
+
+
+def _rule_with_suppress(
+    *paths: str,
+    id: str = "S-313",
+    engine: str = "spectral",
+    engine_rule: str = "owasp:api4:2023-string-restricted",
+) -> RuleMetadata:
+    """Build a minimal RuleMetadata with suppress_schema_paths set."""
+    return RuleMetadata(
+        id=id,
+        name=engine_rule,
+        engine=engine,
+        engine_rule=engine_rule,
+        message_override=None,
+        hint=None,
+        applicability={},
+        conditional_level=None,
+        suppress_schema_paths=tuple(paths),
+    )
+
+
+class TestIsSuppressedBySchemaPath:
+    """Unit tests for the schema-path allowlist matcher."""
+
+    def test_no_allowlist_never_suppresses(self):
+        """A rule without suppress_schema_paths never suppresses anything."""
+        rule = _rule_with_suppress()  # empty allowlist
+        f = _make_finding()
+        f["schema_path"] = "components.schemas.ErrorInfo.properties.code"
+        assert _is_suppressed_by_schema_path(f, rule) is False
+
+    def test_exact_match_suppresses(self):
+        rule = _rule_with_suppress("components.schemas.ErrorInfo.properties.code")
+        f = _make_finding()
+        f["schema_path"] = "components.schemas.ErrorInfo.properties.code"
+        assert _is_suppressed_by_schema_path(f, rule) is True
+
+    def test_prefix_with_dot_boundary_suppresses(self):
+        """Subtree match: an entry for a container path also suppresses its descendants."""
+        rule = _rule_with_suppress("components.schemas.ErrorInfo")
+        f = _make_finding()
+        f["schema_path"] = "components.schemas.ErrorInfo.properties.code"
+        assert _is_suppressed_by_schema_path(f, rule) is True
+
+    def test_lookalike_prefix_does_not_suppress(self):
+        """`ErrorInfo` entry must NOT false-match `ErrorInfoExtended`."""
+        rule = _rule_with_suppress("components.schemas.ErrorInfo")
+        f = _make_finding()
+        f["schema_path"] = "components.schemas.ErrorInfoExtended.properties.code"
+        assert _is_suppressed_by_schema_path(f, rule) is False
+
+    def test_unrelated_path_does_not_suppress(self):
+        rule = _rule_with_suppress("components.schemas.ErrorInfo.properties.code")
+        f = _make_finding()
+        f["schema_path"] = "components.schemas.MySchema.properties.name"
+        assert _is_suppressed_by_schema_path(f, rule) is False
+
+    def test_missing_schema_path_falls_through(self):
+        """Findings without schema_path (e.g. yamllint) can never be suppressed."""
+        rule = _rule_with_suppress("components.schemas.ErrorInfo.properties.code")
+        f = _make_finding()  # no schema_path
+        assert _is_suppressed_by_schema_path(f, rule) is False
+
+    def test_empty_schema_path_falls_through(self):
+        rule = _rule_with_suppress("components.schemas.ErrorInfo.properties.code")
+        f = _make_finding()
+        f["schema_path"] = ""
+        assert _is_suppressed_by_schema_path(f, rule) is False
+
+    def test_first_matching_entry_wins(self):
+        """Multiple entries — only one needs to match."""
+        rule = _rule_with_suppress(
+            "components.schemas.Foo",
+            "components.schemas.ErrorInfo.properties.code",
+            "components.schemas.Bar",
+        )
+        f = _make_finding()
+        f["schema_path"] = "components.schemas.ErrorInfo.properties.code"
+        assert _is_suppressed_by_schema_path(f, rule) is True
+
+
+class TestRunPostFilterSuppression:
+    """Integration: suppressed findings are dropped entirely from the pipeline."""
+
+    def test_suppressed_finding_dropped(self, tmp_path: Path):
+        """A matching schema_path causes the finding to be dropped, not just downgraded."""
+        _write_rules(tmp_path, [{
+            "id": "S-313",
+            "engine": "spectral",
+            "engine_rule": "owasp:api4:2023-string-restricted",
+            "conditional_level": {"default": "hint"},
+            "suppress_schema_paths": [
+                "components.schemas.ErrorInfo.properties.code",
+                "components.schemas.ErrorInfo.properties.message",
+            ],
+        }])
+        ctx = _make_context()
+        finding = _make_finding(
+            engine_rule="owasp:api4:2023-string-restricted",
+            path="code/common/CAMARA_common.yaml",
+            level="hint",
+        )
+        finding["schema_path"] = "components.schemas.ErrorInfo.properties.code"
+        result = run_post_filter([finding], ctx, tmp_path)
+        assert result.findings == []
+        assert result.result == "pass"
+
+    def test_non_suppressed_finding_kept(self, tmp_path: Path):
+        """A non-matching schema_path passes through normally."""
+        _write_rules(tmp_path, [{
+            "id": "S-313",
+            "engine": "spectral",
+            "engine_rule": "owasp:api4:2023-string-restricted",
+            "conditional_level": {"default": "hint"},
+            "suppress_schema_paths": [
+                "components.schemas.ErrorInfo.properties.code",
+            ],
+        }])
+        ctx = _make_context()
+        finding = _make_finding(
+            engine_rule="owasp:api4:2023-string-restricted",
+            path="code/API_definitions/sample-service.yaml",
+            level="hint",
+        )
+        finding["schema_path"] = "components.schemas.MyApiSchema.properties.name"
+        result = run_post_filter([finding], ctx, tmp_path)
+        assert len(result.findings) == 1
+        assert result.findings[0]["rule_id"] == "S-313"
+
+    def test_mixed_findings(self, tmp_path: Path):
+        """A batch of findings — suppressed entries drop, others pass through."""
+        _write_rules(tmp_path, [{
+            "id": "S-313",
+            "engine": "spectral",
+            "engine_rule": "owasp:api4:2023-string-restricted",
+            "conditional_level": {"default": "hint"},
+            "suppress_schema_paths": [
+                "components.schemas.ErrorInfo.properties.code",
+                "components.schemas.ErrorInfo.properties.message",
+                "components.schemas.NetworkAccessIdentifier",
+            ],
+        }])
+        ctx = _make_context()
+        findings = []
+        for schema_path in (
+            "components.schemas.ErrorInfo.properties.code",
+            "components.schemas.ErrorInfo.properties.message",
+            "components.schemas.NetworkAccessIdentifier",
+            "components.schemas.MyApiSchema.properties.name",
+            "components.schemas.MyOtherSchema.properties.id",
+        ):
+            f = _make_finding(
+                engine_rule="owasp:api4:2023-string-restricted",
+                level="hint",
+            )
+            f["schema_path"] = schema_path
+            findings.append(f)
+
+        result = run_post_filter(findings, ctx, tmp_path)
+        # 3 common-library entries suppressed, 2 API-specific kept
+        kept_paths = [f["schema_path"] for f in result.findings]
+        assert kept_paths == [
+            "components.schemas.MyApiSchema.properties.name",
+            "components.schemas.MyOtherSchema.properties.id",
+        ]

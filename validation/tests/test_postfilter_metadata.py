@@ -98,6 +98,47 @@ class TestParseRuleMetadata:
         rule = parse_rule_metadata(raw)
         assert rule.message_override is None
         assert rule.hint is None
+        assert rule.suppress_schema_paths == ()
+
+    def test_suppress_schema_paths_parsed(self):
+        """suppress_schema_paths is an optional list that becomes a tuple."""
+        raw = _minimal_rule_dict(
+            suppress_schema_paths=[
+                "components.schemas.ErrorInfo.properties.code",
+                "components.schemas.NetworkAccessIdentifier",
+            ]
+        )
+        rule = parse_rule_metadata(raw)
+        assert rule.suppress_schema_paths == (
+            "components.schemas.ErrorInfo.properties.code",
+            "components.schemas.NetworkAccessIdentifier",
+        )
+
+    def test_suppress_schema_paths_empty_list(self):
+        raw = _minimal_rule_dict(suppress_schema_paths=[])
+        rule = parse_rule_metadata(raw)
+        assert rule.suppress_schema_paths == ()
+
+    def test_suppress_schema_paths_invalid_type_raises(self):
+        raw = _minimal_rule_dict(suppress_schema_paths="not-a-list")
+        with pytest.raises(ValueError, match="suppress_schema_paths"):
+            parse_rule_metadata(raw)
+
+    def test_suppress_schema_paths_drops_non_string_entries(self):
+        """Non-string entries are silently dropped (defensive)."""
+        raw = _minimal_rule_dict(
+            suppress_schema_paths=[
+                "components.schemas.Valid",
+                123,  # not a string
+                "",   # empty
+                "components.schemas.AlsoValid",
+            ]
+        )
+        rule = parse_rule_metadata(raw)
+        assert rule.suppress_schema_paths == (
+            "components.schemas.Valid",
+            "components.schemas.AlsoValid",
+        )
 
     def test_explicit_message_override(self):
         raw = _minimal_rule_dict(message_override="Better message.")
