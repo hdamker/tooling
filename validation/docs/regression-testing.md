@@ -242,13 +242,21 @@ field will reflect the current `validation-framework` HEAD.
 ### Adding a new regression branch
 
 1. Branch from `camaraproject/ReleaseTest@main` with a descriptive name
-   under the `regression/` namespace
-   (e.g. `regression/r4.1-broken-info-block`).
+   under the `regression/` namespace. Naming convention:
+   - **Baseline branches**: `regression/rX.Y-main-baseline`
+   - **Broken-spec branches**: `regression/rX.Y-broken-spec-<theme>`
+
+   The `rX.Y` prefix records the Commonalities minor release the branch
+   was captured against. See [The broken-spec branch plan](#the-broken-spec-branch-plan)
+   for the target theme set.
 2. Make whatever spec edits the branch is meant to test. For a baseline
-   branch, leave specs unmodified.
+   branch, leave specs unmodified. For a broken-spec branch, keep edits
+   surgical — one theme per branch — and avoid cascades into rules the
+   branch is not meant to test.
 3. Write a short `REGRESSION.md` at `.regression/REGRESSION.md`
-   explaining what this branch is for, what it expects, and the
-   caller-workflow context if it's not the canary default.
+   explaining what this branch is for, what it expects (edit-to-rule
+   mapping for broken-spec branches), and the caller-workflow context
+   if it's not the canary default.
 4. Push the branch.
 5. Run the runner in `--capture` mode to seed
    `.regression/regression-expected.yaml`.
@@ -274,6 +282,80 @@ tested_rules:
 Always list-valued for uniformity when a rule is covered by multiple
 branches. Treat the field as proof, not aspiration: bump it after the
 runner reports PASS against the new fixture, not before.
+
+## The broken-spec branch plan
+
+Broken-spec branches are organised by **theme**, not by individual rule.
+Each branch contains a small set of surgical edits to one or two spec
+files on `camaraproject/ReleaseTest` that together trigger a coherent
+group of rules. One branch = one workflow run — grouping by theme keeps
+the canary dispatch budget small while still pinning every rule that
+can reasonably be exercised from the spec side.
+
+### Target themes
+
+The r4.1 rule set partitions cleanly into seven themes (plus an optional
+eighth for test-file quality). The table records the current plan; each
+theme becomes one `regression/r4.1-broken-spec-<theme>` branch.
+
+| # | Branch | Theme / target files | Rules covered | Rebase risk on minor bump |
+|---|---|---|---|---|
+| 1 | `regression/r4.1-broken-spec-api-metadata` | `sample-service.yaml` — `info`, `servers`, `tags` block | S-018, S-019, S-020, S-021, S-022, S-023, S-024, S-201, S-210 | LOW |
+| 2 | `regression/r4.1-broken-spec-yaml-fundamentals` | `sample-service.yaml` YAML-level defects + `openapi:` version + schema type | Y-001…Y-013, S-005, S-016 | LOW |
+| 3 | `regression/r4.1-broken-spec-error-handling` | `sample-service.yaml` — error responses + error codes | S-025, S-026, S-027, S-221, S-307, S-318 | LOW |
+| 4 | `regression/r4.1-broken-spec-descriptions` | `sample-service.yaml` — descriptions on operations / parameters / properties / responses / array items | S-006, S-009, S-011, S-013, S-014, S-028, S-029, S-031, S-215, S-216, S-223 | MEDIUM |
+| 5 | `regression/r4.1-broken-spec-schema-constraints` | `sample-service.yaml` components (not common files — avoid baseline collision) | S-012, S-017, S-030, S-300, S-303, S-308, S-309, S-310, S-311, S-312 | MEDIUM |
+| 6 | `regression/r4.1-broken-spec-routing` | `sample-service.yaml` — paths, operationIds, HTTP methods, servers | S-002, S-003, S-007, S-008, S-010, S-204, S-214, S-217, S-218, S-220, S-222, S-224, S-225, S-226, S-227, S-301, S-306 | HIGH |
+| 7 | `regression/r4.1-broken-spec-subscriptions` | `sample-service-subscriptions.yaml` + `sample-implicit-events.yaml` — CloudEvent / Protocol / sink / notifications + Python subscription checks | S-032, S-033, S-034, S-035, P-014, P-015, P-016, P-020 | HIGH |
+| 8 (optional) | `regression/r4.1-broken-spec-test-files` | `code/Test_definitions/*.feature` — filename / version / gherkin defects | P-001, P-002, P-003, P-004, P-005, P-007, P-008, selected G-* | LOW |
+
+Rules **not** covered by any broken-spec branch:
+
+- **Owned by the baseline fixture**: P-006, S-211, S-313, S-314, S-316.
+  Broken-spec branches inherit these when captured, but do not own the
+  pinning — they would double-count.
+- **Un-triggerable via spec edits**: P-009, P-010, P-011, P-012, P-013,
+  P-019 (release-plan / PR-context / fixture-dependent).
+- **Deprecated, OAS-3.1-only, or low-signal**: S-001, S-004, S-015,
+  S-205, S-206, S-208, S-209, S-228, S-302, S-304, S-305, S-315, S-317,
+  S-319.
+- **Manual-only (not machine-checkable)**: the 25 `TG-*` rules from the
+  testing guidelines audit.
+
+### Inherited baseline findings
+
+Broken-spec branches are cut from `main`, so every captured fixture
+contains the full baseline finding set **plus** the new findings the
+broken edits trigger. A broken-spec branch fixture is a complete
+snapshot of its branch's output, not a delta. The runner's `exact`
+match mode evaluates both halves together.
+
+When designing a new broken-spec branch, pick edits whose new match keys
+(`(rule_id, path, level)`) do **not** collide with baseline keys — the
+baseline branch already pins those. If an edit would have collided, move
+it to a different file or pick a different rule.
+
+### Lifecycle across Commonalities versions
+
+The `rX.Y` prefix records the Commonalities minor release the branch
+was captured against. Two separate lifecycles apply:
+
+- **Minor bump** (e.g. r4.1 → r4.2): rebase each broken-spec branch onto
+  the updated ReleaseTest `main`, rename the prefix (`r4.1-broken-spec-*`
+  → `r4.2-broken-spec-*`), recapture the fixture, force-push. Delete the
+  old `r4.1-*` branch. Rationale: r4.2 is the current surface, and the
+  broken-spec predicate ("info.description missing", "license.name
+  wrong", etc.) is preserved by rebase for the LOW-risk themes. MEDIUM
+  and HIGH risk themes may need the edits re-applied manually after the
+  rebase — treat them as rewrites, not pure rebases.
+- **Major bump** (e.g. r4.3 → r5.1): **keep** the last `r4.x-broken-spec-*`
+  set as permanent regression coverage for the previous major, and
+  create a fresh `r5.1-broken-spec-*` set from `r5.1` main. Breaking
+  Commonalities changes can invalidate old predicates; the previous
+  major stays frozen so long as it's still supported.
+
+The same model applies to `regression/rX.Y-main-baseline` — rebase +
+rename on minor bumps, preserve across majors.
 
 ## Sharp edges and known limitations
 
