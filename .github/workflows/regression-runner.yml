@@ -1,0 +1,91 @@
+# CAMARA Validation Framework — Regression Runner (canary)
+#
+# Auto-dispatches validation/scripts/regression_runner.py against
+# camaraproject/ReleaseTest on every push to validation-framework, so
+# that "broken stays broken" and "clean stays clean" are verified
+# automatically before v1-rc is moved for the rest of the org.
+#
+# The runner dispatches camara-validation.yml on each branch matching
+# regression/* on ReleaseTest, waits for it to complete, downloads the
+# diagnostics artifact, and diffs the findings against each branch's
+# committed .regression/regression-expected.yaml fixture.
+#
+# Cross-repo access is provided by a short-lived camara-validation
+# GitHub App installation token scoped to camaraproject/ReleaseTest.
+# The default GITHUB_TOKEN is only used for the initial checkout.
+#
+# See validation/docs/regression-testing.md for the full picture.
+
+name: Regression Runner
+
+on:
+  push:
+    branches: [validation-framework]
+    paths:
+      - 'validation/**'
+      - 'shared-actions/**'
+      - '.github/workflows/regression-runner.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: regression-runner-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    name: Regression canary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tooling
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install runner dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pyyaml jsonschema
+
+      - name: Mint validation app token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.VALIDATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.VALIDATION_APP_PRIVATE_KEY }}
+          owner: camaraproject
+          repositories: ReleaseTest
+
+      - name: Run regression runner
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          python3 validation/scripts/regression_runner.py \
+            --repo camaraproject/ReleaseTest \
+            --branch-filter 'regression/*' \
+            --summary-file regression-summary.md
+
+      - name: Publish summary
+        if: always()
+        run: |
+          if [ -f regression-summary.md ]; then
+            cat regression-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::regression-summary.md not produced (runner likely failed before writing)"
+          fi
+
+      - name: Upload summary artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: regression-runner-summary
+          path: regression-summary.md
+          if-no-files-found: warn
+          retention-days: 30
