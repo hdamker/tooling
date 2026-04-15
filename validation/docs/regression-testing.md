@@ -184,6 +184,26 @@ points at.
 
 ## Day-to-day usage
 
+### Automatic runs on `validation-framework`
+
+The regression runner fires automatically on every push to
+`validation-framework` that touches `validation/**`, `shared-actions/**`,
+or the workflow itself. The workflow lives at
+[.github/workflows/regression-runner.yml](../../.github/workflows/regression-runner.yml)
+on this same branch (so it only exists where it matters and does not
+run on `main`). Manual dispatch is available via the Actions UI for
+fix-then-verify cycles.
+
+Cross-repo access to ReleaseTest is provided by a short-lived
+`camara-validation` GitHub App installation token minted with
+`owner: camaraproject, repositories: ReleaseTest`. There is no
+persisted PAT.
+
+Results surface in three places: (1) the workflow's own pass/fail
+status in the Actions tab on `camaraproject/tooling`, (2) the markdown
+summary on the run's summary page, and (3) the `regression-runner-summary`
+artifact attached to each run (30-day retention).
+
 ### Verify all canary branches
 
 ```
