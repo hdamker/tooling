@@ -1,0 +1,36 @@
+# CAMARA Validation Framework — Regression Runner (stub on main)
+#
+# This file exists on `main` only so the Regression Runner workflow
+# appears in the Actions UI and `workflow_dispatch` is wired up. The
+# functional workflow lives on the `validation-framework` branch. This
+# stub fails fast with a clear error if dispatched against `main`, so
+# accidental dispatches are visibly wrong instead of silently routed.
+#
+# To run the real regression canary, dispatch this workflow with
+# "Use workflow from: validation-framework" in the UI, or:
+#
+#   gh workflow run regression-runner.yml \
+#     --repo camaraproject/tooling --ref validation-framework
+#
+# When `validation-framework` merges into `main` at v1 GA, delete this
+# stub — the functional file will already be on `main`.
+
+name: Regression Runner
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stub:
+    name: Stub
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse dispatch from main
+        run: |
+          echo "::error::This is the stub copy of the Regression Runner workflow on 'main'."
+          echo "::error::The functional workflow lives on the 'validation-framework' branch."
+          echo "::error::Re-dispatch with \"Use workflow from: validation-framework\" in the Actions UI, or pass --ref validation-framework to 'gh workflow run'."
+          exit 1
