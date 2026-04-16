@@ -18,7 +18,7 @@ summary:
   total_gap: 0
   total_manual: 25
   total_pending: 0
-  total_tested: 14
+  total_tested: 29
   by_engine:
     spectral: 84
     gherkin: 25
@@ -294,6 +294,8 @@ pending_rules:
 
 tested_rules:
   P-006: [regression/r4.1-main-baseline]
+  S-005: [regression/r4.1-broken-spec-yaml-fundamentals]
+  S-016: [regression/r4.1-broken-spec-yaml-fundamentals]
   S-018: [regression/r4.1-broken-spec-api-metadata]
   S-019: [regression/r4.1-broken-spec-api-metadata]
   S-020: [regression/r4.1-broken-spec-api-metadata]
@@ -307,6 +309,19 @@ tested_rules:
   S-313: [regression/r4.1-main-baseline]
   S-314: [regression/r4.1-main-baseline]
   S-316: [regression/r4.1-main-baseline]
+  Y-001: [regression/r4.1-broken-spec-yaml-fundamentals]
+  Y-002: [regression/r4.1-broken-spec-yaml-fundamentals]
+  Y-003: [regression/r4.1-broken-spec-yaml-fundamentals]
+  Y-004: [regression/r4.1-broken-spec-yaml-fundamentals]
+  Y-005: [regression/r4.1-broken-spec-yaml-fundamentals]
+  Y-006: [regression/r4.1-broken-spec-yaml-fundamentals]
+  Y-007: [regression/r4.1-broken-spec-yaml-fundamentals]
+  Y-008: [regression/r4.1-broken-spec-yaml-fundamentals]
+  Y-009: [regression/r4.1-broken-spec-yaml-fundamentals]
+  Y-010: [regression/r4.1-broken-spec-yaml-fundamentals]
+  Y-011: [regression/r4.1-broken-spec-yaml-fundamentals]
+  Y-012: [regression/r4.1-broken-spec-yaml-fundamentals]
+  Y-013: [regression/r4.1-broken-spec-yaml-fundamentals]
 
 # ---------------------------------------------------------------------------
 # Manual rules — require human judgment
