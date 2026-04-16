@@ -6,7 +6,7 @@ commit status, diagnostics).
 
 Design doc references:
   - Section 9.2: finding grouping and priority ordering
-  - Section 9.3: per-API summary table
+  - Section 9.3: engine summary table
 """
 
 from __future__ import annotations

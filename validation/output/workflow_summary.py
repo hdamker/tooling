@@ -1,7 +1,7 @@
 """Workflow summary generation for ``$GITHUB_STEP_SUMMARY``.
 
-Produces a Markdown string with header, per-API summary table, findings
-tables grouped by severity level, engine status table, and footer.
+Produces a Markdown string with header, engine summary table, findings
+tables grouped by severity level, and footer.
 Implements 900 KB truncation with priority ordering (errors are never
 truncated).
 
