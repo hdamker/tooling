@@ -24,6 +24,8 @@ on:
     paths:
       - 'validation/**'
       - 'shared-actions/**'
+      - 'tooling_lib/**'
+      - '.github/workflows/validation.yml'
       - '.github/workflows/regression-runner.yml'
   workflow_dispatch:
 
