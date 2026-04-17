@@ -15,6 +15,7 @@ from release_automation.scripts.context_builder import build_context
 
 KNOWN_TEMPLATES = [
     "command_rejected",
+    "common_sync_failed",
     "common_sync_pr_created",
     "config_drift_warning",
     "config_error",
@@ -117,10 +118,10 @@ class TestTemplateContextContract:
             )
 
     def test_list_templates_returns_expected_count(self, responder):
-        """list_templates() returns at least 13 templates."""
+        """list_templates() returns at least 14 templates."""
         templates = responder.list_templates()
         assert len(templates) >= 13, (
-            f"Expected at least 13 templates, got {len(templates)}: {templates}"
+            f"Expected at least 14 templates, got {len(templates)}: {templates}"
         )
 
     def test_build_context_no_none_values(self):
