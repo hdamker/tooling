@@ -96,6 +96,15 @@ class BotContext:
     has_sync_pr: bool = False
     has_publish_warnings: bool = False
 
+    # Common file cache sync fields
+    common_cache_status: str = ""      # "stale", "in_sync", or "" (unchecked)
+    common_cache_details: str = ""     # Human-readable staleness description
+    common_sync_pr_url: str = ""       # URL of open sync-common/* PR
+
+    # Derived cache sync flags (set by derive_flags())
+    common_cache_stale: bool = False
+    has_common_sync_pr: bool = False
+
     def derive_flags(self) -> None:
         """Compute boolean flags and derived fields from string fields."""
         self.is_missing_file = self.error_type == "missing_file"
@@ -111,6 +120,8 @@ class BotContext:
         self.has_reason = bool(self.reason)
         self.has_sync_pr = bool(self.sync_pr_url)
         self.has_publish_warnings = bool(self.publish_warnings)
+        self.common_cache_stale = self.common_cache_status == "stale"
+        self.has_common_sync_pr = bool(self.common_sync_pr_url)
         if not self.short_type:
             self.short_type = config.SHORT_TYPE_MAP.get(
                 self.release_type, self.release_type
@@ -189,4 +200,10 @@ class BotContext:
             "publish_warnings": self.publish_warnings,
             "has_sync_pr": self.has_sync_pr,
             "has_publish_warnings": self.has_publish_warnings,
+            # Common file cache sync fields
+            "common_cache_status": self.common_cache_status,
+            "common_cache_details": self.common_cache_details,
+            "common_sync_pr_url": self.common_sync_pr_url,
+            "common_cache_stale": self.common_cache_stale,
+            "has_common_sync_pr": self.has_common_sync_pr,
         }

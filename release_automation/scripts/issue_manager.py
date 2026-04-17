@@ -229,7 +229,10 @@ class IssueManager:
         release_plan: Dict[str, Any],
         api_versions: Dict[str, str],
         commonalities_release: str = "",
-        icm_release: str = ""
+        icm_release: str = "",
+        common_cache_status: str = "",
+        common_cache_details: str = "",
+        common_sync_pr_url: str = "",
     ) -> str:
         """
         Generate content for the CONFIG section.
@@ -237,12 +240,16 @@ class IssueManager:
         Displays release configuration including:
         - APIs table with target and calculated versions
         - Dependencies (Commonalities, ICM)
+        - Common file cache staleness warning if applicable
 
         Args:
             release_plan: Parsed release-plan.yaml content
             api_versions: Dict mapping API name to calculated version
             commonalities_release: Required Commonalities version
             icm_release: Required ICM version
+            common_cache_status: "stale", "in_sync", or "" (unchecked)
+            common_cache_details: Human-readable staleness description
+            common_sync_pr_url: URL of open sync-common PR if any
 
         Returns:
             Formatted config section content
@@ -283,6 +290,21 @@ class IssueManager:
             lines.append(f"**Dependencies:** {', '.join(deps)}")
         elif not apis:
             lines.append("_No APIs or dependencies configured_")
+
+        # Add common file cache staleness warning
+        if common_cache_status == "stale":
+            lines.append("")
+            detail = f" \u2014 {common_cache_details}" if common_cache_details else ""
+            if common_sync_pr_url:
+                lines.append(
+                    f"\u26a0\ufe0f **Common file cache stale**{detail}. "
+                    f"[Sync PR]({common_sync_pr_url}) pending."
+                )
+            else:
+                lines.append(
+                    f"\u26a0\ufe0f **Common file cache stale**{detail}. "
+                    f"Run `workflow_dispatch` to trigger sync."
+                )
 
         return "\n".join(lines)
 

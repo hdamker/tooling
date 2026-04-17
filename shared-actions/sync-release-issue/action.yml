@@ -49,6 +49,18 @@ inputs:
   github_token:
     description: 'GitHub token with issue write permissions'
     required: true
+  common_cache_status:
+    description: 'Common cache sync status from derive-state ("stale", "in_sync", or "")'
+    required: false
+    default: ''
+  common_cache_details:
+    description: 'Human-readable cache staleness description'
+    required: false
+    default: ''
+  common_sync_pr_url:
+    description: 'URL of open sync-common PR if any'
+    required: false
+    default: ''
 
 outputs:
   issue_number:
@@ -88,6 +100,9 @@ runs:
         DRAFT_RELEASE_URL_OVERRIDE: ${{ inputs.draft_release_url_override }}
         FORCE_UPDATE: ${{ inputs.force_update }}
         TRIGGER_TYPE: ${{ inputs.trigger_type }}
+        COMMON_CACHE_STATUS: ${{ inputs.common_cache_status }}
+        COMMON_CACHE_DETAILS: ${{ inputs.common_cache_details }}
+        COMMON_SYNC_PR_URL: ${{ inputs.common_sync_pr_url }}
         REPO: ${{ github.repository }}
         SCRIPTS_PATH: ${{ github.action_path }}/../../release_automation/scripts
       run: |
@@ -117,6 +132,9 @@ runs:
         draft_release_url_override = os.environ.get('DRAFT_RELEASE_URL_OVERRIDE', '').strip()
         force_update = os.environ.get('FORCE_UPDATE', 'false').strip().lower() == 'true'
         trigger_type = os.environ.get('TRIGGER_TYPE', 'workflow_dispatch')
+        common_cache_status = os.environ.get('COMMON_CACHE_STATUS', '').strip()
+        common_cache_details = os.environ.get('COMMON_CACHE_DETAILS', '').strip()
+        common_sync_pr_url = os.environ.get('COMMON_SYNC_PR_URL', '').strip()
 
         output_file = os.environ['GITHUB_OUTPUT']
 
@@ -234,6 +252,9 @@ runs:
                 release_pr_number_override=release_pr_number_override or None,
                 draft_release_url_override=draft_release_url_override or None,
                 force_update=force_update,
+                common_cache_status=common_cache_status,
+                common_cache_details=common_cache_details,
+                common_sync_pr_url=common_sync_pr_url,
             )
 
             # Extract results
