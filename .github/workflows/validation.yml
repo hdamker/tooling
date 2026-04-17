@@ -117,14 +117,10 @@ jobs:
             }
 
             // Tier 3: Hardcoded fallback tag
-            // ┌──────────────────────────────────────────────────────────┐
-            // │ PRE-RC: branch ref — replace with v1-rc tag after tagging │
-            // │   repo: camaraproject/tooling  ref: validation-framework│
-            // └──────────────────────────────────────────────────────────┘
             core.setOutput('tooling_checkout_repo', 'camaraproject/tooling');
-            core.setOutput('tooling_checkout_ref', 'validation-framework');
+            core.setOutput('tooling_checkout_ref', 'v1-rc');
             core.setOutput('tooling_ref_source', 'fallback_tag');
-            core.info('Tooling ref: fallback camaraproject/tooling@validation-framework');
+            core.info('Tooling ref: fallback camaraproject/tooling@v1-rc');
 
       # ── Step 3: Checkout tooling (sparse) ──────────────────────────
       - name: Checkout tooling
