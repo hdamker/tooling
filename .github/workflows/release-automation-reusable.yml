@@ -2101,81 +2101,61 @@ jobs:
           fetch-depth: 1
           token: ${{ steps.app-token.outputs.token || github.token }}
 
-      - name: Fetch Commonalities files and write manifest
+      - name: Checkout Commonalities at declared tag (sparse)
+        if: needs.derive-state.outputs.common_cache_status == 'stale'
+        uses: actions/checkout@v6
+        with:
+          repository: camaraproject/Commonalities
+          ref: ${{ needs.derive-state.outputs.commonalities_release }}
+          path: _commonalities
+          sparse-checkout: artifacts/common
+          sparse-checkout-cone-mode: true
+
+      - name: Copy Commonalities files and write manifest
         id: sync-common
         if: needs.derive-state.outputs.common_cache_status == 'stale'
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
           COMMONALITIES_RELEASE: ${{ needs.derive-state.outputs.commonalities_release }}
           TOOLING_PATH: ${{ github.workspace }}/_tooling
         shell: python
         run: |
-          import base64, hashlib, json, os, subprocess, sys
+          import os, shutil, sys
           from pathlib import Path
 
           sys.path.insert(0, os.environ['TOOLING_PATH'])
 
           comm_release = os.environ['COMMONALITIES_RELEASE']
+          source_dir = Path('_commonalities/artifacts/common')
           api_repo = Path('_api_repo')
           common_dir = api_repo / 'code' / 'common'
           common_dir.mkdir(parents=True, exist_ok=True)
           output_file = os.environ['GITHUB_OUTPUT']
 
-          source_repo = 'camaraproject/Commonalities'
-          source_path = 'artifacts/common'
-
-          # List files in Commonalities artifacts/common at tag
-          try:
-              raw = subprocess.check_output([
-                  'gh', 'api',
-                  f'repos/{source_repo}/contents/{source_path}',
-                  '-q', '.[].name',
-                  '-H', 'Accept: application/vnd.github+json',
-                  '--paginate',
-              ], env={**os.environ, 'GH_TOKEN': os.environ['GH_TOKEN']},
-                  text=True, stderr=subprocess.PIPE)
-              files = [f.strip() for f in raw.strip().split('\n') if f.strip() and f.strip().endswith('.yaml')]
-          except subprocess.CalledProcessError as e:
-              print(f"::error::Could not list files from {source_repo}/{source_path} at {comm_release}: {e.stderr}")
+          if not source_dir.is_dir():
+              print(f"::error::Commonalities artifacts/common not found at tag {comm_release}")
               with open(output_file, 'a') as f:
                   f.write("synced=false\n")
               sys.exit(0)
 
-          if not files:
-              print(f"::error::No YAML files found in {source_repo}/{source_path} at {comm_release}")
-              with open(output_file, 'a') as f:
-                  f.write("synced=false\n")
-              sys.exit(0)
-
-          # Download each file and compute git blob SHA-1
+          # Copy YAML files from Commonalities checkout to code/common/
           from tooling_lib.cache_sync import git_blob_sha
 
-          manifest_files = {}
-          for filename in files:
-              try:
-                  content_b64 = subprocess.check_output([
-                      'gh', 'api',
-                      f'repos/{source_repo}/contents/{source_path}/{filename}?ref={comm_release}',
-                      '-q', '.content',
-                  ], env={**os.environ, 'GH_TOKEN': os.environ['GH_TOKEN']},
-                      text=True, stderr=subprocess.PIPE).strip()
-
-                  raw_bytes = base64.b64decode(content_b64)
-                  dest = common_dir / filename
-                  dest.write_bytes(raw_bytes)
-
-                  sha = git_blob_sha(raw_bytes)
-                  manifest_files[filename] = sha
-                  print(f"Synced: {filename} ({sha[:12]})")
-              except Exception as e:
-                  print(f"::warning::Failed to sync {filename}: {e}")
-
-          if not manifest_files:
-              print("::error::No files synced successfully")
+          source_files = sorted(p for p in source_dir.iterdir() if p.suffix == '.yaml')
+          if not source_files:
+              print(f"::error::No YAML files in Commonalities artifacts/common at {comm_release}")
               with open(output_file, 'a') as f:
                   f.write("synced=false\n")
               sys.exit(0)
+
+          manifest_files = {}
+          for src_path in source_files:
+              dest = common_dir / src_path.name
+              shutil.copy2(src_path, dest)
+              raw_bytes = dest.read_bytes()
+              sha = git_blob_sha(raw_bytes)
+              manifest_files[src_path.name] = sha
+              print(f"Synced: {src_path.name} ({sha[:12]})")
 
           # Write .sync-manifest.yaml per sync-manifest-schema.yaml
           import yaml
@@ -2192,7 +2172,7 @@ jobs:
               yaml.dump(manifest, default_flow_style=False, sort_keys=False),
               encoding='utf-8'
           )
-          print(f"Wrote manifest: {manifest_path}")
+          print(f"Wrote manifest: {manifest_path} ({len(manifest_files)} files)")
 
           with open(output_file, 'a') as f:
               f.write("synced=true\n")
