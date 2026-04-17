@@ -2448,6 +2448,7 @@ jobs:
           template: common_sync_failed
           base_context: ${{ needs.assemble-context.outputs.base_context }}
           github_token: ${{ steps.app-token.outputs.token || github.token }}
+          context: '{}'
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 7: Post final result comment
