@@ -136,6 +136,7 @@ jobs:
             linting/config
             validation
             shared-actions
+            tooling_lib
           path: .tooling
 
       # ── Step 4: Setup Python ───────────────────────────────────────
