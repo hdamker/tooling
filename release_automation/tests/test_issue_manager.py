@@ -357,8 +357,8 @@ class TestIssueManagerGenerateIssueBodyTemplate:
 
         # No redundant heading
         assert "## Release:" not in body
-        # Scope Issue stub sits above the automation-managed markers
-        assert "**Scope Issue:**" in body
+        # Optional scope placeholder sits above the automation-managed markers
+        assert "_Optional: use this space to describe" in body
         # Remaining section headings should stay at ###
         assert "### Preparing the release content" in body
         assert "### Release Status" in body
