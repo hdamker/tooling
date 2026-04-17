@@ -15,7 +15,7 @@ from release_automation.scripts.context_builder import build_context
 
 KNOWN_TEMPLATES = [
     "command_rejected",
-    "common_cache_stale_warning",
+    "common_sync_pr_created",
     "config_drift_warning",
     "config_error",
     "draft_created",

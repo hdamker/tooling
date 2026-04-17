@@ -492,7 +492,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          SYNC_PR_URL=$(gh pr list --head "sync-common/" --state open --json url --jq '.[0].url' 2>/dev/null || true)
+          SYNC_PR_URL=$(gh pr list --state open --json headRefName,url \
+            --jq '.[] | select(.headRefName | startswith("sync-common/")) | .url' 2>/dev/null | head -1 || true)
           echo "common_sync_pr_url=$SYNC_PR_URL" >> "$GITHUB_OUTPUT"
           if [ -n "$SYNC_PR_URL" ]; then
             echo "Found existing sync PR: $SYNC_PR_URL"
@@ -2407,25 +2408,22 @@ jobs:
               "release_plan_url": "${{ github.server_url }}/${{ github.repository }}/blob/main/release-plan.yaml"
             }
 
-      - name: Post Common Cache Stale Warning
+      - name: Post Common Sync PR Created
         if: |
-          needs.derive-state.outputs.common_cache_status == 'stale' &&
-          needs.derive-state.outputs.release_issue_number != '' &&
-          (needs.derive-state.outputs.state == 'snapshot-active' ||
-           needs.derive-state.outputs.state == 'draft-ready')
+          steps.sync-pr.outputs.sync_status == 'created' &&
+          (needs.derive-state.outputs.release_issue_number != '' || steps.sync.outputs.issue_number != '')
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
-          issue_number: ${{ needs.derive-state.outputs.release_issue_number }}
+          issue_number: ${{ needs.derive-state.outputs.release_issue_number || steps.sync.outputs.issue_number }}
           release_tag: ${{ needs.derive-state.outputs.release_tag }}
           run_id: ${{ github.run_id }}
-          template: common_cache_stale_warning
+          template: common_sync_pr_created
           base_context: ${{ needs.assemble-context.outputs.base_context }}
           github_token: ${{ steps.app-token.outputs.token || github.token }}
           context: |
             {
-              "common_cache_status": "${{ needs.derive-state.outputs.common_cache_status }}",
               "common_cache_details": "${{ needs.derive-state.outputs.common_cache_details }}",
-              "common_sync_pr_url": "${{ steps.sync-pr.outputs.sync_pr_url || needs.derive-state.outputs.common_sync_pr_url }}"
+              "common_sync_pr_url": "${{ steps.sync-pr.outputs.sync_pr_url }}"
             }
 
   # ─────────────────────────────────────────────────────────────────────────────
