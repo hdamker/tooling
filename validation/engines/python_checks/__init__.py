@@ -11,6 +11,7 @@ from .error_code_checks import check_conflict_deprecated, check_contextcode_form
 from .filename_checks import check_filename_kebab_case, check_filename_matches_api_name
 from .metadata_checks import check_commonalities_version
 from .readme_checks import check_readme_placeholder_removal
+from .common_cache_checks import check_common_cache_sync
 from .release_plan_checks import check_orphan_api_definitions, check_release_plan_semantics
 from .release_review_checks import check_release_review_file_restriction
 from .subscription_checks import (
@@ -55,6 +56,7 @@ CHECKS: list[CheckDescriptor] = [
     CheckDescriptor("check-readme-placeholder-removal", CheckScope.REPO, check_readme_placeholder_removal),
     CheckDescriptor("check-release-review-file-restriction", CheckScope.REPO, check_release_review_file_restriction),
     CheckDescriptor("check-orphan-api-definitions", CheckScope.REPO, check_orphan_api_definitions),
+    CheckDescriptor("check-common-cache-sync", CheckScope.REPO, check_common_cache_sync),
 ]
 
 __all__ = ["CHECKS", "CheckDescriptor", "CheckScope"]
