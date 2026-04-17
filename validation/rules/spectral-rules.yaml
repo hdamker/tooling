@@ -348,6 +348,27 @@
   hint: "Acceptable if free-form field or implementation-dependent — no fix needed."
   conditional_level:
     default: hint
+  # Known-unactionable locations in the Commonalities common library.
+  # These string fields are already length-constrained via maxLength (S-312
+  # is satisfied); no sensible format/pattern/enum/const value exists for
+  # the free-text and identifier fields below.  The rule's own hint already
+  # flags this as "Acceptable ... no fix needed" — the allowlist removes
+  # the repeated noise. Entries are specific fields, not whole components,
+  # so any new unconstrained string added to a common schema still surfaces
+  # and can be evaluated on its own merits.
+  suppress_schema_paths:
+    # CAMARA_common.yaml
+    - components.schemas.ErrorInfo.properties.code
+    - components.schemas.ErrorInfo.properties.message
+    - components.schemas.NetworkAccessIdentifier
+    # CAMARA_event_common.yaml
+    - components.schemas.CloudEvent.properties.id
+    - components.schemas.CloudEvent.properties.type
+    - components.schemas.SubscriptionId
+    - components.schemas.HTTPSettings.properties.headers.additionalProperties
+    - components.schemas.SubscriptionStarted.properties.initiationDescription
+    - components.schemas.SubscriptionUpdated.properties.updateDescription
+    - components.schemas.SubscriptionEnded.properties.terminationDescription
 
 - id: S-314
   engine: spectral

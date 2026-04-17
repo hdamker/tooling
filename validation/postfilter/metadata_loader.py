@@ -76,6 +76,10 @@ class RuleMetadata:
         applicability: Condition dict — omitted fields are unconstrained.
         conditional_level: Severity specification, or ``None`` to preserve
             engine-reported severity (identity mapping).
+        suppress_schema_paths: Tuple of JSON paths within a source document
+            to suppress for this rule.  A finding is dropped entirely when
+            its ``schema_path`` equals an entry here or starts with an
+            entry followed by a dot.  Empty tuple means no suppression.
     """
 
     id: str
@@ -86,6 +90,7 @@ class RuleMetadata:
     hint: Optional[str]
     applicability: dict
     conditional_level: Optional[ConditionalLevel]
+    suppress_schema_paths: Tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +146,14 @@ def parse_rule_metadata(raw: dict) -> RuleMetadata:
     raw_cl = raw.get("conditional_level")
     conditional_level = _parse_conditional_level(raw_cl) if raw_cl is not None else None
 
+    # Optional suppress_schema_paths — empty tuple means no suppression
+    raw_suppress = raw.get("suppress_schema_paths") or []
+    if not isinstance(raw_suppress, list):
+        raise ValueError("suppress_schema_paths must be a list of strings")
+    suppress_schema_paths: Tuple[str, ...] = tuple(
+        entry for entry in raw_suppress if isinstance(entry, str) and entry
+    )
+
     return RuleMetadata(
         id=raw["id"],
         name=raw.get("name", raw["engine_rule"]),
@@ -150,6 +163,7 @@ def parse_rule_metadata(raw: dict) -> RuleMetadata:
         hint=raw.get("hint"),
         applicability=raw.get("applicability", {}),
         conditional_level=conditional_level,
+        suppress_schema_paths=suppress_schema_paths,
     )
 
 

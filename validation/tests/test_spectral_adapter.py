@@ -248,6 +248,38 @@ class TestNormalizeFinding:
         assert "rule_id" not in finding
         assert "hint" not in finding
 
+    def test_schema_path_dot_joined(self):
+        """Spectral's JSONPath array is dot-joined into finding['schema_path']."""
+        finding = normalize_finding(SAMPLE_SPECTRAL_FINDING)
+        # raw path is ["paths", "/qualityOnDemand", "post"]
+        assert finding["schema_path"] == "paths./qualityOnDemand.post"
+
+    def test_schema_path_mixed_string_and_int_segments(self):
+        """JSONPath segments can include array indices — cast to str."""
+        raw = {
+            **SAMPLE_SPECTRAL_FINDING,
+            "path": ["components", "schemas", "Foo", "allOf", 0, "properties", "bar"],
+        }
+        finding = normalize_finding(raw)
+        assert finding["schema_path"] == "components.schemas.Foo.allOf.0.properties.bar"
+
+    def test_schema_path_none_when_empty(self):
+        """An empty JSONPath list yields schema_path=None."""
+        raw = {**SAMPLE_SPECTRAL_FINDING, "path": []}
+        finding = normalize_finding(raw)
+        assert finding["schema_path"] is None
+
+    def test_schema_path_none_when_missing(self):
+        raw = {
+            "code": "some-rule",
+            "message": "msg",
+            "severity": 1,
+            "source": "code/API_definitions/api.yaml",
+            "range": {"start": {"line": 0, "character": 0}},
+        }
+        finding = normalize_finding(raw)
+        assert finding["schema_path"] is None
+
     def test_absolute_path_normalised_with_repo_root(self):
         raw = {
             **SAMPLE_SPECTRAL_FINDING,

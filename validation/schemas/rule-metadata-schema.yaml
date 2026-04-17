@@ -110,6 +110,23 @@ properties:
 
     additionalProperties: false
 
+  suppress_schema_paths:
+    type: array
+    description: >
+      Post-filter allowlist of JSON paths within a source document to
+      suppress for this rule.  A finding is dropped entirely when its
+      ``schema_path`` field equals an entry here or starts with the entry
+      followed by a dot (prefix-with-boundary match).  Intended for rules
+      that fire on known-unactionable locations — e.g. free-text fields in
+      Commonalities common schemas where no sensible ``pattern``/``format``
+      exists.  Entries should be specific field paths, not whole
+      components, so that any new unconstrained field surfaces instead of
+      being silently masked.  Optional — omit for rules that do not need
+      per-path suppression.
+    items:
+      type: string
+      minLength: 1
+
   conditional_level:
     type: object
     description: >

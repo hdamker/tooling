@@ -56,6 +56,15 @@ properties:
       File path relative to the repository root
       (e.g. "code/API_definitions/quality-on-demand.yaml").
 
+  schema_path:
+    type: ["string", "null"]
+    description: >
+      Dot-joined JSONPath of the offending node within the source document,
+      when the engine provides it (e.g.
+      "components.schemas.ErrorInfo.properties.code").  Optional — absent
+      for engines that only report file+line locations (yamllint, gherkin).
+      Used by post-filter suppress_schema_paths to drop specific findings.
+
   line:
     type: integer
     minimum: 1
