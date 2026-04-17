@@ -70,6 +70,39 @@ class TestBotContext:
         assert ctx.has_sync_pr is False
         assert ctx.has_publish_warnings is False
 
+        # Cache sync fields
+        assert ctx.common_cache_status == ""
+        assert ctx.common_cache_details == ""
+        assert ctx.common_sync_pr_url == ""
+        assert ctx.common_cache_stale is False
+        assert ctx.has_common_sync_pr is False
+
+    def test_derive_flags_common_cache_stale(self):
+        """common_cache_status 'stale' sets common_cache_stale flag."""
+        ctx = BotContext(common_cache_status="stale")
+        ctx.derive_flags()
+
+        assert ctx.common_cache_stale is True
+        assert ctx.has_common_sync_pr is False
+
+    def test_derive_flags_common_cache_in_sync(self):
+        """common_cache_status 'in_sync' does not set stale flag."""
+        ctx = BotContext(common_cache_status="in_sync")
+        ctx.derive_flags()
+
+        assert ctx.common_cache_stale is False
+
+    def test_derive_flags_common_sync_pr(self):
+        """common_sync_pr_url sets has_common_sync_pr flag."""
+        ctx = BotContext(
+            common_cache_status="stale",
+            common_sync_pr_url="https://github.com/org/repo/pull/42",
+        )
+        ctx.derive_flags()
+
+        assert ctx.common_cache_stale is True
+        assert ctx.has_common_sync_pr is True
+
     def test_derive_flags_missing_file(self):
         """error_type 'missing_file' sets is_missing_file flag."""
         ctx = BotContext(error_type="missing_file")
@@ -178,6 +211,9 @@ class TestBotContext:
             "sync_pr_number", "sync_pr_url",
             "src_commit_sha_short", "confirm_tag",
             "publish_warnings", "has_sync_pr", "has_publish_warnings",
+            # Common cache sync fields
+            "common_cache_status", "common_cache_details", "common_sync_pr_url",
+            "common_cache_stale", "has_common_sync_pr",
         }
         assert set(d.keys()) == expected_keys
 
@@ -257,6 +293,9 @@ class TestBuildContext:
             "sync_pr_number", "sync_pr_url",
             "src_commit_sha_short", "confirm_tag",
             "publish_warnings", "has_sync_pr", "has_publish_warnings",
+            # Common cache sync fields
+            "common_cache_status", "common_cache_details", "common_sync_pr_url",
+            "common_cache_stale", "has_common_sync_pr",
         }
         assert set(result.keys()) == expected_keys
 

@@ -69,6 +69,10 @@ def main():
         "commonalities_release": os.environ.get("CTX_COMMONALITIES_RELEASE", ""),
         "identity_consent_management_release": os.environ.get("CTX_IDENTITY_CONSENT_MANAGEMENT_RELEASE", ""),
 
+        # Common file cache sync
+        "common_cache_status": os.environ.get("CTX_COMMON_CACHE_STATUS", ""),
+        "common_cache_details": os.environ.get("CTX_COMMON_CACHE_DETAILS", ""),
+
         # Lists
         "apis": parse_json_list(os.environ.get("CTX_APIS_JSON", "[]")),
         

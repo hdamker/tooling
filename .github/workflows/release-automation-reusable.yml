@@ -378,6 +378,9 @@ jobs:
       release_plan_url: ${{ steps.state.outputs.release_plan_url }}
       src_commit_sha_short: ${{ steps.state.outputs.src_commit_sha_short }}
       meta_release: ${{ steps.state.outputs.meta_release }}
+      # Common file cache sync outputs      common_cache_status: ${{ steps.cache-sync.outputs.common_cache_status }}
+      common_cache_details: ${{ steps.cache-sync.outputs.common_cache_details }}
+      common_sync_pr_url: ${{ steps.find-sync-pr.outputs.common_sync_pr_url }}
     steps:
       - name: Checkout tooling
         uses: actions/checkout@v6
@@ -388,11 +391,114 @@ jobs:
           sparse-checkout: |
             release_automation/scripts
             shared-actions/derive-release-state
+            tooling_lib
 
       - name: Derive Release State
         id: state
         uses: ./_tooling/shared-actions/derive-release-state
         # No release_tag input - derived from repository artifacts (release-plan.yaml or release-metadata.yaml)
+
+      # ── Common file cache sync detection ──────────────────────────────
+      - name: Checkout API repo (sparse, for cache sync check)
+        if: |
+          steps.state.outputs.config_error == '' &&
+          steps.state.outputs.commonalities_release != ''
+        uses: actions/checkout@v6
+        with:
+          path: _api_repo
+          sparse-checkout: |
+            code/common
+          sparse-checkout-cone-mode: true
+
+      - name: Check common cache sync
+        id: cache-sync
+        if: |
+          steps.state.outputs.config_error == '' &&
+          steps.state.outputs.commonalities_release != ''
+        shell: python
+        env:
+          API_REPO_PATH: ${{ github.workspace }}/_api_repo
+          COMMONALITIES_RELEASE: ${{ steps.state.outputs.commonalities_release }}
+          TOOLING_PATH: ${{ github.workspace }}/_tooling
+        run: |
+          import os, sys
+          from pathlib import Path
+
+          sys.path.insert(0, os.environ['TOOLING_PATH'])
+
+          comm_release = os.environ['COMMONALITIES_RELEASE']
+          api_repo = Path(os.environ['API_REPO_PATH'])
+          output_file = os.environ['GITHUB_OUTPUT']
+
+          # Version gate: only check for r4.2+
+          import re
+          m = re.match(r'^r(\d+)\.(\d+)$', comm_release)
+          if not m:
+              print(f"Cannot parse commonalities_release '{comm_release}', skipping cache check")
+              with open(output_file, 'a') as f:
+                  f.write("common_cache_status=\n")
+                  f.write("common_cache_details=\n")
+              sys.exit(0)
+
+          major, minor = int(m.group(1)), int(m.group(2))
+          if major < 4 or (major == 4 and minor < 2):
+              print(f"commonalities_release {comm_release} < r4.2, skipping cache check")
+              with open(output_file, 'a') as f:
+                  f.write("common_cache_status=\n")
+                  f.write("common_cache_details=\n")
+              sys.exit(0)
+
+          from tooling_lib.cache_sync import check_sync_status
+
+          expected = {"Commonalities": comm_release}
+          status = check_sync_status(api_repo, expected)
+
+          if status.in_sync:
+              print(f"Common file cache is in sync with {comm_release}")
+              with open(output_file, 'a') as f:
+                  f.write("common_cache_status=in_sync\n")
+                  f.write("common_cache_details=\n")
+              sys.exit(0)
+
+          # Build descriptive details
+          details_parts = []
+          if status.no_common_dir:
+              details_parts.append("code/common/ directory is missing")
+          elif status.no_manifest:
+              details_parts.append("code/common/.sync-manifest.yaml is missing")
+          else:
+              for src in status.sources:
+                  if src.tag_mismatch:
+                      expected_tag, actual_tag = src.tag_mismatch
+                      details_parts.append(
+                          f"{src.repository}: expected {expected_tag}, manifest has {actual_tag}"
+                      )
+                  for fname in src.missing_files:
+                      details_parts.append(f"{fname} missing from code/common/")
+                  for fname in src.modified_files:
+                      details_parts.append(f"{fname} modified since last sync")
+
+          details = "; ".join(details_parts) if details_parts else "cache mismatch detected"
+          print(f"Common file cache is stale: {details}")
+
+          with open(output_file, 'a') as f:
+              f.write("common_cache_status=stale\n")
+              f.write(f"common_cache_details={details}\n")
+
+      - name: Find existing sync PR
+        id: find-sync-pr
+        if: steps.cache-sync.outputs.common_cache_status == 'stale'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          SYNC_PR_URL=$(gh pr list --head "sync-common/" --state open --json url --jq '.[0].url' 2>/dev/null || true)
+          echo "common_sync_pr_url=$SYNC_PR_URL" >> "$GITHUB_OUTPUT"
+          if [ -n "$SYNC_PR_URL" ]; then
+            echo "Found existing sync PR: $SYNC_PR_URL"
+          else
+            echo "No existing sync PR found"
+          fi
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 2b: Handle configuration errors (if derive-state detected any)
@@ -530,6 +636,8 @@ jobs:
           CTX_APIS_JSON: ${{ needs.derive-state.outputs.apis_json }}
           CTX_COMMONALITIES_RELEASE: ${{ needs.derive-state.outputs.commonalities_release }}
           CTX_IDENTITY_CONSENT_MANAGEMENT_RELEASE: ${{ needs.derive-state.outputs.identity_consent_management_release }}
+          CTX_COMMON_CACHE_STATUS: ${{ needs.derive-state.outputs.common_cache_status }}
+          CTX_COMMON_CACHE_DETAILS: ${{ needs.derive-state.outputs.common_cache_details }}
           CTX_TRIGGER_PR_NUMBER: ${{ needs.check-trigger.outputs.trigger_pr_number }}
           CTX_TRIGGER_PR_URL: ${{ needs.check-trigger.outputs.trigger_pr_url }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -620,6 +728,21 @@ jobs:
               core.setOutput('allowed', 'false');
               core.setOutput('error_message', `Command /${command} is not allowed in state '${currentState}'. ${validCommands}`);
               return;
+            }
+
+            // Block /create-snapshot when common file cache is stale            if (command === 'create-snapshot') {
+              const cacheStatus = '${{ needs.derive-state.outputs.common_cache_status }}';
+              const cacheDetails = '${{ needs.derive-state.outputs.common_cache_details }}';
+              const syncPrUrl = '${{ needs.derive-state.outputs.common_sync_pr_url }}';
+              if (cacheStatus === 'stale') {
+                const prHint = syncPrUrl
+                  ? ` Merge the sync PR: ${syncPrUrl}`
+                  : ' Run workflow_dispatch to trigger sync, or close and reopen the Release Issue.';
+                core.setOutput('allowed', 'false');
+                core.setOutput('error_message',
+                  `Common file cache is stale: ${cacheDetails}.${prHint}`);
+                return;
+              }
             }
 
             // Check user permission (must be write or higher)
@@ -1963,6 +2086,218 @@ jobs:
             release_automation/templates
             shared-actions/sync-release-issue
             shared-actions/post-bot-comment
+            tooling_lib
+
+      # ── Common file cache sync ─────────────────────────────────────────
+      # When cache is stale, fetch Commonalities files and create/update a
+      # sync PR before the Release Issue update. Uses continue-on-error so
+      # sync failures don't prevent the issue update.
+
+      - name: Checkout API repo (for common sync)
+        if: needs.derive-state.outputs.common_cache_status == 'stale'
+        uses: actions/checkout@v6
+        with:
+          path: _api_repo
+          fetch-depth: 1
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Fetch Commonalities files and write manifest
+        id: sync-common
+        if: needs.derive-state.outputs.common_cache_status == 'stale'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          COMMONALITIES_RELEASE: ${{ needs.derive-state.outputs.commonalities_release }}
+          TOOLING_PATH: ${{ github.workspace }}/_tooling
+        shell: python
+        run: |
+          import base64, hashlib, json, os, subprocess, sys
+          from pathlib import Path
+
+          sys.path.insert(0, os.environ['TOOLING_PATH'])
+
+          comm_release = os.environ['COMMONALITIES_RELEASE']
+          api_repo = Path('_api_repo')
+          common_dir = api_repo / 'code' / 'common'
+          common_dir.mkdir(parents=True, exist_ok=True)
+          output_file = os.environ['GITHUB_OUTPUT']
+
+          source_repo = 'camaraproject/Commonalities'
+          source_path = 'artifacts/common'
+
+          # List files in Commonalities artifacts/common at tag
+          try:
+              raw = subprocess.check_output([
+                  'gh', 'api',
+                  f'repos/{source_repo}/contents/{source_path}',
+                  '-q', '.[].name',
+                  '-H', 'Accept: application/vnd.github+json',
+                  '--paginate',
+              ], env={**os.environ, 'GH_TOKEN': os.environ['GH_TOKEN']},
+                  text=True, stderr=subprocess.PIPE)
+              files = [f.strip() for f in raw.strip().split('\n') if f.strip() and f.strip().endswith('.yaml')]
+          except subprocess.CalledProcessError as e:
+              print(f"::error::Could not list files from {source_repo}/{source_path} at {comm_release}: {e.stderr}")
+              with open(output_file, 'a') as f:
+                  f.write("synced=false\n")
+              sys.exit(0)
+
+          if not files:
+              print(f"::error::No YAML files found in {source_repo}/{source_path} at {comm_release}")
+              with open(output_file, 'a') as f:
+                  f.write("synced=false\n")
+              sys.exit(0)
+
+          # Download each file and compute git blob SHA-1
+          from tooling_lib.cache_sync import git_blob_sha
+
+          manifest_files = {}
+          for filename in files:
+              try:
+                  content_b64 = subprocess.check_output([
+                      'gh', 'api',
+                      f'repos/{source_repo}/contents/{source_path}/{filename}?ref={comm_release}',
+                      '-q', '.content',
+                  ], env={**os.environ, 'GH_TOKEN': os.environ['GH_TOKEN']},
+                      text=True, stderr=subprocess.PIPE).strip()
+
+                  raw_bytes = base64.b64decode(content_b64)
+                  dest = common_dir / filename
+                  dest.write_bytes(raw_bytes)
+
+                  sha = git_blob_sha(raw_bytes)
+                  manifest_files[filename] = sha
+                  print(f"Synced: {filename} ({sha[:12]})")
+              except Exception as e:
+                  print(f"::warning::Failed to sync {filename}: {e}")
+
+          if not manifest_files:
+              print("::error::No files synced successfully")
+              with open(output_file, 'a') as f:
+                  f.write("synced=false\n")
+              sys.exit(0)
+
+          # Write .sync-manifest.yaml per sync-manifest-schema.yaml
+          import yaml
+
+          manifest = {
+              'sources': [{
+                  'repository': 'Commonalities',
+                  'release': comm_release,
+                  'files': manifest_files,
+              }]
+          }
+          manifest_path = common_dir / '.sync-manifest.yaml'
+          manifest_path.write_text(
+              yaml.dump(manifest, default_flow_style=False, sort_keys=False),
+              encoding='utf-8'
+          )
+          print(f"Wrote manifest: {manifest_path}")
+
+          with open(output_file, 'a') as f:
+              f.write("synced=true\n")
+              f.write(f"files_count={len(manifest_files)}\n")
+
+      - name: Resolve Bot Identity (for common sync)
+        id: sync-bot-identity
+        if: needs.derive-state.outputs.common_cache_status == 'stale' && steps.sync-common.outputs.synced == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+        run: |
+          if [ -n "${{ vars.RELEASE_APP_SLUG }}" ] && [ -n "${{ steps.app-token.outputs.token }}" ]; then
+            BOT_LOGIN="${{ vars.RELEASE_APP_SLUG }}[bot]"
+          else
+            BOT_LOGIN="github-actions[bot]"
+          fi
+          BOT_INFO=$(gh api "/users/$BOT_LOGIN" --jq '{id: .id, login: .login}')
+          BOT_NAME=$(echo "$BOT_INFO" | jq -r '.login')
+          BOT_ID=$(echo "$BOT_INFO" | jq -r '.id')
+          echo "bot_name=$BOT_NAME" >> $GITHUB_OUTPUT
+          echo "bot_email=${BOT_ID}+${BOT_NAME}@users.noreply.github.com" >> $GITHUB_OUTPUT
+
+      - name: Create or update common sync PR
+        id: sync-pr
+        if: needs.derive-state.outputs.common_cache_status == 'stale' && steps.sync-common.outputs.synced == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          COMMONALITIES_RELEASE: ${{ needs.derive-state.outputs.commonalities_release }}
+        run: |
+          cd _api_repo
+
+          SYNC_BRANCH="sync-common/${COMMONALITIES_RELEASE}"
+
+          # Close stale sync PRs (different commonalities release)
+          STALE_PRS=$(gh pr list --state open --json number,headRefName \
+            --jq '.[] | select(.headRefName | startswith("sync-common/")) | select(.headRefName != "'"$SYNC_BRANCH"'") | .number' 2>/dev/null || true)
+          for pr_num in $STALE_PRS; do
+            echo "Closing stale sync PR #$pr_num"
+            gh pr close "$pr_num" --comment "Superseded by sync to Commonalities ${COMMONALITIES_RELEASE}" || true
+          done
+
+          git config user.name "${{ steps.sync-bot-identity.outputs.bot_name }}"
+          git config user.email "${{ steps.sync-bot-identity.outputs.bot_email }}"
+
+          # Check if branch already exists on remote
+          if git ls-remote --heads origin "$SYNC_BRANCH" | grep -q .; then
+            # Existing branch — update it
+            git fetch origin "$SYNC_BRANCH"
+            git checkout "$SYNC_BRANCH"
+            git add code/common/
+            if git diff --cached --quiet; then
+              echo "No changes to commit on existing sync branch"
+              EXISTING_PR=$(gh pr list --head "$SYNC_BRANCH" --state open --json url --jq '.[0].url' 2>/dev/null || true)
+              echo "sync_pr_url=$EXISTING_PR" >> $GITHUB_OUTPUT
+              echo "sync_pr_number=" >> $GITHUB_OUTPUT
+              echo "sync_status=up_to_date" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            git commit -m "chore: update common file cache for Commonalities ${COMMONALITIES_RELEASE}"
+            git push origin "$SYNC_BRANCH"
+            EXISTING_PR=$(gh pr list --head "$SYNC_BRANCH" --state open --json url --jq '.[0].url' 2>/dev/null || true)
+            echo "sync_pr_url=$EXISTING_PR" >> $GITHUB_OUTPUT
+            echo "sync_status=updated" >> $GITHUB_OUTPUT
+          else
+            # New branch
+            git checkout -b "$SYNC_BRANCH"
+            git add code/common/
+            if git diff --cached --quiet; then
+              echo "No changes to commit"
+              echo "sync_status=no_changes" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            git commit -m "chore: sync common files from Commonalities ${COMMONALITIES_RELEASE}"
+            git push origin "$SYNC_BRANCH"
+
+            # Create PR
+            PR_URL=$(gh pr create \
+              --title "Sync common files from Commonalities ${COMMONALITIES_RELEASE}" \
+              --body "Automated sync of \`code/common/\` files from \`camaraproject/Commonalities\` at release tag \`${COMMONALITIES_RELEASE}\`.
+
+          This PR was created by release automation because the cached Commonalities files were out of sync with the declared dependency in \`release-plan.yaml\`.
+
+          **What changed:**
+          - Updated files in \`code/common/\` to match Commonalities ${COMMONALITIES_RELEASE}
+          - Added/updated \`.sync-manifest.yaml\` with file integrity hashes
+
+          **Action required:** Review and merge this PR. The \`/create-snapshot\` command will be blocked until common files are in sync." \
+              --head "$SYNC_BRANCH" \
+              --base main) || {
+              echo "::error::Failed to create sync PR"
+              echo "sync_status=failed" >> $GITHUB_OUTPUT
+              exit 0
+            }
+
+            PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+            gh pr edit "$PR_NUMBER" --add-label "common-sync" --add-label "automated" 2>/dev/null || true
+
+            echo "sync_pr_url=$PR_URL" >> $GITHUB_OUTPUT
+            echo "sync_pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+            echo "sync_status=created" >> $GITHUB_OUTPUT
+            echo "Sync PR created: $PR_URL"
+          fi
+
+      # ── End common file cache sync ────────────────────────────────────────
 
       - name: Resolve Sync Context
         id: sync-context
@@ -2018,6 +2353,9 @@ jobs:
           force_update: ${{ steps.sync-context.outputs.force_update }}
           trigger_type: ${{ needs.check-trigger.outputs.trigger_type }}
           github_token: ${{ steps.app-token.outputs.token || github.token }}
+          common_cache_status: ${{ needs.derive-state.outputs.common_cache_status }}
+          common_cache_details: ${{ needs.derive-state.outputs.common_cache_details }}
+          common_sync_pr_url: ${{ steps.sync-pr.outputs.sync_pr_url || needs.derive-state.outputs.common_sync_pr_url }}
 
       - name: Log Result
         run: |
@@ -2087,6 +2425,27 @@ jobs:
               "trigger_pr_number": "${{ needs.check-trigger.outputs.trigger_pr_number }}",
               "trigger_pr_url": "${{ needs.check-trigger.outputs.trigger_pr_url }}",
               "release_plan_url": "${{ github.server_url }}/${{ github.repository }}/blob/main/release-plan.yaml"
+            }
+
+      - name: Post Common Cache Stale Warning
+        if: |
+          needs.derive-state.outputs.common_cache_status == 'stale' &&
+          needs.derive-state.outputs.release_issue_number != '' &&
+          (needs.derive-state.outputs.state == 'snapshot-active' ||
+           needs.derive-state.outputs.state == 'draft-ready')
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ needs.derive-state.outputs.release_issue_number }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
+          template: common_cache_stale_warning
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
+          github_token: ${{ steps.app-token.outputs.token || github.token }}
+          context: |
+            {
+              "common_cache_status": "${{ needs.derive-state.outputs.common_cache_status }}",
+              "common_cache_details": "${{ needs.derive-state.outputs.common_cache_details }}",
+              "common_sync_pr_url": "${{ steps.sync-pr.outputs.sync_pr_url || needs.derive-state.outputs.common_sync_pr_url }}"
             }
 
   # ─────────────────────────────────────────────────────────────────────────────

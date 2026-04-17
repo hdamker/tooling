@@ -301,6 +301,83 @@ class TestIssueManagerGenerateConfigSection:
 
         assert "_No APIs or dependencies configured_" in content
 
+    def test_generate_config_with_stale_cache_and_sync_pr(self):
+        """Stale cache with sync PR shows warning with link."""
+        manager = IssueManager()
+
+        release_plan = {
+            "repository": {"target_release_type": "public-release"},
+            "apis": [{"api_name": "test-api", "target_api_version": "1.0.0", "target_api_status": "public"}],
+            "dependencies": {"commonalities_release": "r4.2"},
+        }
+
+        content = manager.generate_config_section(
+            release_plan, {"test-api": "1.0.0"},
+            commonalities_release="r4.2",
+            common_cache_status="stale",
+            common_cache_details="Commonalities: expected r4.2, manifest has r4.1",
+            common_sync_pr_url="https://github.com/org/repo/pull/42",
+        )
+
+        assert "\u26a0\ufe0f **Common file cache stale**" in content
+        assert "expected r4.2, manifest has r4.1" in content
+        assert "[Sync PR](https://github.com/org/repo/pull/42)" in content
+
+    def test_generate_config_with_stale_cache_no_pr(self):
+        """Stale cache without sync PR shows dispatch guidance."""
+        manager = IssueManager()
+
+        release_plan = {
+            "repository": {"target_release_type": "public-release"},
+            "apis": [{"api_name": "test-api", "target_api_version": "1.0.0"}],
+        }
+
+        content = manager.generate_config_section(
+            release_plan, {},
+            commonalities_release="r4.2",
+            common_cache_status="stale",
+            common_cache_details="CAMARA_common.yaml modified since last sync",
+        )
+
+        assert "\u26a0\ufe0f **Common file cache stale**" in content
+        assert "modified since last sync" in content
+        assert "workflow_dispatch" in content
+
+    def test_generate_config_in_sync_no_warning(self):
+        """In-sync cache shows no warning."""
+        manager = IssueManager()
+
+        release_plan = {
+            "repository": {"target_release_type": "public-release"},
+            "apis": [{"api_name": "test-api", "target_api_version": "1.0.0"}],
+        }
+
+        content = manager.generate_config_section(
+            release_plan, {},
+            commonalities_release="r4.2",
+            common_cache_status="in_sync",
+        )
+
+        assert "\u26a0\ufe0f" not in content
+        assert "stale" not in content
+
+    def test_generate_config_unchecked_cache_no_warning(self):
+        """Empty cache status (unchecked/legacy) shows no warning."""
+        manager = IssueManager()
+
+        release_plan = {
+            "repository": {"target_release_type": "public-release"},
+            "apis": [{"api_name": "test-api", "target_api_version": "1.0.0"}],
+        }
+
+        content = manager.generate_config_section(
+            release_plan, {},
+            commonalities_release="r3.4",
+            common_cache_status="",
+        )
+
+        assert "\u26a0\ufe0f" not in content
+
 
 class TestIssueManagerGenerateIssueBodyTemplate:
     """Tests for generate_issue_body_template method."""
