@@ -2101,7 +2101,9 @@ jobs:
       # sync failures don't prevent the issue update.
 
       - name: Checkout API repo (for common sync)
+        id: sync-checkout-api
         if: needs.derive-state.outputs.common_cache_status == 'stale'
+        continue-on-error: true
         uses: actions/checkout@v6
         with:
           path: _api_repo
@@ -2109,7 +2111,9 @@ jobs:
           token: ${{ steps.app-token.outputs.token || github.token }}
 
       - name: Checkout Commonalities at declared tag (sparse)
-        if: needs.derive-state.outputs.common_cache_status == 'stale'
+        id: sync-checkout-commonalities
+        if: steps.sync-checkout-api.outcome == 'success'
+        continue-on-error: true
         uses: actions/checkout@v6
         with:
           repository: camaraproject/Commonalities
@@ -2120,7 +2124,7 @@ jobs:
 
       - name: Copy Commonalities files and write manifest
         id: sync-common
-        if: needs.derive-state.outputs.common_cache_status == 'stale'
+        if: steps.sync-checkout-commonalities.outcome == 'success'
         continue-on-error: true
         env:
           COMMONALITIES_RELEASE: ${{ needs.derive-state.outputs.commonalities_release }}
@@ -2431,6 +2435,19 @@ jobs:
               "common_cache_details": "${{ needs.derive-state.outputs.common_cache_details }}",
               "common_sync_pr_url": "${{ steps.sync-pr.outputs.sync_pr_url }}"
             }
+
+      - name: Post Common Sync Failed
+        if: |
+          steps.sync-checkout-commonalities.outcome == 'failure' &&
+          (needs.derive-state.outputs.release_issue_number != '' || steps.sync.outputs.issue_number != '')
+        uses: ./_tooling/shared-actions/post-bot-comment
+        with:
+          issue_number: ${{ needs.derive-state.outputs.release_issue_number || steps.sync.outputs.issue_number }}
+          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          run_id: ${{ github.run_id }}
+          template: common_sync_failed
+          base_context: ${{ needs.assemble-context.outputs.base_context }}
+          github_token: ${{ steps.app-token.outputs.token || github.token }}
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 7: Post final result comment
