@@ -383,7 +383,8 @@ jobs:
       release_plan_url: ${{ steps.state.outputs.release_plan_url }}
       src_commit_sha_short: ${{ steps.state.outputs.src_commit_sha_short }}
       meta_release: ${{ steps.state.outputs.meta_release }}
-      # Common file cache sync outputs      common_cache_status: ${{ steps.cache-sync.outputs.common_cache_status }}
+      # Common file cache sync outputs
+      common_cache_status: ${{ steps.cache-sync.outputs.common_cache_status }}
       common_cache_details: ${{ steps.cache-sync.outputs.common_cache_details }}
       common_sync_pr_url: ${{ steps.find-sync-pr.outputs.common_sync_pr_url }}
     steps:
