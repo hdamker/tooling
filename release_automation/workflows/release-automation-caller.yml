@@ -29,10 +29,10 @@ on:
     branches:
       - 'release-snapshot/**'
 
-  # Push to main with release-plan.yaml changes (auto sync-issue)
+  # Push to main with release-plan.yaml or common file changes (auto sync-issue)
   push:
     branches: [main]
-    paths: ['release-plan.yaml']
+    paths: ['release-plan.yaml', 'code/common/**']
 
   # Manual trigger for sync-issue only
   # Use this for: initial setup, recovery after manual repo changes, or forced sync

@@ -199,10 +199,15 @@ jobs:
             }
 
             // ─────────────────────────────────────────────────────────────────
-            // Event: push (release-plan.yaml change on main)
+            // Event: push (release-plan.yaml or code/common changes on main)
             // ─────────────────────────────────────────────────────────────────
             else if (eventName === 'push') {
-              triggerType = 'release_plan_change';
+              // Classify by which paths changed
+              const changedFiles = (context.payload.commits || [])
+                .flatMap(c => [...(c.added || []), ...(c.modified || []), ...(c.removed || [])]);
+              const hasReleasePlanChange = changedFiles.includes('release-plan.yaml');
+
+              triggerType = hasReleasePlanChange ? 'release_plan_change' : 'push';
               command = 'sync-issue';
               user = context.actor;
               shouldContinue = 'true';
