@@ -18,7 +18,7 @@ summary:
   total_gap: 0
   total_manual: 25
   total_pending: 0
-  total_tested: 35
+  total_tested: 46
   by_engine:
     spectral: 84
     gherkin: 25
@@ -299,6 +299,17 @@ pending_rules:
 # Format: rule_id: [branch, ...]
 
 tested_rules:
+  G-002: [regression/r4.1-broken-spec-test-files]
+  G-014: [regression/r4.1-broken-spec-test-files]
+  G-016: [regression/r4.1-broken-spec-test-files]
+  G-019: [regression/r4.1-broken-spec-test-files]
+  G-021: [regression/r4.1-broken-spec-test-files]
+  G-024: [regression/r4.1-broken-spec-test-files]
+  G-025: [regression/r4.1-broken-spec-test-files]
+  P-001: [regression/r4.1-broken-spec-test-files]
+  P-002: [regression/r4.1-broken-spec-test-files]
+  P-004: [regression/r4.1-broken-spec-test-files]
+  P-005: [regression/r4.1-broken-spec-test-files]
   P-006: [regression/r4.1-main-baseline]
   S-005: [regression/r4.1-broken-spec-yaml-fundamentals]
   S-016: [regression/r4.1-broken-spec-yaml-fundamentals]

@@ -327,7 +327,7 @@ theme becomes one `regression/r4.1-broken-spec-<theme>` branch.
 | 5 | `regression/r4.1-broken-spec-schema-constraints` | `sample-service.yaml` components (not common files — avoid baseline collision) | S-012, S-017, S-030, S-300, S-303, S-308, S-309, S-310, S-311, S-312 | MEDIUM |
 | 6 | `regression/r4.1-broken-spec-routing` | `sample-service.yaml` — paths, operationIds, HTTP methods, servers | S-002, S-003, S-007, S-008, S-010, S-204, S-214, S-217, S-218, S-220, S-222, S-224, S-225, S-226, S-227, S-301, S-306 | HIGH |
 | 7 | `regression/r4.1-broken-spec-subscriptions` | `sample-service-subscriptions.yaml` + `sample-implicit-events.yaml` — CloudEvent / Protocol / sink / notifications + Python subscription checks | S-032, S-033, S-034, S-035, P-014, P-015, P-016, P-020 | HIGH |
-| 8 (optional) | `regression/r4.1-broken-spec-test-files` | `code/Test_definitions/*.feature` — filename / version / gherkin defects | P-001, P-002, P-003, P-004, P-005, P-007, P-008, selected G-* | LOW |
+| 8 (optional) | `regression/r4.1-broken-spec-test-files` | `release-plan.yaml` synthetic API + `sample-service.yaml` server URL + `sample-service-createResource.feature` gherkin defects | P-001, P-002, P-004, P-005, G-002, G-014, G-016, G-019, G-021, G-024, G-025 | LOW |
 
 Rules **not** covered by any broken-spec branch:
 
@@ -336,6 +336,13 @@ Rules **not** covered by any broken-spec branch:
   pinning — they would double-count.
 - **Un-triggerable via spec edits**: P-009, P-010, P-011, P-012, P-013,
   P-019 (release-plan / PR-context / fixture-dependent).
+- **Branch-type dependent — silent on feature branches**: P-003
+  (`check-info-version-format`) and P-007 (`check-test-file-version`)
+  early-return unless `branch_type` is `main`, `release`, or
+  `maintenance`. Regression branches are feature-named and always
+  classify as `feature`, so these checks cannot be pinned via the
+  broken-spec branch model. Unit tests at the Python check level remain
+  authoritative for them.
 - **Deprecated, OAS-3.1-only, or low-signal**: S-001, S-004, S-015,
   S-205, S-206, S-208, S-209, S-228, S-302, S-304, S-305, S-315, S-317,
   S-319.
