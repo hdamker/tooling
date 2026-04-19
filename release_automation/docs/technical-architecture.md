@@ -509,6 +509,54 @@ Creates a sync PR to main after release publication.
 
 ---
 
+### 2.13 Common Cache Sync
+
+Keeps `code/common/` in sync with the Commonalities release declared under `dependencies.commonalities_release` in `release-plan.yaml`. The handler runs on every `update-issue` pass. For repositories declaring `commonalities_release >= r4.2` it checks the cache and acts on drift; for earlier releases (which don't consume common files via `$ref`) it reports `common_cache_status = ""` (unchecked) and exits without action.
+
+**Handler location:** Embedded in the `update-issue` job of [release-automation-reusable.yml](../../.github/workflows/release-automation-reusable.yml) rather than a standalone job, so the cache converges on every RA invocation that reaches update-issue (push, `workflow_dispatch`, slash commands ending in a state update).
+
+**Signal model:** The `derive-state` job outputs `common_cache_status` with three values:
+
+| Value | Meaning |
+|-------|---------|
+| `""` | Unchecked — repo declares commonalities `< r4.2` or has no cache yet |
+| `in_sync` | Cache matches the declared tag |
+| `stale` | Drift detected (tag mismatch, missing files, or modified files); `common_cache_details` carries the reason |
+
+**Trigger x state matrix:** Sync-PR creation is state-dependent to avoid mixing concerns with an active release:
+
+| Release state | Push to `release-plan.yaml` or `code/common/**` | `/create-snapshot` | `/discard-snapshot` or `/delete-draft` | `workflow_dispatch` |
+|---------------|------------------------------------------------|--------------------|---------------------------------------|---------------------|
+| `NOT_PLANNED` / `PLANNED` / `PUBLISHED` | Create / update sync PR | Block (command rejected when stale) | n/a | Create / update sync PR |
+| `SNAPSHOT_ACTIVE` / `DRAFT_READY` | Drift warning in Release Issue only | n/a | Create / update sync PR | Create / update sync PR |
+
+**Sync PR model:**
+- Branch: `sync-common/{tag}` (e.g., `sync-common/r4.2`)
+- Author: `camara-release-automation` App bot
+- No force-push — codeowners may push fix commits to the PR before merge
+- Stale PRs (wrong tag after a dependency bump) are closed automatically when a new sync is needed
+- Standard CODEOWNERS review applies (one codeowner approval is sufficient; bot is author)
+
+**Data contracts:**
+- [`code/common/.sync-manifest.yaml`](../../validation/schemas/sync-manifest-schema.yaml) — records source repository (Commonalities), declared release tag, and per-file git blob SHA-1. Written by the RA sync handler; read by both RA (`derive-state` drift detection) and the validation framework (`P-021 check-common-cache-sync`).
+- [`tooling_lib/cache_sync.py`](../../tooling_lib/cache_sync.py) — shared drift-detection logic (`SyncStatus`, `SourceStatus`, `check_sync_status`, `git_blob_sha`). Imported by both RA and VF so they produce identical verdicts.
+
+**Notifications:**
+- `common_sync_pr_created.md` — bot comment on the Release Issue when a new sync PR is created (fires once per creation, not once per stale-detection)
+- `common_sync_failed.md` — bot comment when checkout from Commonalities fails (for example, the declared tag has not yet been published)
+- The Release Issue config section shows the `stale` warning on every sync-issue update until the cache converges
+
+**Boundary with validation framework:**
+- RA owns detection and repair (writes common files, creates/updates sync PR, writes manifest)
+- VF's `P-021 check-common-cache-sync` is a read-only safety net. It fires only when codeowners bypass the sync process (e.g., direct edits to `code/common/`) — the design expects it to be silent in normal operation
+- The `camara-release-automation` App has `contents: write`; the `camara-validation` App deliberately does not
+
+**References:**
+- [Commonalities-Consumption-and-Bundling-Design.md §4](https://github.com/camaraproject/ReleaseManagement/blob/main/documentation/SupportingDocuments/Commonalities-Consumption-and-Bundling-Design.md) — cache and sync model
+- Upstream tracking: [ReleaseManagement#489](https://github.com/camaraproject/ReleaseManagement/issues/489)
+
+---
+
 ## 3. Workflow Architecture
 
 ### 3.1 Event Flow
