@@ -18,7 +18,7 @@ summary:
   total_gap: 0
   total_manual: 25
   total_pending: 0
-  total_tested: 65
+  total_tested: 76
   by_engine:
     spectral: 84
     gherkin: 25
@@ -311,9 +311,14 @@ tested_rules:
   P-004: [regression/r4.1-broken-spec-test-files]
   P-005: [regression/r4.1-broken-spec-test-files]
   P-006: [regression/r4.1-main-baseline]
+  S-002: [regression/r4.1-broken-spec-routing]
+  S-003: [regression/r4.1-broken-spec-routing]
   S-005: [regression/r4.1-broken-spec-yaml-fundamentals]
   S-006: [regression/r4.1-broken-spec-descriptions]
+  S-007: [regression/r4.1-broken-spec-routing]
+  S-008: [regression/r4.1-broken-spec-routing]
   S-009: [regression/r4.1-broken-spec-descriptions]
+  S-010: [regression/r4.1-broken-spec-routing]
   S-011: [regression/r4.1-broken-spec-descriptions]
   S-013: [regression/r4.1-broken-spec-descriptions]
   S-014: [regression/r4.1-broken-spec-descriptions]
@@ -337,10 +342,16 @@ tested_rules:
   S-211: [regression/r4.1-main-baseline]
   S-215: [regression/r4.1-broken-spec-descriptions]
   S-216: [regression/r4.1-broken-spec-descriptions]
+  S-217: [regression/r4.1-broken-spec-routing]
+  S-220: [regression/r4.1-broken-spec-routing]
   S-221: [regression/r4.1-broken-spec-error-handling]
+  S-222: [regression/r4.1-broken-spec-routing]
   S-223: [regression/r4.1-broken-spec-descriptions]
+  S-225: [regression/r4.1-broken-spec-routing]
+  S-227: [regression/r4.1-broken-spec-routing]
   S-300: [regression/r4.1-broken-spec-schema-constraints]
   S-303: [regression/r4.1-broken-spec-schema-constraints]
+  S-306: [regression/r4.1-broken-spec-routing]
   S-307: [regression/r4.1-broken-spec-error-handling]
   S-308: [regression/r4.1-broken-spec-schema-constraints]
   S-309: [regression/r4.1-broken-spec-schema-constraints]
