@@ -9,10 +9,11 @@
 # - Slash commands: /create-snapshot, /discard-snapshot, /delete-draft, /publish-release
 # - Issue events: close (with auto-reopen), reopen
 # - PR merge: on release-snapshot branches (creates draft release)
-# - Push to main: when release-plan.yaml, code/common/**, or this caller
-#   workflow itself change. release-plan.yaml and the caller trigger sync-issue;
-#   code/common/** additionally triggers the common-cache sync handler for
-#   repos declaring commonalities_release >= r4.2.
+# - Push to main: on release-plan.yaml, code/common/**, or this caller
+#   workflow itself. All three paths end up running sync-issue so the
+#   Release Issue body reflects the current repo state — most notably,
+#   pushing to code/common/** (typically after a sync PR merge) refreshes
+#   the common-cache status in the Release Issue and clears any stale warning.
 # - Manual: workflow_dispatch triggers sync-issue (reads from release-plan.yaml)
 
 name: CAMARA Release Automation

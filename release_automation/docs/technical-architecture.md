@@ -511,7 +511,7 @@ Creates a sync PR to main after release publication.
 
 ### 2.13 Common Cache Sync
 
-Keeps `code/common/` in sync with the Commonalities release declared under `dependencies.commonalities_release` in `release-plan.yaml`. Only active for repositories declaring `commonalities_release >= r4.2` (earlier releases do not consume common files via `$ref`).
+Keeps `code/common/` in sync with the Commonalities release declared under `dependencies.commonalities_release` in `release-plan.yaml`. The handler runs on every `update-issue` pass. For repositories declaring `commonalities_release >= r4.2` it checks the cache and acts on drift; for earlier releases (which don't consume common files via `$ref`) it reports `common_cache_status = ""` (unchecked) and exits without action.
 
 **Handler location:** Embedded in the `update-issue` job of [release-automation-reusable.yml](../../.github/workflows/release-automation-reusable.yml) rather than a standalone job, so the cache converges on every RA invocation that reaches update-issue (push, `workflow_dispatch`, slash commands ending in a state update).
 
