@@ -199,7 +199,8 @@ jobs:
             }
 
             // ─────────────────────────────────────────────────────────────────
-            // Event: push (release-plan.yaml or code/common changes on main)
+            // Event: push (release-plan.yaml, code/common, or the caller
+            // workflow itself changed on main)
             // ─────────────────────────────────────────────────────────────────
             else if (eventName === 'push') {
               // Classify by which paths changed

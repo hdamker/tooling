@@ -9,7 +9,10 @@
 # - Slash commands: /create-snapshot, /discard-snapshot, /delete-draft, /publish-release
 # - Issue events: close (with auto-reopen), reopen
 # - PR merge: on release-snapshot branches (creates draft release)
-# - Push to main: when release-plan.yaml changes (auto sync-issue)
+# - Push to main: when release-plan.yaml, code/common/**, or this caller
+#   workflow itself change. release-plan.yaml and the caller trigger sync-issue;
+#   code/common/** additionally triggers the common-cache sync handler for
+#   repos declaring commonalities_release >= r4.2.
 # - Manual: workflow_dispatch triggers sync-issue (reads from release-plan.yaml)
 
 name: CAMARA Release Automation
@@ -29,10 +32,15 @@ on:
     branches:
       - 'release-snapshot/**'
 
-  # Push to main with release-plan.yaml or common file changes (auto sync-issue)
+  # Push to main with release-plan.yaml, common file, or caller workflow changes.
+  # Listing the caller itself as a path ensures the workflow runs once right
+  # after it is merged (future caller updates pick up their own trigger).
   push:
     branches: [main]
-    paths: ['release-plan.yaml', 'code/common/**']
+    paths:
+      - 'release-plan.yaml'
+      - 'code/common/**'
+      - '.github/workflows/release-automation.yml'
 
   # Manual trigger for sync-issue only
   # Use this for: initial setup, recovery after manual repo changes, or forced sync

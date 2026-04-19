@@ -1,6 +1,6 @@
 # Repository Setup for Release Automation
 
-**Last Updated**: 2026-03-01
+**Last Updated**: 2026-04-19
 
 ## Overview
 
@@ -8,7 +8,7 @@ API repositories that adopt the CAMARA release automation need specific reposito
 
 This document defines the required configuration for each API repository. It serves as the **specification** that the automated onboarding tooling implements — repository administrators do not need to apply or verify this configuration manually.
 
-**Automated application**: The [release automation onboarding campaign](https://github.com/camaraproject/project-administration/pull/134) in `project-administration` applies the full configuration to API repositories. It includes a campaign workflow (caller workflow, CHANGELOG structure, CODEOWNERS adjustments) and an admin script (repository ruleset). Both support dry-run/plan modes and phased rollout — test repositories first, then volunteering repos, then all.
+**Automated application**: The `campaign-release-automation-onboarding` campaign in [`camaraproject/project-administration`](https://github.com/camaraproject/project-administration) applies the full configuration to API repositories. It installs both the release-automation caller workflow and the CAMARA Validation caller workflow side-by-side, sets up the CHANGELOG directory structure, and uses a stable reconciliation branch so repeated runs update the same PR rather than creating new ones. A separate admin script (`apply-release-rulesets.sh`) applies the repository rulesets. Both support dry-run / plan modes and phased rollout — test repositories first, then volunteering repos, then all.
 
 **New repositories**: After rollout, the configuration will also be applied to `Template_API_Repository` ([camaraproject/tooling#82](https://github.com/camaraproject/tooling/issues/82)), so that newly created API repositories inherit it automatically.
 
@@ -26,7 +26,8 @@ This document defines the required configuration for each API repository. It ser
 |------|---------|---------|
 | Repository ruleset | Branch protection for snapshot branches | [Ruleset](#repository-ruleset) |
 | CODEOWNERS file | Codeowner assignment for `/publish-release` authorization | [CODEOWNERS](#codeowners-requirements) |
-| Caller workflow file | Entry point that connects the repo to the automation | [Caller Workflow](#caller-workflow) |
+| Release-automation caller workflow | Entry point that connects the repo to the release automation | [Caller Workflows](#caller-workflows) |
+| CAMARA Validation caller workflow | Entry point that connects the repo to the validation framework | [Caller Workflows](#caller-workflows) |
 | `release-plan.yaml` | Release configuration (target tag, type, APIs) | [Required Files](#required-files) |
 | README delimiters | Release Information section markers | [Required Files](#required-files) |
 | CHANGELOG structure | Directory layout for per-cycle changelog files | [CHANGELOG Structure](#changelog-structure) |
@@ -297,49 +298,47 @@ The `/publish-release` command checks CODEOWNERS to authorize the publishing use
 
 ---
 
-## Caller Workflow
+## Caller Workflows
 
-The caller workflow is the entry point that connects an API repository to the release automation. It is a static YAML file installed at `.github/workflows/release-automation.yml`.
+API repositories carry **two** caller workflows installed side-by-side by the onboarding campaign:
 
-### Source template
+| Caller file | Connects to | Canonical template in `camaraproject/tooling` |
+|-------------|-------------|------------------------------------------------|
+| `.github/workflows/release-automation.yml` | Release automation | `release_automation/workflows/release-automation-caller.yml` |
+| `.github/workflows/camara-validation.yml` | Validation framework | `validation/workflows/validation-caller.yml` |
 
-The canonical caller workflow template is maintained in the tooling repository:
-
-```
-camaraproject/tooling (release-automation branch)
-  └── release_automation/workflows/release-automation-caller.yml
-```
-
-The onboarding campaign reads this file and copies it to each target repository. Do not maintain separate copies — the template in `tooling` is the single source of truth.
+Both are static files. The onboarding / reconciliation campaign reads them from the tooling repository and copies them into each target repo — do not maintain separate copies.
 
 ### Reference lifecycle
 
-The caller's `uses:` line references the reusable workflow in `camaraproject/tooling`. The reference changes as the automation progresses through rollout phases:
+The callers' `uses:` lines reference reusable workflows in `camaraproject/tooling` via a floating tag. The current RC period uses the unified `@v1-rc` tag for both callers; GA will switch both to `@v1`. See [branching-model.md](branching-model.md) for the full phase model, tag strategy, and how callers transition between refs.
 
-| Phase | `uses:` ref | Who uses it |
-|-------|-------------|-------------|
-| Alpha | `@release-automation` | Test repositories |
-| RC | `@ra-v1-rc` | Test + volunteering repos |
-| GA | `@v1` | All API repositories |
+Transitions between refs are applied by re-dispatching the reconciliation campaign with the new ref inputs — each repo gets a single update PR on the stable reconciliation branch.
 
-See [branching-model.md](branching-model.md) for the full lifecycle and tag strategy.
+### Release automation caller
 
-When transitioning between phases, a campaign updates the `uses:` line across all participating repositories.
-
-### Key configuration in the caller
+Installed at `.github/workflows/release-automation.yml`. Key configuration:
 
 | Aspect | Value | Purpose |
 |--------|-------|---------|
-| **Permissions** | `contents: write`, `issues: write`, `pull-requests: write`, `id-token: write` | Branch/release ops, issue management, PR creation, OIDC claim access for called-workflow repo/SHA resolution |
+| **Permissions** | `contents: write`, `issues: write`, `pull-requests: write`, `id-token: write` | Branch / release ops, issue management, PR creation, OIDC claim access for tooling checkout consistency |
 | **Concurrency** | `release-automation-${{ github.repository }}`, `cancel-in-progress: false` | Serialize runs, prevent race conditions |
-| **Triggers** | `issue_comment`, `issues`, `pull_request`, `push`, `workflow_dispatch` | Slash commands, lifecycle events, auto-sync, manual |
+| **Triggers** | `issue_comment`, `issues`, `pull_request` (on `release-snapshot/**`), `push` (on `main`), `workflow_dispatch` | Slash commands, lifecycle events, auto-sync, manual |
 
-For break-glass or testing, the caller can set `with.tooling_ref_override` in the workflow file.
-This requires committing a workflow file change in the target repository.
-The value must be a full 40-character SHA.
+**Push-path filter on main** (controls when the caller auto-fires):
+- `release-plan.yaml` — triggers sync-issue (release configuration changed)
+- `code/common/**` — triggers sync-issue + common-cache sync handler (cache updated for repos on `commonalities_release >= r4.2`)
+- `.github/workflows/release-automation.yml` — triggers sync-issue so a caller update is picked up immediately after merge
 
-No caller-side repository override is needed for fork testing: the reusable workflow derives the
-tooling repository from OIDC claim `job_workflow_ref`.
+### CAMARA Validation caller
+
+Installed at `.github/workflows/camara-validation.yml`. Runs validation on PRs and on `workflow_dispatch`. Controlled centrally by the stage setting in the validation framework's per-repo config file — repos at stage `disabled` have the caller installed but the reusable workflow exits immediately. See the validation framework documentation for stage semantics.
+
+### Reusable-workflow checkout consistency
+
+Both reusable workflows derive their tooling checkout (Python scripts, shared actions) from OIDC claims on the caller's `id-token: write` — guaranteeing that helper code ships from the same repository + commit as the workflow itself, even when callers reference floating tags such as `@v1-rc` or `@v1`.
+
+For break-glass or testing, the release-automation caller can set `with.tooling_ref_override` to a full 40-character SHA. No caller-side repository override is needed for fork testing — OIDC handles it.
 
 ---
 
@@ -452,16 +451,6 @@ A follow-up campaign moves the legacy content from root `CHANGELOG.md` into the 
 
 ---
 
-## Recommended Enhancements
-
-### Configuration drift protection
-
-When a release snapshot is active, changes to `release-plan.yaml` on `main` can cause the snapshot to diverge from the current configuration. The release automation includes a post-merge warning (config drift warning posted to the Release Issue), but does not block the PR.
-
-For stronger protection, the `pr_validation` workflow can be extended to block PRs that modify `release-plan.yaml` when a `release-snapshot/*` branch exists. This is tracked as [camaraproject/tooling#63](https://github.com/camaraproject/tooling/issues/63) and can be implemented independently on the `main` branch (pr_validation v0).
-
----
-
 ## Verification Checklist
 
 Use this checklist to verify that a repository is correctly configured for release automation. This is the acceptance checklist for test repo setup.
@@ -489,12 +478,18 @@ Use this checklist to verify that a repository is correctly configured for relea
 - [ ] First `*` line lists at least one individual codeowner (`@username`)
 - [ ] `/CHANGELOG.md` and/or `/CHANGELOG.MD` lines present with `@camaraproject/release-management_reviewers`
 
-### Caller Workflow
+### Caller Workflows
 
+Release automation caller:
 - [ ] `.github/workflows/release-automation.yml` exists
-- [ ] `uses:` line references correct org/repo/ref for current phase
-- [ ] `permissions:` includes `contents: write`, `issues: write`, `pull-requests: write`
+- [ ] `uses:` line references correct org/repo/ref for current phase (see [branching-model.md](branching-model.md))
+- [ ] `permissions:` includes `contents: write`, `issues: write`, `pull-requests: write`, `id-token: write`
 - [ ] `concurrency:` group is `release-automation-${{ github.repository }}`
+- [ ] `push.paths` includes `release-plan.yaml`, `code/common/**`, and `.github/workflows/release-automation.yml`
+
+Validation caller:
+- [ ] `.github/workflows/camara-validation.yml` exists
+- [ ] `uses:` line references the validation reusable workflow at the correct ref
 
 ### Required Files
 
