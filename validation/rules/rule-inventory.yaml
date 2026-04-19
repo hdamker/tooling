@@ -18,7 +18,7 @@ summary:
   total_gap: 0
   total_manual: 25
   total_pending: 0
-  total_tested: 46
+  total_tested: 57
   by_engine:
     spectral: 84
     gherkin: 25
@@ -312,6 +312,11 @@ tested_rules:
   P-005: [regression/r4.1-broken-spec-test-files]
   P-006: [regression/r4.1-main-baseline]
   S-005: [regression/r4.1-broken-spec-yaml-fundamentals]
+  S-006: [regression/r4.1-broken-spec-descriptions]
+  S-009: [regression/r4.1-broken-spec-descriptions]
+  S-011: [regression/r4.1-broken-spec-descriptions]
+  S-013: [regression/r4.1-broken-spec-descriptions]
+  S-014: [regression/r4.1-broken-spec-descriptions]
   S-016: [regression/r4.1-broken-spec-yaml-fundamentals]
   S-018: [regression/r4.1-broken-spec-api-metadata]
   S-019: [regression/r4.1-broken-spec-api-metadata]
@@ -323,10 +328,16 @@ tested_rules:
   S-025: [regression/r4.1-broken-spec-error-handling]
   S-026: [regression/r4.1-broken-spec-error-handling]
   S-027: [regression/r4.1-broken-spec-error-handling]
+  S-028: [regression/r4.1-broken-spec-descriptions]
+  S-029: [regression/r4.1-broken-spec-descriptions]
+  S-031: [regression/r4.1-broken-spec-descriptions]
   S-201: [regression/r4.1-broken-spec-api-metadata]
   S-210: [regression/r4.1-broken-spec-api-metadata]
   S-211: [regression/r4.1-main-baseline]
+  S-215: [regression/r4.1-broken-spec-descriptions]
+  S-216: [regression/r4.1-broken-spec-descriptions]
   S-221: [regression/r4.1-broken-spec-error-handling]
+  S-223: [regression/r4.1-broken-spec-descriptions]
   S-307: [regression/r4.1-broken-spec-error-handling]
   S-313: [regression/r4.1-main-baseline]
   S-314: [regression/r4.1-main-baseline]
