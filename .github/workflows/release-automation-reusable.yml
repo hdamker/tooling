@@ -738,7 +738,8 @@ jobs:
               return;
             }
 
-            // Block /create-snapshot when common file cache is stale            if (command === 'create-snapshot') {
+            // Block /create-snapshot when common file cache is stale
+            if (command === 'create-snapshot') {
               const cacheStatus = '${{ needs.derive-state.outputs.common_cache_status }}';
               const cacheDetails = '${{ needs.derive-state.outputs.common_cache_details }}';
               const syncPrUrl = '${{ needs.derive-state.outputs.common_sync_pr_url }}';
