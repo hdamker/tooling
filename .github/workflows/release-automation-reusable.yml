@@ -950,6 +950,7 @@ jobs:
             shared-actions/run-validation
             validation
             linting/config
+            tooling_lib
 
       # ── Pre-snapshot validation ────────────────────────────────────
       #
