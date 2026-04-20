@@ -318,10 +318,8 @@ class TestMetadataQuality:
     def test_p015_conditional_on_api_pattern(self, rule_index):
         """P-015 stays error on explicit-subscription, warn on implicit.
 
-        Implicit-subscription APIs using the r4.1-era inline CloudEvent
-        pattern (enum at CloudEvent.properties.type.enum) cannot be
-        detected by the check, so the rule downgrades to warn until the
-        r4.2 migration to $ref + named ApiEventType schema is complete.
+        Implicit-subscription APIs remain at warn as a conservative level
+        during migration to the named ApiEventType pattern.
         """
         rule = rule_index[("python", "check-event-type-format")]
         assert rule.id == "P-015"

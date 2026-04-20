@@ -146,19 +146,20 @@
 
 # P-015: check-event-type-format (DG-086)
 # Event types must follow org.camaraproject.<api-name>.<vN>.<event-name>.
+# Gated to Commonalities >=r4.2, where the named ApiEventType schema
+# pattern (via $ref to CAMARA_event_common.yaml) is established and the
+# hint below is actionable.
 #
 # Level is conditional on api_pattern:
-#   - explicit-subscription: error (named EventType schema expected today)
-#   - implicit-subscription: warn (r4.1-era specs often inline the enum at
-#     CloudEvent.properties.type.enum, which the detector cannot see; the
-#     r4.2 migration path replaces inline CloudEvent with a $ref to
-#     CAMARA_event_common.yaml and a named ApiEventType schema, at which
-#     point this rule detects the event type correctly).
+#   - explicit-subscription: error
+#   - implicit-subscription: warn (conservative during migration to the
+#     named ApiEventType pattern)
 - id: P-015
   engine: python
   engine_rule: check-event-type-format
   applicability:
     api_pattern: [explicit-subscription, implicit-subscription]
+    commonalities_release: ">=r4.2"
   conditional_level:
     default: error
     overrides:
@@ -216,11 +217,13 @@
 # Detection: components.schemas.CloudEvent exists with top-level
 # `properties`. The $ref-only and `allOf: [{$ref: ...}]` forms have no
 # top-level `properties` and are not flagged.
+# Gated to Commonalities >=r4.2, where CAMARA_event_common.yaml exists.
 - id: P-020
   engine: python
   engine_rule: check-cloudevent-via-ref
   applicability:
     api_pattern: [explicit-subscription, implicit-subscription]
+    commonalities_release: ">=r4.2"
   conditional_level:
     default: warn
   hint: >-
