@@ -7,6 +7,15 @@ const ALLOWED = new Set([
   "HTTPSettings",
   "HTTPSubscriptionRequest",
   "HTTPSubscriptionResponse",
+  "MQTTSettings",
+  "MQTTSubscriptionRequest",
+  "MQTTSubscriptionResponse",
+  "AMQPSettings",
+  "AMQPSubscriptionRequest",
+  "AMQPSubscriptionResponse",
+  "NATSSettings",
+  "NATSSubscriptionRequest",
+  "NATSSubscriptionResponse",
   "PrivateKeyJWTCredential",
 ]);
 

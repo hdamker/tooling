@@ -15,6 +15,7 @@ functions:
   - camara-reserved-words
   - camara-language-avoid-telco
   - camara-security-no-secrets-in-path-or-query-parameters
+  - camara-schema-casing-convention
 functionsDir: "./lint_function"
 rules:
   #  Built-in OpenAPI Specification ruleset. Each rule then can be enabled individually.
@@ -250,14 +251,17 @@ rules:
     recommended: true  # Set to true/false to enable/disable this rule
 
   camara-schema-casing-convention:
-    description: This rule checks schema should follow a specific case convention pascal case.
-    message: "{{property}} should be pascal case (UppperCamelCase)"
+    description: >
+      Schema names must be PascalCase (UpperCamelCase). CloudEvents schema
+      names (HTTPSettings, MQTTSettings, AMQPSettings, NATSSettings and their
+      SubscriptionRequest/SubscriptionResponse counterparts, plus
+      PrivateKeyJWTCredential) are allowed as explicit exceptions to stay
+      aligned with upstream CloudEvents naming.
+    message: "{{error}}"
     severity: warn
     given: $.components.schemas[*]~
     then:
-      function: casing
-      functionOptions:
-        type: pascal
+      function: camara-schema-casing-convention
     recommended: true  # Set to true/false to enable/disable this rule
 
   camara-parameter-casing-convention:
