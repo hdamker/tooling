@@ -32,6 +32,8 @@ def _make_context(
     commonalities_release: str | None = "r4.1",
     is_release_review_pr: bool = False,
     apis: tuple[ApiContext, ...] = (),
+    release_plan_changed: bool | None = None,
+    release_plan_check_only: bool = False,
 ) -> ValidationContext:
     return ValidationContext(
         repository="TestRepo",
@@ -45,11 +47,12 @@ def _make_context(
         icm_release=None,
         base_ref=None,
         is_release_review_pr=is_release_review_pr,
-        release_plan_changed=None,
+        release_plan_changed=release_plan_changed,
         pr_number=None,
         apis=apis,
         workflow_run_url="",
         tooling_ref="",
+        release_plan_check_only=release_plan_check_only,
     )
 
 
@@ -281,6 +284,74 @@ class TestRunPostFilter:
         result = run_post_filter(findings, ctx, tmp_path)
         assert result.findings == []
         assert result.result == "pass"
+
+    def test_release_plan_check_only_keeps_release_plan_gated_rules(
+        self, tmp_path: Path
+    ):
+        """On a Commonalities advance, rules gated on release_plan_changed=true pass through."""
+        _write_rules(tmp_path, [
+            _minimal_rule(
+                engine_rule="some-rule",
+                applicability={"release_plan_changed": True},
+            )
+        ])
+        ctx = _make_context(
+            release_plan_changed=True,
+            release_plan_check_only=True,
+        )
+        findings = [_make_finding()]
+        result = run_post_filter(findings, ctx, tmp_path)
+        assert len(result.findings) == 1
+
+    def test_release_plan_check_only_drops_rules_without_release_plan_gate(
+        self, tmp_path: Path
+    ):
+        """On a Commonalities advance, rules without release_plan_changed applicability are dropped."""
+        _write_rules(tmp_path, [
+            _minimal_rule(engine_rule="some-rule")  # no applicability
+        ])
+        ctx = _make_context(
+            release_plan_changed=True,
+            release_plan_check_only=True,
+        )
+        findings = [_make_finding()]
+        result = run_post_filter(findings, ctx, tmp_path)
+        assert result.findings == []
+
+    def test_release_plan_check_only_drops_false_gated_rules(
+        self, tmp_path: Path
+    ):
+        """Rules gated on release_plan_changed=false would already fail the
+        applicability check (release_plan_changed is true under
+        release_plan_check_only).  Verifies the gate doesn't accidentally
+        keep them.
+        """
+        _write_rules(tmp_path, [
+            _minimal_rule(
+                engine_rule="some-rule",
+                applicability={"release_plan_changed": False},
+            )
+        ])
+        ctx = _make_context(
+            release_plan_changed=True,
+            release_plan_check_only=True,
+        )
+        findings = [_make_finding()]
+        result = run_post_filter(findings, ctx, tmp_path)
+        assert result.findings == []
+
+    def test_release_plan_check_only_false_does_not_filter(
+        self, tmp_path: Path
+    ):
+        """When release_plan_check_only is false (normal PR), rules without
+        a release_plan_changed applicability should run normally."""
+        _write_rules(tmp_path, [
+            _minimal_rule(engine_rule="some-rule")
+        ])
+        ctx = _make_context(release_plan_check_only=False)
+        findings = [_make_finding()]
+        result = run_post_filter(findings, ctx, tmp_path)
+        assert len(result.findings) == 1
 
     def test_level_muted_removes_finding(self, tmp_path: Path):
         """Level resolved to 'muted' removes the finding."""

@@ -329,3 +329,154 @@ def check_orphan_api_definitions(
         )
         for name in orphans
     ]
+
+
+# ---------------------------------------------------------------------------
+# P-022: check-release-plan-exclusivity
+# ---------------------------------------------------------------------------
+
+
+def check_release_plan_exclusivity(
+    repo_path: Path, context: ValidationContext
+) -> List[dict]:
+    """Flag non-release-plan files co-changed with release-plan.yaml.
+
+    Repo-level check.  Reads ``context.non_release_plan_files_changed``
+    (populated by the workflow layer when release-plan.yaml is in the
+    diff).  Emits one error finding listing the co-changed files so the
+    codeowner can split the PR.
+    """
+    other_files = context.non_release_plan_files_changed
+    if not other_files:
+        return []
+
+    # Cap the listed files to keep the message readable; full list is
+    # still visible in the PR diff.
+    preview_limit = 10
+    file_list = list(other_files)
+    if len(file_list) > preview_limit:
+        preview = ", ".join(file_list[:preview_limit])
+        suffix = f", and {len(file_list) - preview_limit} more"
+    else:
+        preview = ", ".join(file_list)
+        suffix = ""
+
+    return [
+        make_finding(
+            engine_rule="check-release-plan-exclusivity",
+            level="error",
+            message=(
+                f"release-plan.yaml was changed alongside "
+                f"{len(file_list)} other file(s): {preview}{suffix}. "
+                f"release-plan.yaml changes should be submitted in a "
+                f"dedicated PR so that any new validation findings remain "
+                f"clearly attributable to the release-plan change."
+            ),
+            path=_RELEASE_PLAN_PATH,
+            line=1,
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
+# P-023: check-declared-dependency-tags-exist
+# ---------------------------------------------------------------------------
+
+# Dependency spec: (YAML field name, display name, source repo,
+# context-flag attribute, context-tag-exists attribute).  YAML field
+# names match release-plan-schema.yaml; display names mirror the short
+# form used in user-facing messages.
+_DEPENDENCY_SPEC = [
+    (
+        "commonalities_release",
+        "commonalities_release",
+        "camaraproject/Commonalities",
+        "commonalities_release_changed",
+        "commonalities_tag_exists",
+    ),
+    (
+        "identity_consent_management_release",
+        "icm_release",
+        "camaraproject/IdentityAndConsentManagement",
+        "icm_release_changed",
+        "icm_tag_exists",
+    ),
+]
+
+
+def check_declared_dependency_tags_exist(
+    repo_path: Path, context: ValidationContext
+) -> List[dict]:
+    """Verify that declared dependency tags exist in their source repos.
+
+    Repo-level check.  For each dependency (``commonalities_release``,
+    ``identity_consent_management_release``):
+
+    - If the declaration did not change in this PR's diff, skip (the
+      existing state is not this PR's responsibility).
+    - If the declaration changed and the tag was confirmed absent by the
+      workflow layer (``<dep>_tag_exists == False``), emit an error.
+    - If the declaration changed and the workflow layer could not verify
+      the tag (``<dep>_tag_exists is None``), emit a warn finding so the
+      codeowner is aware the check was skipped.
+    """
+    plan_path = repo_path / _RELEASE_PLAN_PATH
+    release_plan = load_yaml_safe(plan_path)
+    if release_plan is None:
+        return []
+
+    dependencies = release_plan.get("dependencies") or {}
+
+    findings: List[dict] = []
+
+    for (
+        yaml_field,
+        display_name,
+        source_repo,
+        changed_attr,
+        exists_attr,
+    ) in _DEPENDENCY_SPEC:
+        if not getattr(context, changed_attr, False):
+            # Declaration unchanged in this PR — skip (fail open).
+            continue
+
+        declared_tag = dependencies.get(yaml_field)
+        if not declared_tag:
+            # Declaration advanced to null/removed — not P-023's concern
+            # (schema or P-009 semantics handle this).
+            continue
+
+        exists = getattr(context, exists_attr, None)
+
+        if exists is False:
+            findings.append(
+                make_finding(
+                    engine_rule="check-declared-dependency-tags-exist",
+                    level="error",
+                    message=(
+                        f"Declared {display_name} tag '{declared_tag}' "
+                        f"does not exist in {source_repo}. Verify the "
+                        f"tag name or publish it before advancing the "
+                        f"dependency."
+                    ),
+                    path=_RELEASE_PLAN_PATH,
+                    line=1,
+                )
+            )
+        elif exists is None:
+            findings.append(
+                make_finding(
+                    engine_rule="check-declared-dependency-tags-exist",
+                    level="warn",
+                    message=(
+                        f"Could not verify that {display_name} tag "
+                        f"'{declared_tag}' exists in {source_repo} "
+                        f"(GitHub API lookup unavailable). Re-run the "
+                        f"workflow to retry, or confirm the tag manually."
+                    ),
+                    path=_RELEASE_PLAN_PATH,
+                    line=1,
+                )
+            )
+
+    return findings

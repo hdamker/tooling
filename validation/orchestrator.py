@@ -88,6 +88,14 @@ class OrchestratorArgs:
     commit_sha: str
     commonalities_version: Optional[str]
 
+    # Release-plan validation context (Step 6b outputs from validation.yml)
+    release_plan_check_only: bool
+    commonalities_release_changed: bool
+    icm_release_changed: bool
+    commonalities_tag_exists: Optional[bool]
+    icm_tag_exists: Optional[bool]
+    non_release_plan_files_changed: Tuple[str, ...]
+
 
 def _env(name: str, default: str = "") -> str:
     """Read a VALIDATION_* environment variable."""
@@ -115,6 +123,32 @@ def _env_optional_bool(name: str) -> Optional[bool]:
     return None
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    """Read an env var as a bool with an explicit default."""
+    raw = _env(name).lower()
+    if raw in ("true", "1", "yes"):
+        return True
+    if raw in ("false", "0", "no"):
+        return False
+    return default
+
+
+def _env_json_list(name: str) -> Tuple[str, ...]:
+    """Read an env var as a JSON array of strings.  Returns empty tuple
+    on missing/invalid input.
+    """
+    raw = _env(name)
+    if not raw:
+        return ()
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return ()
+    if not isinstance(value, list):
+        return ()
+    return tuple(str(v) for v in value)
+
+
 def parse_args() -> OrchestratorArgs:
     """Parse all inputs from VALIDATION_* environment variables."""
     return OrchestratorArgs(
@@ -134,6 +168,18 @@ def parse_args() -> OrchestratorArgs:
         tooling_ref=_env("TOOLING_REF"),
         commit_sha=_env("COMMIT_SHA"),
         commonalities_version=_env("COMMONALITIES_VERSION") or None,
+        release_plan_check_only=_env_bool("RELEASE_PLAN_CHECK_ONLY"),
+        commonalities_release_changed=_env_bool(
+            "COMMONALITIES_RELEASE_CHANGED"
+        ),
+        icm_release_changed=_env_bool("ICM_RELEASE_CHANGED"),
+        commonalities_tag_exists=_env_optional_bool(
+            "COMMONALITIES_TAG_EXISTS"
+        ),
+        icm_tag_exists=_env_optional_bool("ICM_TAG_EXISTS"),
+        non_release_plan_files_changed=_env_json_list(
+            "NON_RELEASE_PLAN_FILES_CHANGED"
+        ),
     )
 
 
@@ -200,7 +246,19 @@ def run_engines(
     all_findings: List[dict] = []
     engine_statuses: Dict[str, str] = {}
 
+    # When release_plan_check_only is true, a Commonalities dependency
+    # declaration advanced in this PR.  The code/common/ cache and API
+    # spec content on disk are still tied to the previous tag — running
+    # Spectral with the new ruleset or gherkin-lint against those files
+    # produces misleading findings (DEC-029 exclusivity principle).
+    # Skip those engines entirely; Python engine still runs but its
+    # post-filter keeps only rules gated on release_plan_changed=true.
+    skip_context_dependent = bool(
+        getattr(context, "release_plan_check_only", False)
+    )
+
     # --- yamllint ---
+    # yamllint is structural (syntax/formatting) — always safe to run.
     try:
         yamllint_config = paths.linting_config_dir / ".yamllint.yaml"
         findings = run_yamllint_engine(
@@ -215,21 +273,29 @@ def run_engines(
         logger.error("yamllint failed: %s", exc)
 
     # --- Spectral ---
-    try:
-        commonalities_release = getattr(context, "commonalities_release", None)
-        findings = run_spectral_engine(
-            repo_path=repo_path,
-            config_dir=paths.linting_config_dir,
-            commonalities_release=commonalities_release,
-        )
-        all_findings.extend(findings)
-        engine_statuses["spectral"] = f"{len(findings)} finding(s)"
-        logger.info("Spectral: %d finding(s)", len(findings))
-    except Exception as exc:
-        engine_statuses["spectral"] = f"error: {exc}"
-        logger.error("Spectral failed: %s", exc)
+    if skip_context_dependent:
+        engine_statuses["spectral"] = "skipped (release-plan-check-only mode)"
+        logger.info("Spectral: skipped (release-plan-check-only mode)")
+    else:
+        try:
+            commonalities_release = getattr(
+                context, "commonalities_release", None
+            )
+            findings = run_spectral_engine(
+                repo_path=repo_path,
+                config_dir=paths.linting_config_dir,
+                commonalities_release=commonalities_release,
+            )
+            all_findings.extend(findings)
+            engine_statuses["spectral"] = f"{len(findings)} finding(s)"
+            logger.info("Spectral: %d finding(s)", len(findings))
+        except Exception as exc:
+            engine_statuses["spectral"] = f"error: {exc}"
+            logger.error("Spectral failed: %s", exc)
 
     # --- Python checks ---
+    # Python engine always runs; post-filter drops non-release-plan rules
+    # when release_plan_check_only is true.
     try:
         findings = run_python_engine(
             repo_path=repo_path,
@@ -243,7 +309,10 @@ def run_engines(
         logger.error("Python checks failed: %s", exc)
 
     # --- gherkin-lint ---
-    if not test_files:
+    if skip_context_dependent:
+        engine_statuses["gherkin"] = "skipped (release-plan-check-only mode)"
+        logger.info("gherkin-lint: skipped (release-plan-check-only mode)")
+    elif not test_files:
         engine_statuses["gherkin"] = "skipped (no test files)"
         logger.info("gherkin-lint: skipped (no test files)")
     else:
@@ -432,6 +501,12 @@ def main() -> int:
         workflow_run_url=args.workflow_run_url,
         tooling_ref=args.tooling_ref,
         commonalities_version=args.commonalities_version,
+        release_plan_check_only=args.release_plan_check_only,
+        commonalities_release_changed=args.commonalities_release_changed,
+        icm_release_changed=args.icm_release_changed,
+        commonalities_tag_exists=args.commonalities_tag_exists,
+        icm_tag_exists=args.icm_tag_exists,
+        non_release_plan_files_changed=args.non_release_plan_files_changed,
     )
     logger.info(
         "Context: branch=%s trigger=%s profile=%s release_review=%s apis=%d",

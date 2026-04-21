@@ -253,3 +253,33 @@
   hint: >-
     Merge the auto-created sync PR or trigger the release automation
     workflow manually (workflow_dispatch) to update code/common/ files.
+
+# P-022: check-release-plan-exclusivity
+# release-plan.yaml changes must be in their own PR — any co-changed
+# files are reported so that any new validation errors stay clearly
+# attributable to the release-plan change rather than masked by
+# unrelated code changes in the same PR.
+- id: P-022
+  engine: python
+  engine_rule: check-release-plan-exclusivity
+  applicability:
+    release_plan_changed: true
+  conditional_level:
+    default: error
+  hint: >-
+    Split this PR: keep release-plan.yaml changes in a dedicated PR,
+    and move the other listed files to a separate PR.
+
+# P-023: check-declared-dependency-tags-exist
+# When a dependency declaration (commonalities_release or icm_release)
+# advances in this PR, verify the declared tag exists in the source
+# repository.  Confirmed missing → error; API lookup failure → warn.
+# When the declaration is unchanged in the diff, the check is skipped
+# (pre-existing state is not this PR's responsibility).
+- id: P-023
+  engine: python
+  engine_rule: check-declared-dependency-tags-exist
+  applicability:
+    release_plan_changed: true
+  conditional_level:
+    default: error

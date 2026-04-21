@@ -28,6 +28,48 @@ inputs:
     description: 'Whether release-plan.yaml changed in this PR (true/false)'
     required: false
     default: 'false'
+  release_plan_check_only:
+    description: >
+      When true, a Commonalities dependency declaration advanced in this
+      PR — orchestrator skips Spectral + gherkin engines and post-filter
+      keeps only release-plan-validation rules.  Set by the caller
+      workflow''s release-plan detection step.
+    required: false
+    default: 'false'
+  commonalities_release_changed:
+    description: >
+      Whether dependencies.commonalities_release differs between base and
+      head in this PR diff (true/false).  Used by P-023 to gate the
+      tag-existence check.
+    required: false
+    default: 'false'
+  icm_release_changed:
+    description: >
+      Whether dependencies.icm_release (or identity_consent_management_release)
+      differs between base and head in this PR diff (true/false).
+    required: false
+    default: 'false'
+  commonalities_tag_exists:
+    description: >
+      Tri-state result of the GitHub API lookup for the declared
+      commonalities_release tag.  ''true'' = confirmed present, ''false''
+      = confirmed 404, '''' (empty) = lookup skipped or failed.  Consumed
+      by P-023.
+    required: false
+    default: ''
+  icm_tag_exists:
+    description: >
+      Tri-state result for the declared icm_release tag.  Same semantics
+      as commonalities_tag_exists.
+    required: false
+    default: ''
+  non_release_plan_files_changed:
+    description: >
+      JSON array of file paths changed in the PR alongside
+      release-plan.yaml.  Empty array (''[]'') when release-plan.yaml is
+      the only changed file.  Consumed by P-022 (exclusivity check).
+    required: false
+    default: '[]'
   tooling_ref:
     description: 'Tooling ref used for this run (for diagnostics)'
     required: false
@@ -111,6 +153,12 @@ runs:
         VALIDATION_PROFILE: ${{ inputs.profile }}
         VALIDATION_PR_NUMBER: ${{ github.event.pull_request.number }}
         VALIDATION_RELEASE_PLAN_CHANGED: ${{ inputs.release_plan_changed }}
+        VALIDATION_RELEASE_PLAN_CHECK_ONLY: ${{ inputs.release_plan_check_only }}
+        VALIDATION_COMMONALITIES_RELEASE_CHANGED: ${{ inputs.commonalities_release_changed }}
+        VALIDATION_ICM_RELEASE_CHANGED: ${{ inputs.icm_release_changed }}
+        VALIDATION_COMMONALITIES_TAG_EXISTS: ${{ inputs.commonalities_tag_exists }}
+        VALIDATION_ICM_TAG_EXISTS: ${{ inputs.icm_tag_exists }}
+        VALIDATION_NON_RELEASE_PLAN_FILES_CHANGED: ${{ inputs.non_release_plan_files_changed }}
         VALIDATION_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         VALIDATION_TOOLING_REF: ${{ inputs.tooling_ref }}
         VALIDATION_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
