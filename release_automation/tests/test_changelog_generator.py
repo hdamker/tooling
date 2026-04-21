@@ -521,6 +521,51 @@ class TestFileWritingFlatMode:
         assert "[r2.4](#r24)" in result
         assert "[r2.3](#r23)" in result
 
+    def test_flat_write_end_to_end_sed_style_headings(self, generator, tmp_path):
+        """End-to-end: a repo with SED-style suffixed headings
+        (``# r2.2 - Fall25 public release``) gets a new maintenance
+        section prepended. The regenerated TOC lists every legacy
+        heading with the anchor GitHub actually renders for the full
+        heading text, not the short-tag anchor."""
+        # Simulate SimpleEdgeDiscovery's legacy CHANGELOG.md: mixed heading
+        # styles, one with a trailing descriptor, one without.
+        legacy = (
+            "# Changelog Simple Edge Discovery\n\n"
+            "# r2.2 - Fall25 public release\n\n"
+            "This public release contains the definition and documentation of\n"
+            "* simple-edge-discovery v2.0.0\n\n"
+            "# r2.1 - rc\n\n"
+            "This pre-release contains the definition\n\n"
+            "# r1.3\n\n"
+            "This public release contains the definition\n"
+        )
+        (tmp_path / "CHANGELOG.md").write_text(legacy)
+
+        new_section = (
+            "# r2.3\n\n## Release Notes\n\n"
+            "This maintenance release contains patches\n"
+        )
+        generator.write_changelog(
+            str(tmp_path),
+            new_section,
+            "r2.3",
+            "SimpleEdgeDiscovery",
+            release_type="maintenance-release",
+        )
+
+        result = (tmp_path / "CHANGELOG.md").read_text()
+
+        # New section lands before the first legacy section
+        assert result.index("# r2.3") < result.index("# r2.2 - Fall25")
+
+        # TOC contains an entry for every release-tag heading, with
+        # link text and anchor both derived from the full heading text
+        # so anchors match GitHub's rendering and link labels match the
+        # underlying headings verbatim.
+        assert "[r2.3](#r23)" in result
+        assert "[r2.2 - Fall25 public release](#r22---fall25-public-release)" in result
+        assert "[r2.1 - rc](#r21---rc)" in result
+        assert "[r1.3](#r13)" in result
 
 # --- Table of Contents ---
 
@@ -577,6 +622,49 @@ class TestTocGeneration:
         entries = ChangelogGenerator._extract_toc_entries(content)
         assert entries[0]["is_public"] is False
 
+    def test_extract_entries_matches_heading_with_suffix(self):
+        """Legacy headings may carry trailing descriptor text such as
+        ``# r2.2 - Fall25 public release``. The full heading text is
+        captured so both link label and anchor track what the heading
+        actually says."""
+        content = (
+            "# r2.2 - Fall25 public release\n\n"
+            "## Release Notes\n\n"
+            "This public release contains the definition\n"
+        )
+        entries = ChangelogGenerator._extract_toc_entries(content)
+        assert len(entries) == 1
+        assert entries[0]["heading"] == "r2.2 - Fall25 public release"
+        assert entries[0]["is_public"] is True
+
+    def test_extract_entries_mixed_plain_and_suffixed(self):
+        """Mixed heading styles each get their full heading text in
+        the entry's ``heading`` field."""
+        content = (
+            "# r2.2 - Fall25 public release\n\n"
+            "This public release contains the definition\n\n"
+            "# r2.1 - rc\n\n"
+            "This pre-release contains the definition\n\n"
+            "# r1.3\n\n"
+            "This public release contains the definition\n"
+        )
+        entries = ChangelogGenerator._extract_toc_entries(content)
+        assert [e["heading"] for e in entries] == [
+            "r2.2 - Fall25 public release",
+            "r2.1 - rc",
+            "r1.3",
+        ]
+
+    def test_extract_entries_matches_three_part_legacy_tag(self):
+        """Pre-standardization repos have three-part tags like
+        ``# r0.9.3 - rc``. The full heading text is captured verbatim."""
+        content = (
+            "# r0.9.3 - rc\n\n"
+            "This pre-release contains the definition\n"
+        )
+        entries = ChangelogGenerator._extract_toc_entries(content)
+        assert entries[0]["heading"] == "r0.9.3 - rc"
+
     # --- TOC formatting ---
 
     def test_format_toc_empty_entries(self):
@@ -597,6 +685,26 @@ class TestTocGeneration:
         assert "- **[r4.2](#r42)**" in result
         assert "- [r4.1](#r41)" in result
         assert result.index("r4.2") < result.index("r4.1")
+
+    def test_format_toc_suffixed_heading_uses_full_text(self):
+        """Legacy suffixed headings render with both link text and anchor
+        derived from the full heading text — matching GitHub's rendered
+        anchor for that heading."""
+        entries = [
+            {"heading": "r2.2 - Fall25 public release", "is_public": True}
+        ]
+        result = ChangelogGenerator._format_toc(entries)
+        assert (
+            "- **[r2.2 - Fall25 public release](#r22---fall25-public-release)**"
+            in result
+        )
+
+    def test_format_toc_three_part_tag_preserved(self):
+        """Three-part legacy tags keep the full tag in both link text and
+        anchor, so SED-style ``r0.9.3 - rc`` renders faithfully."""
+        entries = [{"heading": "r0.9.3 - rc", "is_public": False}]
+        result = ChangelogGenerator._format_toc(entries)
+        assert "- [r0.9.3 - rc](#r093---rc)" in result
 
     # --- File integration ---
 

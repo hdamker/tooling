@@ -345,9 +345,15 @@ class ChangelogGenerator:
     def _extract_toc_entries(content: str) -> List[Dict[str, Any]]:
         """Extract TOC entries from file content by scanning level-1 headings.
 
-        Finds all ``# rX.Y`` headings and determines if the release is a
-        public release (bold in TOC) by checking the "This {type} contains"
-        line in the few lines following the heading.
+        Finds all ``# rX.Y`` release-tag headings (optionally followed by
+        trailing descriptor text, e.g. ``# r2.2 - Fall25 public release``)
+        and determines if the release is a public release (bold in TOC)
+        by checking the "This {type} contains" line in the few lines
+        following the heading.
+
+        ``heading`` is the full heading text after ``# `` — used both as
+        the TOC link label and as the anchor source so link text and
+        anchor track what the underlying heading actually says.
 
         Returns:
             List of dicts ordered by appearance (newest first):
@@ -356,10 +362,9 @@ class ChangelogGenerator:
         lines = content.split("\n")
         entries: List[Dict[str, Any]] = []
         for i, line in enumerate(lines):
-            match = re.match(r"^# (r\d+\.\d+)\s*$", line)
-            if not match:
+            if not re.match(r"^#\s+r\d+\.\d+\b", line):
                 continue
-            heading = match.group(1)
+            heading = line.lstrip("#").strip()
             is_public = False
             for j in range(i + 1, min(i + 6, len(lines))):
                 if re.search(
@@ -376,6 +381,9 @@ class ChangelogGenerator:
         """Format TOC entries into markdown.
 
         Public/maintenance releases are bold, pre-releases are plain.
+        Link text and anchor both derive from the full heading text so
+        the TOC faithfully mirrors each heading and the anchor matches
+        GitHub's rendered anchor for that heading.
 
         Returns:
             TOC section string including ``## Table of Contents`` heading,
