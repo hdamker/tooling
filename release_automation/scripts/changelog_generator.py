@@ -158,11 +158,23 @@ class ChangelogGenerator:
         return self.renderer.render(template_content, context)
 
     def write_changelog(
-        self, work_dir: str, content: str, release_tag: str, repo_name: str
+        self,
+        work_dir: str,
+        content: str,
+        release_tag: str,
+        repo_name: str,
+        release_type: str = "",
     ) -> str:
-        """Write CHANGELOG section to the appropriate per-cycle file.
+        """Write CHANGELOG section to the appropriate file.
 
-        File naming: r4.1 -> cycle 4 -> CHANGELOG/CHANGELOG-r4.md
+        Target selection (maintenance releases preserve legacy flat CHANGELOG.md
+        until the repo has been migrated to per-cycle via ``/migrate-changelog``):
+
+            if release_type == "maintenance-release" and
+               CHANGELOG/CHANGELOG-r{cycle}.md does NOT exist:
+                write to CHANGELOG.md at the repo root (flat mode)
+            else:
+                write to CHANGELOG/CHANGELOG-r{cycle}.md (per-cycle mode)
 
         Behavior:
             - If file exists: prepend new section after the header block
@@ -173,17 +185,17 @@ class ChangelogGenerator:
             content: Rendered release section content
             release_tag: Release tag for cycle extraction
             repo_name: Repository name for header generation
+            release_type: Release type from release-plan/metadata; used only
+                to enable flat-mode fallback for maintenance releases.
 
         Returns:
-            Relative path to the written file (e.g., "CHANGELOG/CHANGELOG-r4.md")
+            Relative path to the written file, e.g. ``CHANGELOG/CHANGELOG-r4.md``
+            (per-cycle) or ``CHANGELOG.md`` (flat).
         """
         cycle = self._get_cycle(release_tag)
-        changelog_dir = Path(work_dir) / "CHANGELOG"
-        changelog_dir.mkdir(exist_ok=True)
-
-        filename = f"CHANGELOG-r{cycle}.md"
-        filepath = changelog_dir / filename
-        relative_path = f"CHANGELOG/{filename}"
+        filepath, relative_path = self._resolve_changelog_path(
+            Path(work_dir), cycle, release_type
+        )
 
         if filepath.exists():
             existing = filepath.read_text()
@@ -200,6 +212,27 @@ class ChangelogGenerator:
         self._update_toc(filepath)
 
         return relative_path
+
+    @staticmethod
+    def _resolve_changelog_path(
+        work_dir: Path, cycle: str, release_type: str
+    ) -> Tuple[Path, str]:
+        """Pick flat vs per-cycle target for write_changelog().
+
+        Flat mode (``CHANGELOG.md`` at repo root) activates only when the
+        release is a maintenance release AND no per-cycle file exists yet
+        for the target cycle. Every other case uses per-cycle, and the
+        ``CHANGELOG/`` directory is created if missing.
+
+        Returns:
+            Tuple of (absolute Path to target file, relative path string).
+        """
+        per_cycle_file = work_dir / "CHANGELOG" / f"CHANGELOG-r{cycle}.md"
+        if release_type == "maintenance-release" and not per_cycle_file.exists():
+            return work_dir / "CHANGELOG.md", "CHANGELOG.md"
+
+        per_cycle_file.parent.mkdir(exist_ok=True)
+        return per_cycle_file, f"CHANGELOG/CHANGELOG-r{cycle}.md"
 
     def _find_header_end(self, content: str) -> int:
         """Find the position where release sections start in an existing file.

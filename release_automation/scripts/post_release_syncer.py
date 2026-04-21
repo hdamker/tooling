@@ -150,10 +150,13 @@ class PostReleaseSyncer:
         target_branch: str,
         release_tag: str
     ) -> bool:
-        """Copy release-specific CHANGELOG from snapshot branch to target branch.
+        """Copy release CHANGELOG from snapshot branch to target branch.
 
-        Copies CHANGELOG/CHANGELOG-rX.md where X is the release cycle number
-        extracted from the release tag (e.g., r4.1 → CHANGELOG/CHANGELOG-r4.md).
+        Prefers the per-cycle file ``CHANGELOG/CHANGELOG-rX.md`` (where X is
+        the release cycle number from the release tag). Falls back to flat
+        ``CHANGELOG.md`` if the per-cycle file does not exist on the
+        snapshot branch (maintenance releases on repos that have not yet
+        migrated to per-cycle structure).
 
         Args:
             snapshot_branch: Source branch with release CHANGELOG
@@ -171,12 +174,19 @@ class PostReleaseSyncer:
             return False
 
         cycle = match.group(1)
-        changelog_path = f"CHANGELOG/CHANGELOG-r{cycle}.md"
+        per_cycle_path = f"CHANGELOG/CHANGELOG-r{cycle}.md"
+        flat_path = "CHANGELOG.md"
 
-        # Get CHANGELOG from snapshot branch
+        # Probe per-cycle first, fall back to flat CHANGELOG.md
+        changelog_path = per_cycle_path
         changelog_content = self.gh.get_file_content(changelog_path, ref=snapshot_branch)
         if not changelog_content:
-            logger.warning(f"No {changelog_path} found on {snapshot_branch}")
+            changelog_path = flat_path
+            changelog_content = self.gh.get_file_content(changelog_path, ref=snapshot_branch)
+        if not changelog_content:
+            logger.warning(
+                f"No {per_cycle_path} or {flat_path} found on {snapshot_branch}"
+            )
             return False
 
         # Write to target branch

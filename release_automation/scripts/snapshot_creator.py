@@ -877,9 +877,15 @@ class SnapshotCreator:
             for api_name, version in api_versions.items()
         ]
 
+        cycle_match = re.match(r"r(\d+)\.", config.release_tag)
+        cycle = cycle_match.group(1) if cycle_match else ""
+
         # Build data dict
         data = {
             "repo_name": repo_name,
+            "changelog_url": self._changelog_url(
+                temp_dir, org, repo_name, release_type, cycle
+            ),
         }
 
         if release_state in ("public_release", "public_with_prerelease"):
@@ -928,6 +934,29 @@ class SnapshotCreator:
         updater = ReadmeUpdater()
         return updater.update_release_info(readme_path, release_state, data)
 
+    @staticmethod
+    def _changelog_url(
+        temp_dir: str,
+        org: str,
+        repo_name: str,
+        release_type: str,
+        cycle: str,
+    ) -> str:
+        """Build the CHANGELOG link used in README release-info.
+
+        Mirrors the generator's dual-mode rule: a maintenance release
+        into a cycle with no per-cycle file writes flat ``CHANGELOG.md``
+        and the link points there. Every other case uses the per-cycle
+        ``CHANGELOG/`` directory tree view.
+        """
+        base = f"https://github.com/{org}/{repo_name}"
+        per_cycle_file = os.path.join(
+            temp_dir, "CHANGELOG", f"CHANGELOG-r{cycle}.md"
+        )
+        if release_type == "maintenance-release" and not os.path.isfile(per_cycle_file):
+            return f"{base}/blob/main/CHANGELOG.md"
+        return f"{base}/tree/main/CHANGELOG"
+
     def _generate_changelog(
         self,
         temp_dir: str,
@@ -970,7 +999,13 @@ class SnapshotCreator:
             repo_name=repo_name,
             candidate_changes=candidate_changes,
         )
-        return generator.write_changelog(temp_dir, content, config.release_tag, repo_name)
+        return generator.write_changelog(
+            temp_dir,
+            content,
+            config.release_tag,
+            repo_name,
+            release_type=release_type,
+        )
 
     def _cleanup_branches(
         self,

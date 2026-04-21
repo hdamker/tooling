@@ -59,6 +59,7 @@ def public_release_data():
         "latest_public_release": "r3.2",
         "github_url": "https://github.com/camaraproject/QualityOnDemand/releases/tag/r3.2",
         "meta_release": "Spring25",
+        "changelog_url": "https://github.com/camaraproject/QualityOnDemand/tree/main/CHANGELOG",
         "formatted_apis": (
             "  * **quality-on-demand v1.1.0**\n"
             "  [[YAML]](https://github.com/camaraproject/QualityOnDemand/blob/r3.2/"
@@ -81,6 +82,7 @@ def prerelease_data():
         "newest_prerelease": "r4.1-rc.1",
         "prerelease_github_url": "https://github.com/camaraproject/QualityOnDemand/releases/tag/r4.1-rc.1",
         "prerelease_type": "release candidate",
+        "changelog_url": "https://github.com/camaraproject/QualityOnDemand/tree/main/CHANGELOG",
         "formatted_prerelease_apis": (
             "  * **quality-on-demand v1.2.0-rc.1**\n"
             "  [[YAML]](https://github.com/camaraproject/QualityOnDemand/blob/r4.1-rc.1/"
@@ -168,6 +170,32 @@ class TestTemplateRendering:
         assert "r4.1-rc.1" in result
         assert "Upcoming Release Preview" in result
         assert "NOTE" in result
+
+    def test_changelog_url_renders_directory_link_in_all_release_templates(
+        self, updater, public_release_data, prerelease_data
+    ):
+        """changelog_url variable is honored by every release template."""
+        dir_url = "https://github.com/camaraproject/QualityOnDemand/tree/main/CHANGELOG"
+        public_release_data["changelog_url"] = dir_url
+        prerelease_data["changelog_url"] = dir_url
+
+        public_result = updater._render_template("public_release", public_release_data)
+        prerelease_result = updater._render_template("prerelease_only", prerelease_data)
+        combined_result = updater._render_template(
+            "public_with_prerelease", {**public_release_data, **prerelease_data}
+        )
+
+        for result in (public_result, prerelease_result, combined_result):
+            assert f"[CHANGELOG]({dir_url})" in result
+
+    def test_changelog_url_renders_flat_file_link(self, updater, public_release_data):
+        """Flat-mode URL (blob/main/CHANGELOG.md) also renders cleanly."""
+        flat_url = "https://github.com/camaraproject/SimpleEdgeDiscovery/blob/main/CHANGELOG.md"
+        public_release_data["changelog_url"] = flat_url
+        public_release_data["repo_name"] = "SimpleEdgeDiscovery"
+
+        result = updater._render_template("public_release", public_release_data)
+        assert f"[CHANGELOG]({flat_url})" in result
 
 
 # --- Content Replacement ---
