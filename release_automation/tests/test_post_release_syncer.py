@@ -164,6 +164,70 @@ class TestSyncChangelog:
         assert result is False
         mock_github_client.get_file_content.assert_not_called()
 
+    def test_sync_changelog_prefers_per_cycle(self, syncer, mock_github_client):
+        """When the per-cycle file is present on the snapshot, sync it and
+        do not probe the flat fallback."""
+        mock_github_client.get_file_content.return_value = "# per-cycle content"
+
+        result = syncer._sync_changelog(
+            "release-snapshot/r4.1-abc123",
+            "pr-to-main/r4.1",
+            "r4.1",
+        )
+
+        assert result is True
+        # Only one probe — for the per-cycle path
+        mock_github_client.get_file_content.assert_called_once_with(
+            "CHANGELOG/CHANGELOG-r4.md", ref="release-snapshot/r4.1-abc123"
+        )
+        mock_github_client.update_file.assert_called_once()
+        assert (
+            mock_github_client.update_file.call_args.kwargs["path"]
+            == "CHANGELOG/CHANGELOG-r4.md"
+        )
+
+    def test_sync_changelog_falls_back_to_flat_when_per_cycle_missing(
+        self, syncer, mock_github_client
+    ):
+        """Maintenance releases on unmigrated repos write flat CHANGELOG.md;
+        the syncer must pick that up when the per-cycle probe returns None."""
+        mock_github_client.get_file_content.side_effect = [None, "# flat content"]
+
+        result = syncer._sync_changelog(
+            "release-snapshot/r2.3-abc123",
+            "pr-to-main/r2.3",
+            "r2.3",
+        )
+
+        assert result is True
+        assert mock_github_client.get_file_content.call_count == 2
+        mock_github_client.get_file_content.assert_any_call(
+            "CHANGELOG/CHANGELOG-r2.md", ref="release-snapshot/r2.3-abc123"
+        )
+        mock_github_client.get_file_content.assert_any_call(
+            "CHANGELOG.md", ref="release-snapshot/r2.3-abc123"
+        )
+        mock_github_client.update_file.assert_called_once()
+        assert (
+            mock_github_client.update_file.call_args.kwargs["path"] == "CHANGELOG.md"
+        )
+
+    def test_sync_changelog_neither_present_returns_false(
+        self, syncer, mock_github_client
+    ):
+        """Both probes return None → False and no update attempt."""
+        mock_github_client.get_file_content.side_effect = [None, None]
+
+        result = syncer._sync_changelog(
+            "release-snapshot/r2.3-abc123",
+            "pr-to-main/r2.3",
+            "r2.3",
+        )
+
+        assert result is False
+        assert mock_github_client.get_file_content.call_count == 2
+        mock_github_client.update_file.assert_not_called()
+
 
 class TestCreatePR:
     """Tests for _create_pr method."""

@@ -392,16 +392,31 @@ The delimiters are distributed by the `campaign-release-info` campaign in `proje
 
 ## CHANGELOG Structure
 
-The release automation uses a per-cycle directory structure for changelog files:
+The release automation supports two CHANGELOG layouts on the same discriminator:
 
-```
-CHANGELOG/
-  CHANGELOG-r1.md   # All releases in cycle 1 (r1.1, r1.2, ...)
-  CHANGELOG-r2.md   # All releases in cycle 2 (r2.1, r2.2, ...)
-  README.md          # Index pointing to available files and legacy CHANGELOG.md
-```
+- **Per-cycle** (default): `CHANGELOG/CHANGELOG-r{cycle}.md` — one file per release cycle, with newest entries prepended. Used for every release type except maintenance, and for maintenance releases once a per-cycle file for the target cycle already exists.
 
-Each `/create-snapshot` command generates a release section in the appropriate per-cycle file. Multiple releases within the same cycle (e.g., r4.1 alpha, r4.1 RC, r4.2) accumulate in the same file with newest entries at the top.
+  ```
+  CHANGELOG/
+    CHANGELOG-r1.md   # All releases in cycle 1 (r1.1, r1.2, ...)
+    CHANGELOG-r2.md   # All releases in cycle 2 (r2.1, r2.2, ...)
+    README.md         # Index pointing to available files and legacy CHANGELOG.md
+  ```
+
+- **Flat** (fallback for pre-automation maintenance releases): root `CHANGELOG.md` — new section prepended before the first `# r...` heading; manual TOC is replaced by an automation-managed TOC on first write.
+
+### Discriminator
+
+`write_changelog()` and `_sync_changelog()` apply the same rule:
+
+> If `release_type == "maintenance-release"` AND `CHANGELOG/CHANGELOG-r{cycle}.md` does **not** exist → write flat `CHANGELOG.md`. Otherwise → write `CHANGELOG/CHANGELOG-r{cycle}.md` (creating the `CHANGELOG/` directory if needed).
+
+Effect:
+
+- New release cycles on any repo land in `CHANGELOG/CHANGELOG-r{cycle}.md`.
+- Maintenance releases on repos that have not yet migrated their legacy history keep writing to the existing flat `CHANGELOG.md` until `/migrate-changelog` splits the history into per-cycle files. After migration, subsequent maintenance releases for those cycles prepend to the per-cycle file.
+
+The same rule drives the CHANGELOG URL rendered into the README release-info section: flat writes point to `blob/main/CHANGELOG.md`, per-cycle writes point to `tree/main/CHANGELOG`.
 
 ### Onboarding: CHANGELOG.md handling
 
@@ -498,8 +513,8 @@ Validation caller:
 
 ### CHANGELOG Structure
 
-- [ ] `CHANGELOG/README.md` exists as index file
-- [ ] Root `CHANGELOG.md` either: has forward-reference note (repos with history), or is deleted (repos with unchanged template placeholder)
+- [ ] The repo has a live changelog on `main` — either `CHANGELOG/README.md` plus per-cycle `CHANGELOG/CHANGELOG-r{cycle}.md` files (per-cycle mode, default), or a flat root `CHANGELOG.md` (flat-mode fallback, acceptable for maintenance releases on repos that have not yet run `/migrate-changelog`)
+- [ ] Root `CHANGELOG.md` either: has forward-reference note (onboarded repos with legacy history), is the active flat changelog (not yet migrated), or is deleted (repos that were onboarded from the unchanged template placeholder)
 
 ### Smoke Test
 

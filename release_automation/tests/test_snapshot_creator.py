@@ -264,7 +264,63 @@ class TestGenerateSnapshotId:
         ) == "v1.0.0-abc1234"
 
 
+# --- Tests for _changelog_url ---
+
+
+class TestChangelogUrl:
+    """Tests for the CHANGELOG link rendered into README release-info.
+
+    Mirrors the dual-mode rule used by the generator: maintenance releases
+    into a cycle without a per-cycle file link to the flat CHANGELOG.md;
+    every other case links to the per-cycle CHANGELOG/ directory view.
+    """
+
+    def test_maintenance_with_no_per_cycle_file_points_to_flat(self, tmp_path):
+        (tmp_path / "CHANGELOG.md").write_text("legacy\n")
+        url = SnapshotCreator._changelog_url(
+            str(tmp_path),
+            org="camaraproject",
+            repo_name="SimpleEdgeDiscovery",
+            release_type="maintenance-release",
+            cycle="2",
+        )
+        assert url == (
+            "https://github.com/camaraproject/SimpleEdgeDiscovery/blob/main/CHANGELOG.md"
+        )
+
+    def test_maintenance_with_existing_per_cycle_file_points_to_dir(self, tmp_path):
+        (tmp_path / "CHANGELOG").mkdir()
+        (tmp_path / "CHANGELOG" / "CHANGELOG-r2.md").write_text("per-cycle\n")
+        url = SnapshotCreator._changelog_url(
+            str(tmp_path),
+            org="camaraproject",
+            repo_name="SimpleEdgeDiscovery",
+            release_type="maintenance-release",
+            cycle="2",
+        )
+        assert url == (
+            "https://github.com/camaraproject/SimpleEdgeDiscovery/tree/main/CHANGELOG"
+        )
+
+    def test_non_maintenance_always_points_to_dir(self, tmp_path):
+        # Even a repo with a flat CHANGELOG.md and no CHANGELOG/ yet gets
+        # the directory link when the release is not a maintenance release,
+        # because the generator will create the per-cycle file on first run.
+        (tmp_path / "CHANGELOG.md").write_text("legacy\n")
+        url = SnapshotCreator._changelog_url(
+            str(tmp_path),
+            org="camaraproject",
+            repo_name="QualityOnDemand",
+            release_type="public-release",
+            cycle="4",
+        )
+        assert url == (
+            "https://github.com/camaraproject/QualityOnDemand/tree/main/CHANGELOG"
+        )
+
+
 # --- Tests for validate_preconditions ---
+
 
 class TestValidatePreconditions:
     """Tests for precondition validation."""
