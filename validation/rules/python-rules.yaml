@@ -286,3 +286,18 @@
     release_plan_changed: true
   conditional_level:
     default: error
+
+# P-024: check-test-file-feature-line-untransformable
+# Fires when the Feature line of a test file has no `wip`, `vwip`, or
+# `v{version}` token — nothing for snapshot transformation T1b to
+# replace, so a release cut would carry the literal text into the
+# snapshot. Always error: distinct from P-007 (which covers the
+# "present but mismatched" case under conditional_level hint/warn).
+# P-007 and P-024 are mutually exclusive per the check's code path
+# (`continue` after the None branch prevents both from firing on the
+# same file).
+- id: P-024
+  engine: python
+  engine_rule: check-test-file-feature-line-untransformable
+  conditional_level:
+    default: error

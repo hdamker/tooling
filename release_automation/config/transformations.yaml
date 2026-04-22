@@ -49,15 +49,18 @@ transformations:
     replacement: "/{url_version}"
 
   # T1b: Test definition API version in Feature line
-  # Replaces "vwip" with "v{api_version}" (e.g., "v1.1.0") in Feature declarations.
-  # Matches both the comma-separated form ("Feature: <name>, vwip - …") and the
-  # space-only form ("Feature: <name> vwip - …"); the space before "vwip" is the
-  # single common anchor across CAMARA test-file conventions.
+  # Replaces "wip" or "vwip" with "v{api_version}" (e.g., "v1.1.0") in
+  # Feature declarations. Matches both the comma-separated form
+  # ("Feature: <name>, vwip - …") and the space-only form
+  # ("Feature: <name> vwip - …"); the space before the version token
+  # is the single common anchor across CAMARA test-file conventions.
+  # The optional `v?` accepts bare `wip` as a style variation (parallel
+  # to `0.1.0` vs `v0.1.0` in info.version).
   - name: test_def_api_version
-    description: Replace vwip in test definition Feature line (comma- or space-separated)
+    description: Replace wip/vwip in test definition Feature line (comma- or space-separated)
     type: regex
     file_pattern: "code/Test_definitions/*.feature"
-    pattern: "(Feature: .*?) vwip\\b"
+    pattern: "(Feature: .*?) v?wip\\b"
     replacement: "\\g<1> v{api_version}"
 
   # T3: Commonalities reference in x-camara-commonalities
