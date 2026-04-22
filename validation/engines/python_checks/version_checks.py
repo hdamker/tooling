@@ -13,6 +13,9 @@ from typing import List, Optional
 from validation.context import ValidationContext
 
 from ._types import load_yaml_safe, make_finding
+from .test_checks import _stem_matches_api
+
+_TEST_DIR = "code/Test_definitions"
 
 # Matches a semantic version (optionally with pre-release label).
 # Examples: "1.0.0", "0.2.0-alpha.2", "1.0.0-rc.1"
@@ -30,6 +33,19 @@ _URL_VERSION_RE = re.compile(r"/(?P<version>v[a-z0-9.]+)/?$", re.IGNORECASE)
 # Extracts the api-name segment from a server URL (segment before version).
 # e.g. "{apiRoot}/quality-on-demand/v1" -> "quality-on-demand"
 _URL_API_NAME_RE = re.compile(r"/(?P<api_name>[^/]+)/v[a-z0-9.]+/?$", re.IGNORECASE)
+
+# Matches a CAMARA-shaped version segment inside a scenario-step URL path:
+# an api-name segment (lowercase letters/digits/hyphens) followed by
+# either ``v{segment}`` or bare ``wip`` as the next segment. Used by P-025
+# to locate the version-bearing portion of a URL anywhere in a feature-
+# file line (not just at the end of the URL).
+# e.g. ``/quality-on-demand/vwip/sessions`` -> captured segment ``vwip``
+#      ``/qod/v1/sessions``                 -> captured ``v1``
+#      ``/device-status/wip/status``        -> captured ``wip``
+_STEP_URL_VERSION_RE = re.compile(
+    r"/[a-z0-9\-]+/(v[a-z0-9.]+|wip)(?=/|\s|$)",
+    re.IGNORECASE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +242,90 @@ def check_server_url_version(
                     api_name=api.api_name,
                 )
             )
+
+    return findings
+
+
+def check_feature_file_url_version(
+    repo_path: Path, context: ValidationContext
+) -> List[dict]:
+    """Validate server URL version segments in feature-file scenario steps.
+
+    P-004 (``check_server_url_version``) covers ``servers[].url`` in the API
+    YAML.  This check extends the same version-segment discipline to URL
+    paths inside ``code/Test_definitions/*.feature`` scenario steps.
+
+    Rationale: snapshot transformation T2b rewrites ``/vwip`` to the
+    target version path (``/{url_version}``), but the rewrite only matches
+    the strict ``/vwip`` form.  A bare ``/wip`` (or a wrong ``/v{...}``
+    segment) in a scenario step survives into the snapshot.  Unlike the
+    Feature-line ``wip`` vs ``vwip`` case in P-007 (which is a style
+    variation), a URL-path version segment has no style-variation escape
+    hatch — the leading ``v`` is required.
+
+    Always error.  The expected segment is derived from the API spec's
+    ``info.version`` via :func:`build_version_segment`, so the check
+    naturally handles main (``info.version == 'wip'`` -> ``vwip``),
+    release, and maintenance branches without branch-type code.
+    """
+    api = context.apis[0]
+    spec_path = repo_path / api.spec_file
+
+    spec = load_yaml_safe(spec_path)
+    if spec is None:
+        return []
+
+    info_version = str(spec.get("info", {}).get("version", "")).strip()
+    if not info_version:
+        return []  # Caught by check_info_version_format.
+
+    expected_segment = build_version_segment(info_version)
+    if expected_segment is None:
+        return []  # Caught by check_info_version_format.
+
+    test_dir = repo_path / _TEST_DIR
+    if not test_dir.is_dir():
+        return []
+
+    matching = [
+        f for f in test_dir.iterdir()
+        if f.is_file()
+        and f.suffix == ".feature"
+        and _stem_matches_api(f.stem, api.api_name)
+    ]
+    if not matching:
+        return []
+
+    findings: List[dict] = []
+    expected_lower = expected_segment.lower()
+
+    for feature_file in matching:
+        try:
+            with open(feature_file, encoding="utf-8") as fh:
+                lines = fh.readlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+
+        for line_number, line in enumerate(lines, start=1):
+            for match in _STEP_URL_VERSION_RE.finditer(line):
+                actual_segment = match.group(1)
+                if actual_segment.lower() == expected_lower:
+                    continue
+                findings.append(
+                    make_finding(
+                        engine_rule="check-feature-file-url-version",
+                        level="error",
+                        message=(
+                            f"Scenario-step URL version segment "
+                            f"'/{actual_segment}' does not match expected "
+                            f"'/{expected_segment}' (derived from "
+                            f"info.version '{info_version}')"
+                        ),
+                        path=f"{_TEST_DIR}/{feature_file.name}",
+                        line=line_number,
+                        api_name=api.api_name,
+                    )
+                )
 
     return findings
 

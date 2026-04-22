@@ -153,6 +153,26 @@ class TestCheckTestFileVersion:
         ctx = _make_context("qod", branch_type="main")
         assert check_test_file_version(tmp_path, ctx) == []
 
+    def test_main_bare_wip_passes(self, tmp_path: Path):
+        """Bare 'wip' (no leading v) is a style variation — accepted on main."""
+        test_dir = _make_test_dir(tmp_path)
+        self._write_feature(
+            test_dir / "qod.feature",
+            "Feature: CAMARA QoD API, wip - Operation createSession",
+        )
+        ctx = _make_context("qod", branch_type="main")
+        assert check_test_file_version(tmp_path, ctx) == []
+
+    def test_main_space_only_vwip_passes(self, tmp_path: Path):
+        """Space-only Feature line (no comma) is a legacy style — accepted."""
+        test_dir = _make_test_dir(tmp_path)
+        self._write_feature(
+            test_dir / "qod.feature",
+            "Feature: CAMARA QoD API vwip - Operation createSession",
+        )
+        ctx = _make_context("qod", branch_type="main")
+        assert check_test_file_version(tmp_path, ctx) == []
+
     def test_main_real_version_fails(self, tmp_path: Path):
         """On main, v1 is wrong even when target_api_version is 1.0.0."""
         test_dir = _make_test_dir(tmp_path)
@@ -163,6 +183,7 @@ class TestCheckTestFileVersion:
         ctx = _make_context("qod", version="1.0.0", branch_type="main")
         findings = check_test_file_version(tmp_path, ctx)
         assert len(findings) == 1
+        assert findings[0]["engine_rule"] == "check-test-file-version"
         assert "v1" in findings[0]["message"]
         assert "vwip" in findings[0]["message"]
 
@@ -173,6 +194,15 @@ class TestCheckTestFileVersion:
         self._write_feature(
             test_dir / "qod.feature",
             "Feature: CAMARA QoD API, vwip - Operation createSession",
+        )
+        ctx = _make_context("qod", branch_type="maintenance")
+        assert check_test_file_version(tmp_path, ctx) == []
+
+    def test_maintenance_bare_wip_passes(self, tmp_path: Path):
+        test_dir = _make_test_dir(tmp_path)
+        self._write_feature(
+            test_dir / "qod.feature",
+            "Feature: CAMARA QoD API, wip - Operation createSession",
         )
         ctx = _make_context("qod", branch_type="maintenance")
         assert check_test_file_version(tmp_path, ctx) == []
@@ -244,6 +274,7 @@ class TestCheckTestFileVersion:
     # --- common edge cases ---
 
     def test_no_version_in_feature_line(self, tmp_path: Path):
+        """Feature line with no wip/vwip/v* token → untransformable (P-024)."""
         test_dir = _make_test_dir(tmp_path)
         self._write_feature(
             test_dir / "qod.feature",
@@ -252,7 +283,24 @@ class TestCheckTestFileVersion:
         ctx = _make_context("qod", branch_type="main")
         findings = check_test_file_version(tmp_path, ctx)
         assert len(findings) == 1
-        assert "no version" in findings[0]["message"]
+        assert findings[0]["engine_rule"] == (
+            "check-test-file-feature-line-untransformable"
+        )
+        assert findings[0]["level"] == "error"
+
+    def test_garbage_token_is_untransformable(self, tmp_path: Path):
+        """A non-version token like 'xyz' is untransformable, not a mismatch."""
+        test_dir = _make_test_dir(tmp_path)
+        self._write_feature(
+            test_dir / "qod.feature",
+            "Feature: CAMARA QoD API, xyz - Operation createSession",
+        )
+        ctx = _make_context("qod", branch_type="main")
+        findings = check_test_file_version(tmp_path, ctx)
+        assert len(findings) == 1
+        assert findings[0]["engine_rule"] == (
+            "check-test-file-feature-line-untransformable"
+        )
 
     def test_empty_file(self, tmp_path: Path):
         test_dir = _make_test_dir(tmp_path)
@@ -260,7 +308,9 @@ class TestCheckTestFileVersion:
         ctx = _make_context("qod", branch_type="main")
         findings = check_test_file_version(tmp_path, ctx)
         assert len(findings) == 1
-        assert "no version" in findings[0]["message"]
+        assert findings[0]["engine_rule"] == (
+            "check-test-file-feature-line-untransformable"
+        )
 
     def test_no_test_dir(self, tmp_path: Path):
         ctx = _make_context("qod")

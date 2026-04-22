@@ -370,10 +370,10 @@ class TestFeatureLineReplacement:
 
     T1B_RULE = TransformationRule(
         name="test_def_api_version",
-        description="Replace vwip in test definition Feature line",
+        description="Replace wip/vwip in test definition Feature line",
         type=TransformationType.REGEX,
         file_pattern="code/Test_definitions/*.feature",
-        pattern=r"(Feature: .*?) vwip\b",
+        pattern=r"(Feature: .*?) v?wip\b",
         replacement=r"\g<1> v{api_version}",
     )
 
@@ -429,12 +429,43 @@ class TestFeatureLineReplacement:
         assert content == original
 
     def test_no_vwip_unchanged(self, transformer, context):
-        """A Feature line with no `vwip` anywhere is a no-op."""
+        """A Feature line with no `wip` or `vwip` anywhere is a no-op."""
         original = "Feature: CAMARA Quality On Demand - Operation createSession\n"
         result, content, feature_path = self._run(transformer, context, original)
         assert result.success
         assert feature_path not in result.files_modified
         assert content == original
+
+    def test_bare_wip_comma_form(self, transformer, context):
+        """Bare `wip` (no leading v) on a comma-separated Feature line.
+
+        Observed on Simple Edge Discovery — treated as a style variation
+        parallel to `0.1.0` vs `v0.1.0` in info.version.
+        """
+        result, content, feature_path = self._run(
+            transformer,
+            context,
+            "Feature: CAMARA Simple Edge Discovery, wip - Operation readClosestEdgeCloudZone\n",
+        )
+        assert result.success
+        assert feature_path in result.files_modified
+        assert content == (
+            "Feature: CAMARA Simple Edge Discovery, v3.2.0-rc.2 - "
+            "Operation readClosestEdgeCloudZone\n"
+        )
+
+    def test_bare_wip_space_form(self, transformer, context):
+        """Bare `wip` on a space-only Feature line."""
+        result, content, feature_path = self._run(
+            transformer,
+            context,
+            "Feature: CAMARA Quality On Demand wip - Operation createSession\n",
+        )
+        assert result.success
+        assert feature_path in result.files_modified
+        assert content == (
+            "Feature: CAMARA Quality On Demand v3.2.0-rc.2 - Operation createSession\n"
+        )
 
 
 class TestYamlPathTransformation:

@@ -106,14 +106,20 @@ def check_test_files_exist(
     ]
 
 
-# Regex to extract version from CAMARA Feature line.
-# Matches ", v{segment}" where segment runs until " - " or end of line.
-# On main: "vwip".  On release: "v2.2.0-alpha.5" (full semver with v).
+# Regex to extract version from CAMARA Feature line. Aligned with the T1b
+# transformation pattern in release_automation/config/transformations.yaml
+# so that any line T1b can transform is also recognized here. The leading
+# ``\s`` separator accepts both the comma-and-space form ("Feature: X, vwip")
+# and the space-only form ("Feature: X vwip"). The captured token is
+# ``wip`` / ``vwip`` (style variation on main/maintenance) or ``v{semver}``
+# (release branches).
 # Examples:
 #   "Feature: CAMARA QoD API, vwip - Operation deleteSession"       → "vwip"
+#   "Feature: CAMARA QoD API, wip - Operation deleteSession"        → "wip"
+#   "Feature: CAMARA QoD API vwip - Operation deleteSession"        → "vwip"
 #   "Feature: CAMARA QoD API, v2.2.0-alpha.5 - Operation create"    → "v2.2.0-alpha.5"
 #   "Feature: CAMARA QoD API, v1.0.0"                               → "v1.0.0"
-_FEATURE_VERSION_RE = re.compile(r",\s*(v\S+?)(?:\s+-\s| *$)")
+_FEATURE_VERSION_RE = re.compile(r"\s(v?wip|v\S+?)(?:\s+-\s|\s*$)")
 
 
 def _extract_feature_version(file_path: Path) -> Optional[str]:
@@ -181,18 +187,31 @@ def check_test_file_version(
         # No test files found — check_test_files_exist reports this.
         return []
 
+    # Compare with leading-v stripped so bare "wip" and "vwip" are treated
+    # as equivalent on main/maintenance (a style variation, parallel to
+    # "0.1.0" vs "v0.1.0" in info.version). Release branches always carry
+    # T1b's "v{api_version}" output, so the normalized comparison still
+    # enforces an exact match there.
+    expected_token = expected_segment.lower().removeprefix("v")
+
     findings: List[dict] = []
     for test_file in matching:
         actual_version = _extract_feature_version(test_file)
 
         if actual_version is None:
+            # No wip/vwip/v* token on the Feature line — T1b has nothing to
+            # replace and a release cut would carry the literal text into
+            # the snapshot. Emitted under a distinct rule ID (P-024) so its
+            # severity cannot be masked by P-007's conditional_level.
             findings.append(
                 make_finding(
-                    engine_rule="check-test-file-version",
+                    engine_rule="check-test-file-feature-line-untransformable",
                     level="error",
                     message=(
-                        f"Test file '{test_file.name}' has no version in its "
-                        f"Feature line (expected '{expected_segment}')"
+                        f"Test file '{test_file.name}' Feature line has no "
+                        f"'wip', 'vwip', or 'v{{version}}' token — nothing "
+                        f"for snapshot transformation to replace "
+                        f"(expected '{expected_segment}')"
                     ),
                     path=f"{_TEST_DIR}/{test_file.name}",
                     line=1,
@@ -201,7 +220,8 @@ def check_test_file_version(
             )
             continue
 
-        if actual_version.lower() != expected_segment.lower():
+        actual_token = actual_version.lower().removeprefix("v")
+        if actual_token != expected_token:
             findings.append(
                 make_finding(
                     engine_rule="check-test-file-version",

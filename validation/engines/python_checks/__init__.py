@@ -31,6 +31,7 @@ from .test_checks import (
     check_test_files_exist,
 )
 from .version_checks import (
+    check_feature_file_url_version,
     check_info_version_format,
     check_server_url_api_name,
     check_server_url_version,
@@ -47,6 +48,7 @@ CHECKS: list[CheckDescriptor] = [
     CheckDescriptor("check-server-url-api-name", CheckScope.API, check_server_url_api_name),
     CheckDescriptor("check-test-files-exist", CheckScope.API, check_test_files_exist),
     CheckDescriptor("check-test-file-version", CheckScope.API, check_test_file_version),
+    CheckDescriptor("check-feature-file-url-version", CheckScope.API, check_feature_file_url_version),
     CheckDescriptor("check-commonalities-version", CheckScope.API, check_commonalities_version),
     CheckDescriptor("check-subscription-filename", CheckScope.API, check_subscription_filename),
     CheckDescriptor("check-event-type-format", CheckScope.API, check_event_type_format),
