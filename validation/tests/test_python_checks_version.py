@@ -10,6 +10,7 @@ import yaml
 from validation.context import ApiContext, ValidationContext
 from validation.engines.python_checks.version_checks import (
     build_version_segment,
+    check_feature_file_url_version,
     check_info_version_format,
     check_server_url_api_name,
     check_server_url_version,
@@ -346,3 +347,168 @@ class TestCheckServerUrlApiName:
         findings = check_server_url_api_name(tmp_path, ctx)
         assert len(findings) == 1
         assert "wrong-name" in findings[0]["message"]
+
+
+# ---------------------------------------------------------------------------
+# TestCheckFeatureFileUrlVersion  (P-025)
+# ---------------------------------------------------------------------------
+
+
+def _write_feature(tmp_path: Path, name: str, body: str) -> Path:
+    test_dir = tmp_path / "code" / "Test_definitions"
+    test_dir.mkdir(parents=True, exist_ok=True)
+    feature_path = test_dir / name
+    feature_path.write_text(body)
+    return feature_path
+
+
+class TestCheckFeatureFileUrlVersion:
+    """Tests for check_feature_file_url_version — P-025.
+
+    On main, ``info.version == 'wip'`` -> expected ``vwip``.
+    On release, ``info.version`` is a semver -> expected derived via
+    :func:`build_version_segment` (e.g. ``1.0.0`` -> ``v1``).
+    """
+
+    def test_main_vwip_scenarios_pass(self, tmp_path: Path):
+        _write_spec(tmp_path, "qod", "wip")
+        _write_feature(
+            tmp_path, "qod.feature",
+            "Feature: QoD, vwip\n"
+            "  Scenario: Create session\n"
+            "    When I send a POST to /quality-on-demand/vwip/sessions\n"
+            "    Then the status code is 201\n",
+        )
+        ctx = _make_context("qod", branch_type="main", version="wip")
+        assert check_feature_file_url_version(tmp_path, ctx) == []
+
+    def test_main_bare_wip_in_url_is_error(self, tmp_path: Path):
+        """Bare /wip in a scenario step has no style-variation excuse."""
+        _write_spec(tmp_path, "qod", "wip")
+        _write_feature(
+            tmp_path, "qod.feature",
+            "Feature: QoD, vwip\n"
+            "  Scenario: Create session\n"
+            "    When I send a POST to /quality-on-demand/wip/sessions\n",
+        )
+        ctx = _make_context("qod", branch_type="main", version="wip")
+        findings = check_feature_file_url_version(tmp_path, ctx)
+        assert len(findings) == 1
+        assert findings[0]["engine_rule"] == "check-feature-file-url-version"
+        assert findings[0]["level"] == "error"
+        assert "/wip" in findings[0]["message"]
+        assert "/vwip" in findings[0]["message"]
+        assert findings[0]["line"] == 3
+
+    def test_main_wrong_version_segment_is_error(self, tmp_path: Path):
+        _write_spec(tmp_path, "qod", "wip")
+        _write_feature(
+            tmp_path, "qod.feature",
+            "Feature: QoD, vwip\n"
+            "  When I send a POST to /quality-on-demand/v1/sessions\n",
+        )
+        ctx = _make_context("qod", branch_type="main", version="wip")
+        findings = check_feature_file_url_version(tmp_path, ctx)
+        assert len(findings) == 1
+        assert "/v1" in findings[0]["message"]
+        assert "/vwip" in findings[0]["message"]
+
+    def test_release_matching_version_passes(self, tmp_path: Path):
+        _write_spec(tmp_path, "qod", "1.0.0")
+        _write_feature(
+            tmp_path, "qod.feature",
+            "Feature: QoD, v1.0.0\n"
+            "  When I send a POST to /quality-on-demand/v1/sessions\n",
+        )
+        ctx = _make_context("qod", branch_type="release", version="1.0.0")
+        assert check_feature_file_url_version(tmp_path, ctx) == []
+
+    def test_release_wrong_version_is_error(self, tmp_path: Path):
+        """/vwip survives into a release snapshot only if T2b failed —
+        treat it as error relative to the release target version."""
+        _write_spec(tmp_path, "qod", "1.0.0")
+        _write_feature(
+            tmp_path, "qod.feature",
+            "Feature: QoD, v1.0.0\n"
+            "  When I send a POST to /quality-on-demand/vwip/sessions\n",
+        )
+        ctx = _make_context("qod", branch_type="release", version="1.0.0")
+        findings = check_feature_file_url_version(tmp_path, ctx)
+        assert len(findings) == 1
+        assert "/vwip" in findings[0]["message"]
+        assert "/v1" in findings[0]["message"]
+
+    def test_initial_version_minor_segment(self, tmp_path: Path):
+        """info.version 0.3.0 -> v0.3 (initial-maturity mapping)."""
+        _write_spec(tmp_path, "qod", "0.3.0")
+        _write_feature(
+            tmp_path, "qod.feature",
+            "Feature: QoD, v0.3.0\n"
+            "  When I send a POST to /quality-on-demand/v0.3/sessions\n",
+        )
+        ctx = _make_context("qod", branch_type="release", version="0.3.0")
+        assert check_feature_file_url_version(tmp_path, ctx) == []
+
+    def test_feature_without_url_steps(self, tmp_path: Path):
+        _write_spec(tmp_path, "qod", "wip")
+        _write_feature(
+            tmp_path, "qod.feature",
+            "Feature: QoD, vwip\n"
+            "  Scenario: plain prose only\n"
+            "    Given an authenticated user\n"
+            "    Then the service responds successfully\n",
+        )
+        ctx = _make_context("qod", branch_type="main", version="wip")
+        assert check_feature_file_url_version(tmp_path, ctx) == []
+
+    def test_url_without_version_segment_skipped(self, tmp_path: Path):
+        """A URL with no version/wip segment is silently ignored — scope
+        is URL-version validation, not presence checking."""
+        _write_spec(tmp_path, "qod", "wip")
+        _write_feature(
+            tmp_path, "qod.feature",
+            "Feature: QoD, vwip\n"
+            "  When I send a GET to /static/index.html\n",
+        )
+        ctx = _make_context("qod", branch_type="main", version="wip")
+        assert check_feature_file_url_version(tmp_path, ctx) == []
+
+    def test_multiple_lines_collect_all_findings(self, tmp_path: Path):
+        _write_spec(tmp_path, "qod", "wip")
+        _write_feature(
+            tmp_path, "qod.feature",
+            "Feature: QoD, vwip\n"
+            "  When I send a POST to /quality-on-demand/v1/sessions\n"
+            "  And I send a GET to /quality-on-demand/wip/sessions/{id}\n",
+        )
+        ctx = _make_context("qod", branch_type="main", version="wip")
+        findings = check_feature_file_url_version(tmp_path, ctx)
+        assert len(findings) == 2
+        lines = {f["line"] for f in findings}
+        assert lines == {2, 3}
+
+    def test_spec_missing_returns_no_findings(self, tmp_path: Path):
+        """No spec file => silent skip (filename/presence checks report)."""
+        _write_feature(
+            tmp_path, "qod.feature",
+            "Feature: QoD, vwip\n"
+            "  When I send a POST to /quality-on-demand/wip/sessions\n",
+        )
+        ctx = _make_context("qod", branch_type="main", version="wip")
+        assert check_feature_file_url_version(tmp_path, ctx) == []
+
+    def test_test_dir_missing_returns_no_findings(self, tmp_path: Path):
+        _write_spec(tmp_path, "qod", "wip")
+        ctx = _make_context("qod", branch_type="main", version="wip")
+        assert check_feature_file_url_version(tmp_path, ctx) == []
+
+    def test_no_matching_feature_file(self, tmp_path: Path):
+        """Feature file for a different API => skip (stem doesn't match)."""
+        _write_spec(tmp_path, "qod", "wip")
+        _write_feature(
+            tmp_path, "other-api.feature",
+            "Feature: Other, vwip\n"
+            "  When I send a POST to /other-api/wip/resource\n",
+        )
+        ctx = _make_context("qod", branch_type="main", version="wip")
+        assert check_feature_file_url_version(tmp_path, ctx) == []
