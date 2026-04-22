@@ -13,7 +13,9 @@ from validation.engines.python_checks.release_plan_checks import (
     _check_file_existence,
     _check_release_type_consistency,
     _check_track_consistency,
+    check_declared_dependency_tags_exist,
     check_orphan_api_definitions,
+    check_release_plan_exclusivity,
     check_release_plan_semantics,
 )
 
@@ -312,3 +314,229 @@ class TestCheckOrphanApiDefinitions:
         (api_dir / "README.md").touch()
         findings = check_orphan_api_definitions(tmp_path, _make_context())
         assert findings == []
+
+
+# ---------------------------------------------------------------------------
+# TestCheckReleasePlanExclusivity (P-022)
+# ---------------------------------------------------------------------------
+
+
+def _context_with_other_files(*files: str) -> ValidationContext:
+    """Build a context with a populated non_release_plan_files_changed."""
+    base = _make_context()
+    return ValidationContext(
+        repository=base.repository,
+        branch_type=base.branch_type,
+        trigger_type=base.trigger_type,
+        profile=base.profile,
+        stage=base.stage,
+        target_release_type=base.target_release_type,
+        commonalities_release=base.commonalities_release,
+        commonalities_version=base.commonalities_version,
+        icm_release=base.icm_release,
+        base_ref=base.base_ref,
+        is_release_review_pr=base.is_release_review_pr,
+        release_plan_changed=True,
+        pr_number=base.pr_number,
+        apis=base.apis,
+        workflow_run_url=base.workflow_run_url,
+        tooling_ref=base.tooling_ref,
+        non_release_plan_files_changed=tuple(files),
+    )
+
+
+class TestCheckReleasePlanExclusivity:
+    def test_no_other_files(self, tmp_path: Path):
+        context = _context_with_other_files()
+        assert check_release_plan_exclusivity(tmp_path, context) == []
+
+    def test_single_other_file(self, tmp_path: Path):
+        context = _context_with_other_files("code/API_definitions/qod.yaml")
+        findings = check_release_plan_exclusivity(tmp_path, context)
+        assert len(findings) == 1
+        assert findings[0]["level"] == "error"
+        assert findings[0]["engine_rule"] == "check-release-plan-exclusivity"
+        assert findings[0]["path"] == "release-plan.yaml"
+        assert "code/API_definitions/qod.yaml" in findings[0]["message"]
+        assert "1 other file" in findings[0]["message"]
+
+    def test_multiple_other_files(self, tmp_path: Path):
+        files = [
+            "code/API_definitions/qod.yaml",
+            "code/Test_definitions/qod.feature",
+            "CHANGELOG.md",
+        ]
+        context = _context_with_other_files(*files)
+        findings = check_release_plan_exclusivity(tmp_path, context)
+        assert len(findings) == 1
+        assert "3 other file" in findings[0]["message"]
+        for f in files:
+            assert f in findings[0]["message"]
+
+    def test_preview_truncation_over_ten_files(self, tmp_path: Path):
+        files = [f"file-{i}.yaml" for i in range(15)]
+        context = _context_with_other_files(*files)
+        findings = check_release_plan_exclusivity(tmp_path, context)
+        assert len(findings) == 1
+        msg = findings[0]["message"]
+        # First 10 files listed, remaining count summarised
+        for f in files[:10]:
+            assert f in msg
+        assert "and 5 more" in msg
+
+    def test_default_context_has_no_other_files(self, tmp_path: Path):
+        # Ensures _make_context() default does not trigger the rule.
+        assert check_release_plan_exclusivity(tmp_path, _make_context()) == []
+
+
+# ---------------------------------------------------------------------------
+# TestCheckDeclaredDependencyTagsExist (P-023)
+# ---------------------------------------------------------------------------
+
+
+def _context_with_dependency_changes(
+    *,
+    commonalities_release_changed: bool = False,
+    icm_release_changed: bool = False,
+    commonalities_tag_exists: bool | None = None,
+    icm_tag_exists: bool | None = None,
+) -> ValidationContext:
+    base = _make_context()
+    return ValidationContext(
+        repository=base.repository,
+        branch_type=base.branch_type,
+        trigger_type=base.trigger_type,
+        profile=base.profile,
+        stage=base.stage,
+        target_release_type=base.target_release_type,
+        commonalities_release=base.commonalities_release,
+        commonalities_version=base.commonalities_version,
+        icm_release=base.icm_release,
+        base_ref=base.base_ref,
+        is_release_review_pr=base.is_release_review_pr,
+        release_plan_changed=True,
+        pr_number=base.pr_number,
+        apis=base.apis,
+        workflow_run_url=base.workflow_run_url,
+        tooling_ref=base.tooling_ref,
+        commonalities_release_changed=commonalities_release_changed,
+        icm_release_changed=icm_release_changed,
+        commonalities_tag_exists=commonalities_tag_exists,
+        icm_tag_exists=icm_tag_exists,
+    )
+
+
+def _write_release_plan_with_dependencies(
+    tmp_path: Path,
+    commonalities: str | None = "r4.2",
+    icm: str | None = "r2.3",
+) -> None:
+    plan = _make_plan()
+    deps: dict = {}
+    if commonalities is not None:
+        deps["commonalities_release"] = commonalities
+    if icm is not None:
+        # Schema field name (not the shorter context attribute 'icm_release').
+        deps["identity_consent_management_release"] = icm
+    plan["dependencies"] = deps
+    _write_release_plan(tmp_path, plan)
+
+
+class TestCheckDeclaredDependencyTagsExist:
+    def test_no_release_plan(self, tmp_path: Path):
+        context = _context_with_dependency_changes(
+            commonalities_release_changed=True,
+            commonalities_tag_exists=False,
+        )
+        assert check_declared_dependency_tags_exist(tmp_path, context) == []
+
+    def test_no_dependency_changed(self, tmp_path: Path):
+        _write_release_plan_with_dependencies(tmp_path)
+        # Default context: no *_release_changed flags set
+        assert check_declared_dependency_tags_exist(tmp_path, _make_context()) == []
+
+    def test_commonalities_changed_tag_exists(self, tmp_path: Path):
+        _write_release_plan_with_dependencies(tmp_path)
+        context = _context_with_dependency_changes(
+            commonalities_release_changed=True,
+            commonalities_tag_exists=True,
+        )
+        assert check_declared_dependency_tags_exist(tmp_path, context) == []
+
+    def test_commonalities_changed_tag_missing(self, tmp_path: Path):
+        _write_release_plan_with_dependencies(tmp_path, commonalities="r9.9")
+        context = _context_with_dependency_changes(
+            commonalities_release_changed=True,
+            commonalities_tag_exists=False,
+        )
+        findings = check_declared_dependency_tags_exist(tmp_path, context)
+        assert len(findings) == 1
+        assert findings[0]["level"] == "error"
+        assert findings[0]["engine_rule"] == "check-declared-dependency-tags-exist"
+        assert "r9.9" in findings[0]["message"]
+        assert "camaraproject/Commonalities" in findings[0]["message"]
+
+    def test_commonalities_changed_lookup_failed(self, tmp_path: Path):
+        _write_release_plan_with_dependencies(tmp_path, commonalities="r4.2")
+        context = _context_with_dependency_changes(
+            commonalities_release_changed=True,
+            commonalities_tag_exists=None,
+        )
+        findings = check_declared_dependency_tags_exist(tmp_path, context)
+        assert len(findings) == 1
+        assert findings[0]["level"] == "warn"
+        assert "r4.2" in findings[0]["message"]
+        assert "Could not verify" in findings[0]["message"]
+
+    def test_commonalities_changed_declaration_removed(self, tmp_path: Path):
+        # Dependency declaration was advanced to null — not P-023's
+        # concern (P-009 / schema handles this).
+        _write_release_plan_with_dependencies(tmp_path, commonalities=None)
+        context = _context_with_dependency_changes(
+            commonalities_release_changed=True,
+            commonalities_tag_exists=None,
+        )
+        assert check_declared_dependency_tags_exist(tmp_path, context) == []
+
+    def test_icm_changed_tag_missing(self, tmp_path: Path):
+        _write_release_plan_with_dependencies(tmp_path, icm="r9.9")
+        context = _context_with_dependency_changes(
+            icm_release_changed=True,
+            icm_tag_exists=False,
+        )
+        findings = check_declared_dependency_tags_exist(tmp_path, context)
+        assert len(findings) == 1
+        assert findings[0]["level"] == "error"
+        assert "r9.9" in findings[0]["message"]
+        assert "camaraproject/IdentityAndConsentManagement" in findings[0]["message"]
+
+    def test_both_changed_both_missing(self, tmp_path: Path):
+        _write_release_plan_with_dependencies(
+            tmp_path, commonalities="r9.9", icm="r9.9"
+        )
+        context = _context_with_dependency_changes(
+            commonalities_release_changed=True,
+            commonalities_tag_exists=False,
+            icm_release_changed=True,
+            icm_tag_exists=False,
+        )
+        findings = check_declared_dependency_tags_exist(tmp_path, context)
+        assert len(findings) == 2
+        messages = "\n".join(f["message"] for f in findings)
+        assert "commonalities_release" in messages
+        assert "icm_release" in messages
+
+    def test_icm_changed_commonalities_unchanged(self, tmp_path: Path):
+        # ICM-only advance: commonalities_release unchanged, icm_release changed.
+        # Only ICM tag checked.
+        _write_release_plan_with_dependencies(
+            tmp_path, commonalities="r4.2", icm="r9.9"
+        )
+        context = _context_with_dependency_changes(
+            commonalities_release_changed=False,
+            icm_release_changed=True,
+            icm_tag_exists=False,
+        )
+        findings = check_declared_dependency_tags_exist(tmp_path, context)
+        assert len(findings) == 1
+        assert "icm_release" in findings[0]["message"]

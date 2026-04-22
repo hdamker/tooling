@@ -123,6 +123,24 @@ class ValidationContext:
     workflow_run_url: str
     tooling_ref: str
 
+    # Release-plan validation context (Step 6b outputs; defaults when absent)
+    # commonalities_release_changed / icm_release_changed: True when the
+    # respective dependency declaration differs between base and head.
+    # release_plan_check_only: True when a Commonalities advance is detected —
+    # orchestrator skips Spectral/gherkin engines and post-filter keeps only
+    # rules in the release-plan-validation group.  ICM advance does NOT set
+    # this flag (no common files to sync).
+    # *_tag_exists: tri-state — True (confirmed), False (confirmed missing),
+    # None (check did not run or API lookup failed).
+    # non_release_plan_files_changed: files co-changed alongside release-plan.yaml
+    # in the current PR diff (P-022 exclusivity input).
+    commonalities_release_changed: bool = False
+    icm_release_changed: bool = False
+    release_plan_check_only: bool = False
+    commonalities_tag_exists: Optional[bool] = None
+    icm_tag_exists: Optional[bool] = None
+    non_release_plan_files_changed: Tuple[str, ...] = ()
+
     def to_dict(self) -> dict:
         """Serialize to dict with all keys present.
 
@@ -264,6 +282,12 @@ def build_validation_context(
     workflow_run_url: str = "",
     tooling_ref: str = "",
     commonalities_version: Optional[str] = None,
+    release_plan_check_only: bool = False,
+    commonalities_release_changed: bool = False,
+    icm_release_changed: bool = False,
+    commonalities_tag_exists: Optional[bool] = None,
+    icm_tag_exists: Optional[bool] = None,
+    non_release_plan_files_changed: Tuple[str, ...] = (),
 ) -> ValidationContext:
     """Assemble the unified validation context.
 
@@ -348,4 +372,10 @@ def build_validation_context(
         apis=api_contexts,
         workflow_run_url=workflow_run_url,
         tooling_ref=tooling_ref,
+        commonalities_release_changed=commonalities_release_changed,
+        icm_release_changed=icm_release_changed,
+        release_plan_check_only=release_plan_check_only,
+        commonalities_tag_exists=commonalities_tag_exists,
+        icm_tag_exists=icm_tag_exists,
+        non_release_plan_files_changed=non_release_plan_files_changed,
     )

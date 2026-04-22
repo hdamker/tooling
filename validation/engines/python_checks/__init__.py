@@ -12,7 +12,12 @@ from .filename_checks import check_filename_kebab_case, check_filename_matches_a
 from .metadata_checks import check_commonalities_version
 from .readme_checks import check_readme_placeholder_removal
 from .common_cache_checks import check_common_cache_sync
-from .release_plan_checks import check_orphan_api_definitions, check_release_plan_semantics
+from .release_plan_checks import (
+    check_declared_dependency_tags_exist,
+    check_orphan_api_definitions,
+    check_release_plan_exclusivity,
+    check_release_plan_semantics,
+)
 from .release_review_checks import check_release_review_file_restriction
 from .subscription_checks import (
     check_cloudevent_via_ref,
@@ -57,6 +62,8 @@ CHECKS: list[CheckDescriptor] = [
     CheckDescriptor("check-release-review-file-restriction", CheckScope.REPO, check_release_review_file_restriction),
     CheckDescriptor("check-orphan-api-definitions", CheckScope.REPO, check_orphan_api_definitions),
     CheckDescriptor("check-common-cache-sync", CheckScope.REPO, check_common_cache_sync),
+    CheckDescriptor("check-release-plan-exclusivity", CheckScope.REPO, check_release_plan_exclusivity),
+    CheckDescriptor("check-declared-dependency-tags-exist", CheckScope.REPO, check_declared_dependency_tags_exist),
 ]
 
 __all__ = ["CHECKS", "CheckDescriptor", "CheckScope"]

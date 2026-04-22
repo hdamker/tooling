@@ -101,6 +101,12 @@ def _make_context(**overrides):
         "apis": (),
         "workflow_run_url": "https://github.com/example/runs/1",
         "tooling_ref": "abc123",
+        "release_plan_check_only": False,
+        "commonalities_release_changed": False,
+        "icm_release_changed": False,
+        "commonalities_tag_exists": None,
+        "icm_tag_exists": None,
+        "non_release_plan_files_changed": (),
     }
     defaults.update(overrides)
     ctx = MagicMock()
@@ -337,6 +343,57 @@ class TestRunEngines:
 
         assert "error:" in statuses["yamllint"]
         assert "finding(s)" in statuses["spectral"]
+
+    @patch("validation.orchestrator.run_gherkin_engine")
+    @patch("validation.orchestrator.run_python_engine")
+    @patch("validation.orchestrator.run_spectral_engine")
+    @patch("validation.orchestrator.run_yamllint_engine")
+    def test_release_plan_check_only_skips_spectral_and_gherkin(
+        self, mock_yamllint, mock_spectral, mock_python, mock_gherkin, paths
+    ):
+        """On a Commonalities advance (release_plan_check_only=True):
+        yamllint + Python still run; Spectral and gherkin are skipped
+        with explicit status messages.
+        """
+        mock_yamllint.return_value = []
+        mock_python.return_value = []
+        context = _make_context(release_plan_check_only=True)
+
+        findings, statuses = run_engines(
+            Path("/repo"), paths, context,
+            test_files=[Path("some.feature")],
+        )
+
+        assert mock_yamllint.called
+        assert mock_python.called
+        assert not mock_spectral.called
+        assert not mock_gherkin.called
+        assert "release-plan-check-only" in statuses["spectral"]
+        assert "release-plan-check-only" in statuses["gherkin"]
+
+    @patch("validation.orchestrator.run_gherkin_engine")
+    @patch("validation.orchestrator.run_python_engine")
+    @patch("validation.orchestrator.run_spectral_engine")
+    @patch("validation.orchestrator.run_yamllint_engine")
+    def test_release_plan_check_only_false_runs_all_engines(
+        self, mock_yamllint, mock_spectral, mock_python, mock_gherkin, paths
+    ):
+        """Default context (release_plan_check_only=False) runs all engines."""
+        mock_yamllint.return_value = []
+        mock_spectral.return_value = []
+        mock_python.return_value = []
+        mock_gherkin.return_value = []
+        context = _make_context(release_plan_check_only=False)
+
+        findings, statuses = run_engines(
+            Path("/repo"), paths, context,
+            test_files=[Path("some.feature")],
+        )
+
+        assert mock_yamllint.called
+        assert mock_spectral.called
+        assert mock_python.called
+        assert mock_gherkin.called
 
 
 # ---------------------------------------------------------------------------

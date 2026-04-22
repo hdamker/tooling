@@ -239,6 +239,11 @@ class TestValidationContextToDict:
             "commonalities_version", "icm_release",
             "base_ref", "is_release_review_pr", "release_plan_changed",
             "pr_number", "apis", "workflow_run_url", "tooling_ref",
+            # Release-plan validation context (Step 6b outputs)
+            "commonalities_release_changed", "icm_release_changed",
+            "release_plan_check_only",
+            "commonalities_tag_exists", "icm_tag_exists",
+            "non_release_plan_files_changed",
         }
         assert set(d.keys()) == expected_keys
 

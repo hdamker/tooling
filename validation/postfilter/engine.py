@@ -263,6 +263,21 @@ def run_post_filter(
             if not is_applicable(rule.applicability, context, api_ctx):
                 continue
 
+            # Release-plan-check-only gate — when a Commonalities dependency
+            # declaration has advanced in this PR, the code/common/ cache
+            # and on-disk content are stale relative to the declared tag.
+            # Running version-context-dependent rules against that stale
+            # content produces misleading findings (DEC-029 exclusivity
+            # principle).  Only rules that explicitly gate on
+            # release_plan_changed: true survive — those are release-plan
+            # validation rules (P-009, P-022, P-023) which check the
+            # release-plan.yaml content itself, not the consumption side.
+            if (
+                context.release_plan_check_only
+                and rule.applicability.get("release_plan_changed") is not True
+            ):
+                continue
+
             # Conditional level resolution (skip for identity-only entries)
             if rule.conditional_level is not None:
                 resolved_level = resolve_level(rule, context, api_ctx)

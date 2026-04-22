@@ -152,11 +152,143 @@ jobs:
         id: detect-changes
         if: github.event_name == 'pull_request'
         run: |
+          # Emit the list of non-release-plan files touched in this PR so
+          # P-022 (exclusivity) can report them.  Empty JSON array when
+          # release-plan.yaml is the only change.
           if git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- release-plan.yaml | grep -q .; then
             echo "release_plan_changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "release_plan_changed=false" >> "$GITHUB_OUTPUT"
           fi
+
+          OTHER_FILES=$(
+            git diff --name-only "origin/${{ github.base_ref }}...HEAD" \
+              | grep -v '^release-plan\.yaml$' \
+              | python3 -c 'import json, sys; print(json.dumps([line for line in sys.stdin.read().splitlines() if line]))'
+          )
+          echo "non_release_plan_files_changed=${OTHER_FILES}" >> "$GITHUB_OUTPUT"
+
+      # ── Step 6b: Resolve dependency changes and declared-tag existence
+      #
+      # When release-plan.yaml changed, diff base vs head to detect which
+      # dependency declarations advanced (commonalities_release,
+      # identity_consent_management_release).  For each advanced tag,
+      # look it up in the source repository via the GitHub API.  Emit a
+      # tri-state existence flag: 'true' / 'false' / '' (empty = lookup
+      # failed or skipped).  release_plan_check_only is set only when
+      # commonalities_release advances — that's the dependency whose
+      # content (code/common/*) is stale under the new ruleset, which is
+      # why the orchestrator suppresses the Spectral + gherkin engines.
+      # ICM has no common files to sync, so an ICM advance does not
+      # trigger engine suppression.
+      - name: Resolve dependency changes and declared tags
+        id: detect-deps
+        if: >-
+          github.event_name == 'pull_request'
+          && steps.detect-changes.outputs.release_plan_changed == 'true'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { execSync } = require('child_process');
+            const fs = require('fs');
+            const path = require('path');
+            // js-yaml is bundled with actions/github-script v9+ and its
+            // dependencies; require by name.
+            const yaml = require('js-yaml');
+
+            function readYamlAtRef(ref, filePath) {
+              // Returns the parsed YAML at origin/<ref>:<filePath>, or
+              // {} when the file is absent at that ref.
+              try {
+                const raw = execSync(
+                  `git show origin/${ref}:${filePath}`,
+                  { stdio: ['ignore', 'pipe', 'pipe'] }
+                ).toString('utf8');
+                const parsed = yaml.load(raw);
+                return parsed && typeof parsed === 'object' ? parsed : {};
+              } catch (err) {
+                return {};
+              }
+            }
+
+            function readYamlAtPath(filePath) {
+              try {
+                const raw = fs.readFileSync(filePath, 'utf8');
+                const parsed = yaml.load(raw);
+                return parsed && typeof parsed === 'object' ? parsed : {};
+              } catch (err) {
+                return {};
+              }
+            }
+
+            function getDep(plan, field) {
+              const deps = (plan && plan.dependencies) || {};
+              return deps[field] || null;
+            }
+
+            const baseRef = context.payload.pull_request.base.ref;
+            const planPath = 'release-plan.yaml';
+            const basePlan = readYamlAtRef(baseRef, planPath);
+            const headPlan = readYamlAtPath(
+              path.join(process.env.GITHUB_WORKSPACE, planPath)
+            );
+
+            const DEPENDENCIES = [
+              {
+                field: 'commonalities_release',
+                sourceRepo: 'camaraproject/Commonalities',
+                changedOutput: 'commonalities_release_changed',
+                tagExistsOutput: 'commonalities_tag_exists',
+              },
+              {
+                field: 'identity_consent_management_release',
+                sourceRepo: 'camaraproject/IdentityAndConsentManagement',
+                changedOutput: 'icm_release_changed',
+                tagExistsOutput: 'icm_tag_exists',
+              },
+            ];
+
+            async function tagExists(owner, repo, tag) {
+              try {
+                await github.rest.git.getRef({
+                  owner, repo, ref: `tags/${tag}`,
+                });
+                return 'true';
+              } catch (err) {
+                if (err && err.status === 404) return 'false';
+                // 5xx, rate-limit, network, auth issues — let P-023
+                // surface a warn-level finding rather than blocking.
+                core.warning(
+                  `Tag lookup for ${owner}/${repo}@${tag} failed: ${err.message}`
+                );
+                return '';
+              }
+            }
+
+            let commonalitiesChanged = false;
+            for (const dep of DEPENDENCIES) {
+              const baseTag = getDep(basePlan, dep.field);
+              const headTag = getDep(headPlan, dep.field);
+              const changed = baseTag !== headTag;
+              core.setOutput(dep.changedOutput, changed ? 'true' : 'false');
+
+              if (changed && dep.field === 'commonalities_release') {
+                commonalitiesChanged = true;
+              }
+
+              if (changed && headTag) {
+                const [owner, repo] = dep.sourceRepo.split('/');
+                const exists = await tagExists(owner, repo, headTag);
+                core.setOutput(dep.tagExistsOutput, exists);
+              } else {
+                core.setOutput(dep.tagExistsOutput, '');
+              }
+            }
+
+            core.setOutput(
+              'release_plan_check_only',
+              commonalitiesChanged ? 'true' : 'false'
+            );
 
       # ── Step 7: Run validation (shared action) ─────────────────────
       #
@@ -171,6 +303,12 @@ jobs:
           mode: ${{ inputs.mode }}
           profile: ${{ inputs.profile }}
           release_plan_changed: ${{ steps.detect-changes.outputs.release_plan_changed || 'false' }}
+          release_plan_check_only: ${{ steps.detect-deps.outputs.release_plan_check_only || 'false' }}
+          commonalities_release_changed: ${{ steps.detect-deps.outputs.commonalities_release_changed || 'false' }}
+          icm_release_changed: ${{ steps.detect-deps.outputs.icm_release_changed || 'false' }}
+          commonalities_tag_exists: ${{ steps.detect-deps.outputs.commonalities_tag_exists || '' }}
+          icm_tag_exists: ${{ steps.detect-deps.outputs.icm_tag_exists || '' }}
+          non_release_plan_files_changed: ${{ steps.detect-changes.outputs.non_release_plan_files_changed || '[]' }}
           tooling_ref: ${{ steps.resolve-ref.outputs.tooling_checkout_ref }}
 
       # ── Step 8: Mint validation app token (PR only) ──────────────
