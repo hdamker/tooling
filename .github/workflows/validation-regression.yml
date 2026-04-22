@@ -1,4 +1,4 @@
-# CAMARA Validation Framework — Regression Runner (canary)
+# CAMARA Validation Framework — Validation Regression (canary)
 #
 # Auto-dispatches validation/scripts/regression_runner.py against
 # camaraproject/ReleaseTest on every push to validation-framework, so
@@ -16,7 +16,7 @@
 #
 # See validation/docs/regression-testing.md for the full picture.
 
-name: Regression Runner
+name: Validation Regression
 
 on:
   push:
@@ -26,11 +26,11 @@ on:
       - 'shared-actions/**'
       - 'tooling_lib/**'
       - '.github/workflows/validation.yml'
-      - '.github/workflows/regression-runner.yml'
+      - '.github/workflows/validation-regression.yml'
   workflow_dispatch:
 
 concurrency:
-  group: regression-runner-${{ github.ref }}
+  group: validation-regression-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -72,22 +72,22 @@ jobs:
           python3 validation/scripts/regression_runner.py \
             --repo camaraproject/ReleaseTest \
             --branch-filter 'regression/*' \
-            --summary-file regression-summary.md
+            --summary-file validation-regression-summary.md
 
       - name: Publish summary
         if: always()
         run: |
-          if [ -f regression-summary.md ]; then
-            cat regression-summary.md >> "$GITHUB_STEP_SUMMARY"
+          if [ -f validation-regression-summary.md ]; then
+            cat validation-regression-summary.md >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "::warning::regression-summary.md not produced (runner likely failed before writing)"
+            echo "::warning::validation-regression-summary.md not produced (runner likely failed before writing)"
           fi
 
       - name: Upload summary artifact
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: regression-runner-summary
-          path: regression-summary.md
+          name: validation-regression-summary
+          path: validation-regression-summary.md
           if-no-files-found: warn
           retention-days: 30
