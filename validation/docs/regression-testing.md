@@ -189,7 +189,7 @@ points at.
 The regression runner fires automatically on every push to
 `validation-framework` that touches `validation/**`, `shared-actions/**`,
 or the workflow itself. The workflow lives at
-[.github/workflows/regression-runner.yml](../../.github/workflows/regression-runner.yml)
+[.github/workflows/validation-regression.yml](../../.github/workflows/validation-regression.yml)
 on this same branch (so it only exists where it matters and does not
 run on `main`). Manual dispatch is available via the Actions UI for
 fix-then-verify cycles.
@@ -201,7 +201,7 @@ persisted PAT.
 
 Results surface in three places: (1) the workflow's own pass/fail
 status in the Actions tab on `camaraproject/tooling`, (2) the markdown
-summary on the run's summary page, and (3) the `regression-runner-summary`
+summary on the run's summary page, and (3) the `validation-regression-summary`
 artifact attached to each run (30-day retention).
 
 ### Verify all canary branches

@@ -1,0 +1,94 @@
+# CAMARA Release Automation — Regression (canary)
+#
+# Sibling to validation-regression.yml. Exercises the release-automation-reusable.yml
+# workflow on camaraproject/ReleaseTest via a /create-snapshot + /discard-snapshot
+# round-trip, catching runtime bugs in the RA workflow and shared actions
+# that the Validation Regression canary cannot reach.
+#
+# Round-trip only — never merges the Release Review PR, never creates a
+# draft build, never calls /publish-release. No real tags or releases
+# are produced. Full manual E2E remains the gate for publish-side changes
+# before @v1-rc moves.
+#
+# Cross-repo access is provided by a short-lived camara-validation
+# GitHub App installation token scoped to camaraproject/ReleaseTest.
+# Permissions used: issues:write (post slash-command comment),
+# actions:write (poll caller runs), pull_requests:write (verify Release
+# Review PR presence). The App has no contents:write — and none is needed.
+# The default GITHUB_TOKEN is only used for the initial checkout.
+
+name: Release Automation Regression
+
+on:
+  push:
+    branches: [validation-framework]
+    paths:
+      - '.github/workflows/release-automation-reusable.yml'
+      - '.github/workflows/release-automation-regression.yml'
+      - 'release_automation/**'
+      - 'shared-actions/**'
+      - 'tooling_lib/**'
+  workflow_dispatch:
+
+concurrency:
+  group: release-automation-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    name: RA regression canary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tooling
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install runner dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pyyaml
+
+      - name: Mint validation app token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.VALIDATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.VALIDATION_APP_PRIVATE_KEY }}
+          owner: camaraproject
+          repositories: ReleaseTest
+
+      - name: Run RA regression runner
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          python3 release_automation/scripts/regression_runner.py \
+            --repo camaraproject/ReleaseTest \
+            --release-issue 90 \
+            --summary-file release-automation-regression-summary.md
+
+      - name: Publish summary
+        if: always()
+        run: |
+          if [ -f release-automation-regression-summary.md ]; then
+            cat release-automation-regression-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::release-automation-regression-summary.md not produced (runner likely failed before writing)"
+          fi
+
+      - name: Upload summary artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-automation-regression-summary
+          path: release-automation-regression-summary.md
+          if-no-files-found: warn
+          retention-days: 30
