@@ -106,31 +106,33 @@ jobs:
                 return;
               }
 
-              // Parse slash commands
-              if (body.startsWith('/create-snapshot')) {
+              // Parse slash commands. Each pattern anchors at start and
+              // requires either whitespace or end-of-string after the
+              // command so /create-snapshotextra does not match /create-snapshot.
+              if (/^\/create-snapshot(?:\s|$)/.test(body)) {
                 triggerType = 'slash_command';
                 command = 'create-snapshot';
-                commandArgs = body.replace('/create-snapshot', '').trim();
+                commandArgs = body.replace(/^\/create-snapshot/, '').trim();
                 shouldContinue = 'true';
-              } else if (body.startsWith('/discard-snapshot')) {
+              } else if (/^\/discard-snapshot(?:\s|$)/.test(body)) {
                 triggerType = 'slash_command';
                 command = 'discard-snapshot';
-                commandArgs = body.replace('/discard-snapshot', '').trim();
+                commandArgs = body.replace(/^\/discard-snapshot/, '').trim();
                 shouldContinue = 'true';
-              } else if (body.startsWith('/delete-draft')) {
+              } else if (/^\/delete-draft(?:\s|$)/.test(body)) {
                 triggerType = 'slash_command';
                 command = 'delete-draft';
-                commandArgs = body.replace('/delete-draft', '').trim();
+                commandArgs = body.replace(/^\/delete-draft/, '').trim();
                 shouldContinue = 'true';
-              } else if (body.startsWith('/sync-issue')) {
+              } else if (/^\/sync-issue(?:\s|$)/.test(body)) {
                 triggerType = 'slash_command';
                 command = 'sync-issue';
-                commandArgs = body.replace('/sync-issue', '').trim();
+                commandArgs = body.replace(/^\/sync-issue/, '').trim();
                 shouldContinue = 'true';
-              } else if (body.startsWith('/publish-release')) {
+              } else if (/^\/publish-release(?:\s|$)/.test(body)) {
                 triggerType = 'slash_command';
                 command = 'publish-release';
-                commandArgs = body.replace('/publish-release', '').trim();
+                commandArgs = body.replace(/^\/publish-release/, '').trim();
                 // Parse --confirm <tag> argument
                 const confirmMatch = commandArgs.match(/--confirm\s+(\S+)/);
                 confirmTag = confirmMatch ? confirmMatch[1] : '';
@@ -1686,16 +1688,22 @@ jobs:
           git commit -m "chore: post-release sync for ${RELEASE_TAG}"
           git push origin "$SYNC_BRANCH"
 
-          # Create PR — capture failure as sync_status=failed
-          if PR_URL=$(gh pr create \
-            --title "Release Automation: Post-release sync (${RELEASE_TAG})" \
-            --body "Automated post-release sync PR for ${RELEASE_TAG}.
+          # Create PR — capture failure as sync_status=failed.
+          # Body assembled via heredoc so the markdown has no
+          # YAML-run-block indent leaking into the rendered PR description.
+          PR_BODY=$(cat <<EOF
+          Automated post-release sync PR for ${RELEASE_TAG}.
 
           This PR updates:
           - README.md Release Information section (copied from release tag)
           - CHANGELOG for the release cycle
 
-          Created by release automation workflow." \
+          Created by release automation workflow.
+          EOF
+          )
+          if PR_URL=$(gh pr create \
+            --title "Release Automation: Post-release sync (${RELEASE_TAG})" \
+            --body "$PR_BODY" \
             --head "$SYNC_BRANCH" \
             --base main); then
 
@@ -2263,10 +2271,10 @@ jobs:
             git commit -m "chore: sync common files from Commonalities ${COMMONALITIES_RELEASE}"
             git push origin "$SYNC_BRANCH"
 
-            # Create PR
-            PR_URL=$(gh pr create \
-              --title "Sync common files from Commonalities ${COMMONALITIES_RELEASE}" \
-              --body "Automated sync of \`code/common/\` files from \`camaraproject/Commonalities\` at release tag \`${COMMONALITIES_RELEASE}\`.
+            # Create PR. Body assembled via heredoc so markdown has no
+            # YAML-run-block indent leaking into the rendered PR description.
+            PR_BODY=$(cat <<EOF
+          Automated sync of \`code/common/\` files from \`camaraproject/Commonalities\` at release tag \`${COMMONALITIES_RELEASE}\`.
 
           This PR was created by release automation because the cached Commonalities files were out of sync with the declared dependency in \`release-plan.yaml\`.
 
@@ -2274,7 +2282,12 @@ jobs:
           - Updated files in \`code/common/\` to match Commonalities ${COMMONALITIES_RELEASE}
           - Added/updated \`.sync-manifest.yaml\` with file integrity hashes
 
-          **Action required:** Review and merge this PR. The \`/create-snapshot\` command will be blocked until common files are in sync." \
+          **Action required:** Review and merge this PR. The \`/create-snapshot\` command will be blocked until common files are in sync.
+          EOF
+          )
+            PR_URL=$(gh pr create \
+              --title "Sync common files from Commonalities ${COMMONALITIES_RELEASE}" \
+              --body "$PR_BODY" \
               --head "$SYNC_BRANCH" \
               --base main) || {
               echo "::error::Failed to create sync PR"
