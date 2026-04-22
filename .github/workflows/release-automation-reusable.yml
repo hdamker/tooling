@@ -760,28 +760,41 @@ jobs:
             console.log('Checking user permission...');
             let userPermission;
 
-            try {
-              const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                username: user
-              });
+            // Trusted CI bot identities. App bots don't register as collaborators,
+            // so getCollaboratorPermissionLevel returns 'none' for them; the write
+            // intent is established by the App installation on the target repo.
+            // Currently used by the Release Automation Regression canary in
+            // camaraproject/tooling, which posts slash commands as
+            // camara-validation[bot].
+            const TRUSTED_BOT_USERS = new Set(['camara-validation[bot]']);
 
-              userPermission = permission.permission;
-              console.log(`User permission: ${userPermission}`);
+            if (TRUSTED_BOT_USERS.has(user)) {
+              userPermission = 'write';
+              console.log(`User ${user} is a trusted CI bot; treating as write`);
+            } else {
+              try {
+                const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  username: user
+                });
 
-              const hasPermission = ['admin', 'maintain', 'write'].includes(userPermission);
-
-              if (!hasPermission) {
+                userPermission = permission.permission;
+                console.log(`User permission: ${userPermission}`);
+              } catch (error) {
+                console.log(`Permission check failed: ${error.message}`);
+                // If we can't check permission, deny by default
                 core.setOutput('allowed', 'false');
-                core.setOutput('error_message', `You must have write access or higher to run release commands. Your current permission: ${userPermission}`);
+                core.setOutput('error_message', `Failed to verify permissions: ${error.message}`);
                 return;
               }
-            } catch (error) {
-              console.log(`Permission check failed: ${error.message}`);
-              // If we can't check permission, deny by default
+            }
+
+            const hasPermission = ['admin', 'maintain', 'write'].includes(userPermission);
+
+            if (!hasPermission) {
               core.setOutput('allowed', 'false');
-              core.setOutput('error_message', `Failed to verify permissions: ${error.message}`);
+              core.setOutput('error_message', `You must have write access or higher to run release commands. Your current permission: ${userPermission}`);
               return;
             }
 
