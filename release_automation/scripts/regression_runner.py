@@ -635,9 +635,10 @@ def render_markdown(reports: list[PhaseReport], repo: str, issue_number: int) ->
     """Render a phase-by-phase PASS/FAIL summary as markdown."""
     passed = sum(1 for r in reports if r.passed)
     total = len(reports)
+    verdict = "PASS" if passed == total and total > 0 else "FAIL"
     lines: list[str] = []
     lines.append(
-        f"## Release Automation Regression — {passed}/{total} phases PASS"
+        f"## Release Automation Regression — {verdict}: {passed} of {total} phases passed"
     )
     lines.append("")
     lines.append(f"- target repo: `{repo}`")
@@ -789,7 +790,7 @@ def main(argv: list[str] | None = None) -> int:
     passed = sum(1 for r in reports if r.passed)
     total = len(reports)
     print(
-        f"{'PASS' if all_passed else 'FAIL'}: {passed}/{total} phases",
+        f"{'PASS' if all_passed else 'FAIL'}: {passed} of {total} phases passed",
         file=sys.stderr,
     )
 

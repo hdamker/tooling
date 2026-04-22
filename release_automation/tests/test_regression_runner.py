@@ -539,10 +539,9 @@ class TestRenderMarkdown:
             ),
         ]
         out = render_markdown(reports, "o/r", 90)
-        assert "2/2 phases PASS" in out
+        assert "PASS: 2 of 2 phases passed" in out
         assert "`o/r`" in out
         assert "#90" in out
-        assert "PASS" in out
         assert "https://x/1" in out
         # Successful phases with a run_url still emit a detail section.
         assert "conclusion: `success`" in out
@@ -552,9 +551,18 @@ class TestRenderMarkdown:
             PhaseReport(name="pre-check", passed=False, detail="state=planned"),
         ]
         out = render_markdown(reports, "o/r", 90)
-        assert "0/1 phases PASS" in out
-        assert "FAIL" in out
+        assert "FAIL: 0 of 1 phases passed" in out
         assert "state=planned" in out
+
+    def test_partial_pass_header_says_fail(self):
+        reports = [
+            PhaseReport(name="pre-check", passed=True, detail="ok"),
+            PhaseReport(name="verify", passed=False, detail="state unchanged"),
+        ]
+        out = render_markdown(reports, "o/r", 90)
+        # 1/2 is not overall PASS — header must say FAIL, not leave it ambiguous.
+        assert "FAIL: 1 of 2 phases passed" in out
+        assert "PASS: " not in out.split("\n")[0]
 
     def test_pipe_escape_in_detail(self):
         reports = [
