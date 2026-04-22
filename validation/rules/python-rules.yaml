@@ -218,12 +218,15 @@
 # `properties`. The $ref-only and `allOf: [{$ref: ...}]` forms have no
 # top-level `properties` and are not flagged.
 # Gated to Commonalities >=r4.2, where CAMARA_event_common.yaml exists.
+# Skipped on Release Review PRs, where inline CloudEvent is the expected
+# output of bundling rather than drift.
 - id: P-020
   engine: python
   engine_rule: check-cloudevent-via-ref
   applicability:
     api_pattern: [explicit-subscription, implicit-subscription]
     commonalities_release: ">=r4.2"
+    is_release_review_pr: false
   conditional_level:
     default: warn
   hint: >-
