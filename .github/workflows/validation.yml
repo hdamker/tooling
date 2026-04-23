@@ -181,114 +181,23 @@ jobs:
       # why the orchestrator suppresses the Spectral + gherkin engines.
       # ICM has no common files to sync, so an ICM advance does not
       # trigger engine suppression.
+      - name: Install pyyaml for dependency resolver
+        if: >-
+          github.event_name == 'pull_request'
+          && steps.detect-changes.outputs.release_plan_changed == 'true'
+        run: pip install --quiet pyyaml==6.0.3
+
       - name: Resolve dependency changes and declared tags
         id: detect-deps
         if: >-
           github.event_name == 'pull_request'
           && steps.detect-changes.outputs.release_plan_changed == 'true'
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const { execSync } = require('child_process');
-            const fs = require('fs');
-            const path = require('path');
-            // js-yaml is bundled with actions/github-script v9+ and its
-            // dependencies; require by name.
-            const yaml = require('js-yaml');
-
-            function readYamlAtRef(ref, filePath) {
-              // Returns the parsed YAML at origin/<ref>:<filePath>, or
-              // {} when the file is absent at that ref.
-              try {
-                const raw = execSync(
-                  `git show origin/${ref}:${filePath}`,
-                  { stdio: ['ignore', 'pipe', 'pipe'] }
-                ).toString('utf8');
-                const parsed = yaml.load(raw);
-                return parsed && typeof parsed === 'object' ? parsed : {};
-              } catch (err) {
-                return {};
-              }
-            }
-
-            function readYamlAtPath(filePath) {
-              try {
-                const raw = fs.readFileSync(filePath, 'utf8');
-                const parsed = yaml.load(raw);
-                return parsed && typeof parsed === 'object' ? parsed : {};
-              } catch (err) {
-                return {};
-              }
-            }
-
-            function getDep(plan, field) {
-              const deps = (plan && plan.dependencies) || {};
-              return deps[field] || null;
-            }
-
-            const baseRef = context.payload.pull_request.base.ref;
-            const planPath = 'release-plan.yaml';
-            const basePlan = readYamlAtRef(baseRef, planPath);
-            const headPlan = readYamlAtPath(
-              path.join(process.env.GITHUB_WORKSPACE, planPath)
-            );
-
-            const DEPENDENCIES = [
-              {
-                field: 'commonalities_release',
-                sourceRepo: 'camaraproject/Commonalities',
-                changedOutput: 'commonalities_release_changed',
-                tagExistsOutput: 'commonalities_tag_exists',
-              },
-              {
-                field: 'identity_consent_management_release',
-                sourceRepo: 'camaraproject/IdentityAndConsentManagement',
-                changedOutput: 'icm_release_changed',
-                tagExistsOutput: 'icm_tag_exists',
-              },
-            ];
-
-            async function tagExists(owner, repo, tag) {
-              try {
-                await github.rest.git.getRef({
-                  owner, repo, ref: `tags/${tag}`,
-                });
-                return 'true';
-              } catch (err) {
-                if (err && err.status === 404) return 'false';
-                // 5xx, rate-limit, network, auth issues — let P-023
-                // surface a warn-level finding rather than blocking.
-                core.warning(
-                  `Tag lookup for ${owner}/${repo}@${tag} failed: ${err.message}`
-                );
-                return '';
-              }
-            }
-
-            let commonalitiesChanged = false;
-            for (const dep of DEPENDENCIES) {
-              const baseTag = getDep(basePlan, dep.field);
-              const headTag = getDep(headPlan, dep.field);
-              const changed = baseTag !== headTag;
-              core.setOutput(dep.changedOutput, changed ? 'true' : 'false');
-
-              if (changed && dep.field === 'commonalities_release') {
-                commonalitiesChanged = true;
-              }
-
-              if (changed && headTag) {
-                const [owner, repo] = dep.sourceRepo.split('/');
-                const exists = await tagExists(owner, repo, headTag);
-                core.setOutput(dep.tagExistsOutput, exists);
-              } else {
-                core.setOutput(dep.tagExistsOutput, '');
-              }
-            }
-
-            core.setOutput(
-              'release_plan_check_only',
-              commonalitiesChanged ? 'true' : 'false'
-            );
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .tooling/validation/scripts/resolve-release-plan-deps.py \
+            --base-ref "${{ github.base_ref }}" \
+            --workspace "${GITHUB_WORKSPACE}"
 
       # ── Step 7: Run validation (shared action) ─────────────────────
       #
