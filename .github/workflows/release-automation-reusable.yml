@@ -109,30 +109,40 @@ jobs:
               // Parse slash commands. Each pattern anchors at start and
               // requires either whitespace or end-of-string after the
               // command so /create-snapshotextra does not match /create-snapshot.
+              //
+              // commandArgs is clamped to what follows on the SAME line as
+              // the command. Anything after the first newline is treated
+              // as free-form context and ignored. No command consumes more
+              // than a single-token reason or a '--confirm <tag>' flag, so
+              // this also blocks shell-injection via backticks in multi-line
+              // bodies when command_args flows into downstream shell steps
+              // (e.g. post-result's Resolve Reason).
+              const firstLine = body.split(/\r?\n/, 1)[0];
+
               if (/^\/create-snapshot(?:\s|$)/.test(body)) {
                 triggerType = 'slash_command';
                 command = 'create-snapshot';
-                commandArgs = body.replace(/^\/create-snapshot/, '').trim();
+                commandArgs = '';  // no arguments accepted
                 shouldContinue = 'true';
               } else if (/^\/discard-snapshot(?:\s|$)/.test(body)) {
                 triggerType = 'slash_command';
                 command = 'discard-snapshot';
-                commandArgs = body.replace(/^\/discard-snapshot/, '').trim();
+                commandArgs = firstLine.replace(/^\/discard-snapshot/, '').trim();
                 shouldContinue = 'true';
               } else if (/^\/delete-draft(?:\s|$)/.test(body)) {
                 triggerType = 'slash_command';
                 command = 'delete-draft';
-                commandArgs = body.replace(/^\/delete-draft/, '').trim();
+                commandArgs = firstLine.replace(/^\/delete-draft/, '').trim();
                 shouldContinue = 'true';
               } else if (/^\/sync-issue(?:\s|$)/.test(body)) {
                 triggerType = 'slash_command';
                 command = 'sync-issue';
-                commandArgs = body.replace(/^\/sync-issue/, '').trim();
+                commandArgs = '';  // no arguments accepted
                 shouldContinue = 'true';
               } else if (/^\/publish-release(?:\s|$)/.test(body)) {
                 triggerType = 'slash_command';
                 command = 'publish-release';
-                commandArgs = body.replace(/^\/publish-release/, '').trim();
+                commandArgs = firstLine.replace(/^\/publish-release/, '').trim();
                 // Parse --confirm <tag> argument
                 const confirmMatch = commandArgs.match(/--confirm\s+(\S+)/);
                 confirmTag = confirmMatch ? confirmMatch[1] : '';
