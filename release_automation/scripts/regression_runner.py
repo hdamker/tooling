@@ -11,11 +11,19 @@ runner at validation/scripts/regression_runner.py.
 
 Usage:
     python3 regression_runner.py --repo camaraproject/ReleaseTest \\
-        --release-issue 90 \\
         [--summary-file release-automation-regression-summary.md]
 
+    # Override discovery (useful when iterating locally):
+    python3 regression_runner.py --repo camaraproject/ReleaseTest --release-issue 93
+
     # Dry-run (no comments posted, no runs polled):
-    python3 regression_runner.py --repo ... --release-issue 90 --dry-run
+    python3 regression_runner.py --repo camaraproject/ReleaseTest --dry-run
+
+The Release Issue is auto-discovered on --repo via the 'release-issue' label
+and the workflow-owned body marker. Release Issues cycle per release — each
+publish closes the current one and opens a fresh issue for the next cycle —
+so a hardcoded number would break after the first cycle. Pass --release-issue
+only to override discovery (local testing, or recovering from a split state).
 
 Exit codes:
     0  all phases PASS
@@ -66,6 +74,13 @@ logger = logging.getLogger("ra_regression_runner")
 # Python modules. If the workflow changes the prefix, update this line.
 # Source of truth: .github/workflows/release-automation-reusable.yml
 _STATE_LABEL_PREFIX = "release-state:"
+
+# Release Issue discovery markers — matched by find_release_issue().
+# Both the label and the body marker must be present; the combination
+# distinguishes the workflow-owned Release Issue from any other issue
+# a maintainer might tag as 'release-issue'.
+_RELEASE_ISSUE_LABEL = "release-issue"
+_RELEASE_ISSUE_BODY_MARKER = "<!-- release-automation:workflow-owned -->"
 
 # Caller workflow filename on the target test repo. Each release-plan
 # repo copies this caller from the shared template.
@@ -180,6 +195,50 @@ def poll_run(
 # ---------------------------------------------------------------------------
 # Issue / branch / PR readers
 # ---------------------------------------------------------------------------
+
+
+def find_release_issue(repo: str) -> int:
+    """Discover the single workflow-owned Release Issue on *repo*.
+
+    Release Issues cycle per release (closed on publish, a fresh one opened
+    for the next cycle), so the canary must discover the current one rather
+    than relying on a static number. A match requires both:
+
+    - the `release-issue` label (server-side filter), and
+    - the workflow-owned body marker (client-side check).
+
+    Returns the issue number. Raises InfrastructureError if zero matches
+    (no active release cycle on the target repo) or more than one match
+    (corrupted state that automation must not silently collapse).
+    """
+    data = gh(
+        [
+            "api", f"repos/{repo}/issues",
+            "-X", "GET",
+            "-f", "state=open",
+            "-f", f"labels={_RELEASE_ISSUE_LABEL}",
+            "--paginate",
+            "--jq", "[.[] | select(.pull_request == null) | {number, body}]",
+        ],
+        parse_json=True,
+    )
+    matching = [
+        item["number"]
+        for item in data
+        if _RELEASE_ISSUE_BODY_MARKER in (item.get("body") or "")
+    ]
+    if len(matching) == 0:
+        raise InfrastructureError(
+            f"{repo}: no open Release Issue found "
+            f"(need label '{_RELEASE_ISSUE_LABEL}' AND body marker "
+            f"'{_RELEASE_ISSUE_BODY_MARKER}')"
+        )
+    if len(matching) > 1:
+        nums = ", ".join(f"#{n}" for n in sorted(matching))
+        raise InfrastructureError(
+            f"{repo}: multiple open Release Issues found: {nums}"
+        )
+    return matching[0]
 
 
 def read_state_label(labels: list[dict[str, Any]]) -> str | None:
@@ -686,8 +745,9 @@ def _build_argparser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--release-issue",
         type=int,
-        required=True,
-        help="issue number of the persistent Release Issue on --repo",
+        help="issue number of the current Release Issue on --repo; "
+             "if omitted, auto-discovered via label + body marker "
+             "(the normal path — Release Issues cycle per release)",
     )
     parser.add_argument(
         "--summary-file",
@@ -772,8 +832,15 @@ def main(argv: list[str] | None = None) -> int:
     _setup_logging(args.verbose)
 
     try:
+        issue_number = args.release_issue
+        if issue_number is None:
+            issue_number = find_release_issue(args.repo)
+            logger.info(
+                "discovered Release Issue: #%d on %s", issue_number, args.repo
+            )
+
         reports = run_phases(
-            args.repo, args.release_issue,
+            args.repo, issue_number,
             poll_timeout=args.poll_timeout,
             dry_run=args.dry_run,
         )
@@ -781,7 +848,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"INFRA: {exc}", file=sys.stderr)
         return 2
 
-    markdown = render_markdown(reports, args.repo, args.release_issue)
+    markdown = render_markdown(reports, args.repo, issue_number)
     print(markdown)
     if args.summary_file:
         args.summary_file.write_text(markdown, encoding="utf-8")
