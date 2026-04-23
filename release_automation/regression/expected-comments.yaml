@@ -1,0 +1,18 @@
+# Expected leading title of the final bot comment on the Release Issue
+# when each slash command completes on the green path.
+#
+# This is a test assertion, not a captured artifact. When the RA workflow
+# changes the template used for a given command, edit this file alongside
+# the workflow change.
+#
+# Titles are taken from the first line of
+#   release_automation/templates/bot_messages/<template>.md
+# and truncated at the first dynamic portion (after the static prefix).
+# A comment matches if its first non-blank line starts with the prefix.
+#
+# Source templates:
+#   snapshot_created.md   -> "**✅ Snapshot created — State: `snapshot-active`**"
+#   snapshot_discarded.md -> "**🗑️ Snapshot discarded — State: `planned`**"
+
+create-snapshot: "**✅ Snapshot created"
+discard-snapshot: "**🗑️ Snapshot discarded"

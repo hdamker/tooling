@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import subprocess
 import sys
 import time
@@ -47,6 +48,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+try:
+    import yaml
+except ImportError:
+    print("Error: pyyaml package is required. Install with: pip install pyyaml")
+    sys.exit(2)
 
 # Package-relative imports so unit tests can patch at the right boundary.
 # The release_automation/ package is already on sys.path when invoked via
@@ -57,7 +64,6 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from config import (  # noqa: E402
-    LABEL_RELEASE_MGMT_BOT,
     RELEASE_REVIEW_BRANCH_PREFIX,
     SNAPSHOT_BRANCH_PREFIX,
     STATE_PLANNED,
@@ -368,6 +374,143 @@ def release_review_pr_for_issue(repo: str, issue_number: int) -> int | None:
 
 
 # ---------------------------------------------------------------------------
+# Expected comment-title config + bot-comment lookup
+# ---------------------------------------------------------------------------
+
+
+# Bot logins that post replies during RA workflow runs. The validation App
+# token posts via GITHUB_TOKEN inside the workflow (github-actions[bot]) for
+# most replies; the RA app mints its own token for some paths.
+_RA_BOT_LOGINS = frozenset({
+    "github-actions[bot]",
+    "camara-release-automation[bot]",
+})
+
+
+def _expected_comments_path() -> Path:
+    """Path to the expected-comment-titles config file in this worktree."""
+    return _HERE.parent / "regression" / "expected-comments.yaml"
+
+
+def load_expected_comment_titles(path: Path | None = None) -> dict[str, str]:
+    """Load the per-command expected final-bot-comment title prefixes.
+
+    The config is human-edited alongside RA workflow template changes. Format:
+        create-snapshot: "**✅ Snapshot created"
+        discard-snapshot: "**🗑️ Snapshot discarded"
+    """
+    config_path = path or _expected_comments_path()
+    if not config_path.exists():
+        raise InfrastructureError(
+            f"expected-comments config not found at {config_path}"
+        )
+    try:
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise InfrastructureError(
+            f"{config_path}: YAML parse error: {exc}"
+        ) from exc
+    if not isinstance(data, dict):
+        raise InfrastructureError(
+            f"{config_path}: expected a YAML mapping at the root"
+        )
+    for key, val in data.items():
+        if not isinstance(key, str) or not isinstance(val, str):
+            raise InfrastructureError(
+                f"{config_path}: all keys and values must be strings "
+                f"(offender: {key!r}={val!r})"
+            )
+    return data
+
+
+def _first_nonblank_line(body: str) -> str:
+    """Return the first non-blank line of *body*, stripped of trailing space."""
+    for line in body.splitlines():
+        if line.strip():
+            return line.rstrip()
+    return ""
+
+
+def _match_comment_title(body: str, expected_prefix: str) -> bool:
+    """True iff the first non-blank line of *body* starts with *expected_prefix*."""
+    return _first_nonblank_line(body).startswith(expected_prefix)
+
+
+def fetch_last_bot_comment(
+    repo: str, issue_number: int, since: datetime,
+) -> dict[str, Any] | None:
+    """Return the newest RA-bot-authored comment on *issue_number* since *since*.
+
+    Scans comments via the `gh api` issues/comments endpoint. Filters
+    client-side to authors in `_RA_BOT_LOGINS` whose `created_at` >= *since*.
+    Returns the comment dict (with `body`, `created_at`, `user.login`, `html_url`)
+    or None if no matching comment is found.
+    """
+    data = gh(
+        [
+            "api", f"repos/{repo}/issues/{issue_number}/comments",
+            "--paginate",
+            "--jq", "[.[] | {body, created_at, user: {login: .user.login}, html_url}]",
+        ],
+        parse_json=True,
+    )
+    candidates: list[dict[str, Any]] = []
+    for item in data:
+        user = (item.get("user") or {}).get("login")
+        if user not in _RA_BOT_LOGINS:
+            continue
+        try:
+            created = _iso_to_dt(item["created_at"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        if created >= since:
+            candidates.append(item)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: c["created_at"], reverse=True)
+    return candidates[0]
+
+
+# ---------------------------------------------------------------------------
+# Command-comment attribution
+# ---------------------------------------------------------------------------
+
+
+def _canary_run_url() -> str | None:
+    """Compose this workflow run's URL from the Actions-provided env vars.
+
+    Returns None when any required var is missing (e.g. running locally).
+    """
+    server = os.environ.get("GITHUB_SERVER_URL")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    if server and repo and run_id:
+        return f"{server}/{repo}/actions/runs/{run_id}"
+    return None
+
+
+def _build_command_body(command: str, purpose: str) -> str:
+    """Build a slash-command comment body carrying canary attribution.
+
+    The first line is the bare slash command (so the caller's `if:` filter
+    and the reusable workflow's word-boundary parser both accept it). A blank
+    line and an attribution paragraph follow.
+    """
+    run_url = _canary_run_url()
+    if run_url:
+        attribution = (
+            f"Posted by the Release Automation Regression canary in "
+            f"`camaraproject/tooling` (run: {run_url})."
+        )
+    else:
+        attribution = (
+            "Posted by the Release Automation Regression canary in "
+            "`camaraproject/tooling`."
+        )
+    return f"{command}\n\n{attribution} {purpose}".rstrip() + "\n"
+
+
+# ---------------------------------------------------------------------------
 # Fire + run discovery
 # ---------------------------------------------------------------------------
 
@@ -476,34 +619,61 @@ def phase_pre_check(repo: str, issue_number: int) -> PhaseReport:
     return report
 
 
-def phase_fire_create_snapshot(
+_CREATE_SNAPSHOT_PURPOSE = (
+    "This is an automated CI smoke test. A `/discard-snapshot` will follow "
+    "to restore state; no release will be published."
+)
+
+_DISCARD_SNAPSHOT_PURPOSE = (
+    "Completing the CI smoke test round-trip started above."
+)
+
+
+def _fire_command_phase(
     repo: str,
     issue_number: int,
     *,
+    command: str,
+    purpose: str,
+    expected_title: str,
     poll_timeout: int,
     dry_run: bool,
 ) -> tuple[PhaseReport, str | None]:
-    """Phase 2 — post /create-snapshot, discover the caller run, poll it.
+    """Post a slash command, poll the triggered run, check the final bot reply.
 
-    Returns (report, run_id). run_id is None on dry-run or failure.
+    Fire phase passes iff:
+    1. The comment was posted + a caller run was discovered;
+    2. The caller run reached `completed` with `conclusion == 'success'`;
+    3. A bot comment appeared on the Release Issue after we posted, and its
+       first non-blank line starts with `expected_title`.
+
+    Rejection (e.g. cache-stale, permission-denied) surfaces as the caller
+    bot posting `command_rejected` as its final reply — case (3) fails with
+    the actual title in the detail. Internal failures (snapshot_failed,
+    internal_error templates) fail the same way.
+
+    Returns (report, run_id). run_id is None on dry-run or early fail.
     """
-    report = PhaseReport(name="fire /create-snapshot")
+    report = PhaseReport(name=f"fire {command}")
     if dry_run:
         report.passed = True
-        report.detail = f"DRY-RUN: would post /create-snapshot on {repo}#{issue_number}"
+        report.detail = (
+            f"DRY-RUN: would post attributed `{command}` on {repo}#{issue_number}"
+        )
         return report, None
 
+    body = _build_command_body(command, purpose)
     marker = datetime.now(timezone.utc).replace(microsecond=0)
     try:
-        post_issue_comment(repo, issue_number, "/create-snapshot")
-        logger.info("posted /create-snapshot on %s#%s; polling for run", repo, issue_number)
+        post_issue_comment(repo, issue_number, body)
+        logger.info("posted %s on %s#%s; polling for caller run", command, repo, issue_number)
         run = find_recent_caller_run(
             repo,
             workflow_file=_RA_CALLER_WORKFLOW,
             since=marker,
         )
     except InfrastructureError as exc:
-        report.detail = f"could not fire /create-snapshot: {exc}"
+        report.detail = f"could not fire {command}: {exc}"
         return report, None
 
     run_id = str(run["databaseId"])
@@ -518,15 +688,63 @@ def phase_fire_create_snapshot(
         return report, run_id
 
     report.run_conclusion = conclusion
-    if conclusion == "success":
+    if conclusion != "success":
+        report.detail = (
+            f"caller run concluded {conclusion!r} — RA workflow failed "
+            f"(skipping comment check)"
+        )
+        return report, run_id
+
+    # Caller concluded success. That alone doesn't mean the command ran
+    # (rejection skips downstream jobs but still concludes success). Check
+    # the RA bot's final reply on the issue to disambiguate.
+    try:
+        last_comment = fetch_last_bot_comment(repo, issue_number, marker)
+    except InfrastructureError as exc:
+        report.detail = f"could not read bot reply: {exc}"
+        return report, run_id
+
+    if last_comment is None:
+        report.detail = (
+            "no bot reply received on the Release Issue since firing "
+            f"{command}; see caller run"
+        )
+        return report, run_id
+
+    actual_title = _first_nonblank_line(last_comment.get("body") or "")
+    if _match_comment_title(last_comment.get("body") or "", expected_title):
         report.passed = True
-        report.detail = f"run completed with conclusion={conclusion!r}"
+        report.detail = f"bot reply matches expected — `{actual_title}`"
     else:
         report.detail = (
-            f"run concluded {conclusion!r} (expected 'success') — "
-            f"see run for details"
+            f"bot reply does not match expected: got `{actual_title}`, "
+            f"expected prefix `{expected_title}`"
+        )
+        report.extras.append(
+            f"comment: {last_comment.get('html_url', '<no url>')}"
         )
     return report, run_id
+
+
+def phase_fire_create_snapshot(
+    repo: str,
+    issue_number: int,
+    *,
+    poll_timeout: int,
+    dry_run: bool,
+    expected_titles: dict[str, str] | None = None,
+) -> tuple[PhaseReport, str | None]:
+    """Phase 2 — post /create-snapshot, discover the caller run, poll, check reply."""
+    titles = expected_titles or load_expected_comment_titles()
+    expected = titles.get("create-snapshot", "")
+    return _fire_command_phase(
+        repo, issue_number,
+        command="/create-snapshot",
+        purpose=_CREATE_SNAPSHOT_PURPOSE,
+        expected_title=expected,
+        poll_timeout=poll_timeout,
+        dry_run=dry_run,
+    )
 
 
 def phase_verify_post_create(repo: str, issue_number: int) -> tuple[PhaseReport, str | None]:
@@ -591,48 +809,19 @@ def phase_fire_discard_snapshot(
     *,
     poll_timeout: int,
     dry_run: bool,
+    expected_titles: dict[str, str] | None = None,
 ) -> tuple[PhaseReport, str | None]:
-    """Phase 4 — post /discard-snapshot, discover the caller run, poll it."""
-    report = PhaseReport(name="fire /discard-snapshot")
-    if dry_run:
-        report.passed = True
-        report.detail = f"DRY-RUN: would post /discard-snapshot on {repo}#{issue_number}"
-        return report, None
-
-    marker = datetime.now(timezone.utc).replace(microsecond=0)
-    try:
-        post_issue_comment(repo, issue_number, "/discard-snapshot")
-        logger.info("posted /discard-snapshot on %s#%s; polling for run", repo, issue_number)
-        run = find_recent_caller_run(
-            repo,
-            workflow_file=_RA_CALLER_WORKFLOW,
-            since=marker,
-        )
-    except InfrastructureError as exc:
-        report.detail = f"could not fire /discard-snapshot: {exc}"
-        return report, None
-
-    run_id = str(run["databaseId"])
-    report.run_url = run.get("url")
-
-    try:
-        conclusion = poll_run(
-            repo, run_id, interval=15, timeout=poll_timeout
-        )
-    except InfrastructureError as exc:
-        report.detail = f"run {run_id} polling error: {exc}"
-        return report, run_id
-
-    report.run_conclusion = conclusion
-    if conclusion == "success":
-        report.passed = True
-        report.detail = f"run completed with conclusion={conclusion!r}"
-    else:
-        report.detail = (
-            f"run concluded {conclusion!r} (expected 'success') — "
-            f"see run for details"
-        )
-    return report, run_id
+    """Phase 4 — post /discard-snapshot, discover the caller run, poll, check reply."""
+    titles = expected_titles or load_expected_comment_titles()
+    expected = titles.get("discard-snapshot", "")
+    return _fire_command_phase(
+        repo, issue_number,
+        command="/discard-snapshot",
+        purpose=_DISCARD_SNAPSHOT_PURPOSE,
+        expected_title=expected,
+        poll_timeout=poll_timeout,
+        dry_run=dry_run,
+    )
 
 
 def phase_verify_post_discard(
