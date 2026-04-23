@@ -41,6 +41,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -423,17 +424,29 @@ def load_expected_comment_titles(path: Path | None = None) -> dict[str, str]:
     return data
 
 
-def _first_nonblank_line(body: str) -> str:
-    """Return the first non-blank line of *body*, stripped of trailing space."""
+_HTML_COMMENT_RE = re.compile(r"^\s*<!--.*?-->\s*$")
+
+
+def _first_visible_line(body: str) -> str:
+    """Return the first non-blank, non-HTML-comment line of *body*.
+
+    The RA bot's post-bot-comment action prepends an HTML-comment marker
+    (e.g. `<!-- release-bot:r1.2 -->`) to every reply for programmatic
+    identity. That marker isn't user-visible and isn't the title; skip it
+    when locating the title line.
+    """
     for line in body.splitlines():
-        if line.strip():
-            return line.rstrip()
+        stripped = line.strip()
+        if not stripped or _HTML_COMMENT_RE.match(line):
+            continue
+        return line.rstrip()
     return ""
 
 
 def _match_comment_title(body: str, expected_prefix: str) -> bool:
-    """True iff the first non-blank line of *body* starts with *expected_prefix*."""
-    return _first_nonblank_line(body).startswith(expected_prefix)
+    """True iff the first visible (non-blank, non-HTML-comment) line of *body*
+    starts with *expected_prefix*."""
+    return _first_visible_line(body).startswith(expected_prefix)
 
 
 def fetch_last_bot_comment(
@@ -711,7 +724,7 @@ def _fire_command_phase(
         )
         return report, run_id
 
-    actual_title = _first_nonblank_line(last_comment.get("body") or "")
+    actual_title = _first_visible_line(last_comment.get("body") or "")
     if _match_comment_title(last_comment.get("body") or "", expected_title):
         report.passed = True
         report.detail = f"bot reply matches expected — `{actual_title}`"
