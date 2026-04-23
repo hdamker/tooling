@@ -18,10 +18,17 @@ import pytest
 from release_automation.scripts.regression_runner import (
     InfrastructureError,
     PhaseReport,
+    _build_command_body,
+    _canary_run_url,
+    _first_nonblank_line,
     _iso_to_dt,
+    _match_comment_title,
+    fetch_last_bot_comment,
     find_recent_caller_run,
     find_release_issue,
     get_release_issue_state,
+    load_expected_comment_titles,
+    phase_fire_create_snapshot,
     phase_pre_check,
     phase_verify_post_create,
     phase_verify_post_discard,
@@ -680,3 +687,397 @@ class TestFindReleaseIssue:
             return_value=issues,
         ):
             assert find_release_issue("o/r") == 93
+
+
+# ---------------------------------------------------------------------------
+# load_expected_comment_titles + _match_comment_title
+# ---------------------------------------------------------------------------
+
+
+class TestLoadExpectedCommentTitles:
+    def test_loads_committed_config(self):
+        # Smoke-test against the real file in the repo — covers both
+        # "file exists" and "both commands present". If the workflow
+        # changes the template titles, this test starts failing and
+        # flags that the config must be updated too.
+        titles = load_expected_comment_titles()
+        assert "create-snapshot" in titles
+        assert "discard-snapshot" in titles
+        assert titles["create-snapshot"].startswith("**")
+        assert titles["discard-snapshot"].startswith("**")
+
+    def test_missing_file_raises(self, tmp_path):
+        missing = tmp_path / "does-not-exist.yaml"
+        with pytest.raises(InfrastructureError, match="not found"):
+            load_expected_comment_titles(missing)
+
+    def test_root_must_be_mapping(self, tmp_path):
+        bad = tmp_path / "bad.yaml"
+        bad.write_text("- not-a-mapping\n", encoding="utf-8")
+        with pytest.raises(InfrastructureError, match="mapping"):
+            load_expected_comment_titles(bad)
+
+    def test_values_must_be_strings(self, tmp_path):
+        bad = tmp_path / "bad.yaml"
+        bad.write_text("create-snapshot: 42\n", encoding="utf-8")
+        with pytest.raises(InfrastructureError, match="strings"):
+            load_expected_comment_titles(bad)
+
+
+class TestMatchCommentTitle:
+    def test_exact_prefix_match(self):
+        body = "**✅ Snapshot created — State: `snapshot-active`**\nmore text"
+        assert _match_comment_title(body, "**✅ Snapshot created")
+
+    def test_prefix_with_dynamic_tail(self):
+        body = "**✅ Snapshot created — State: `snapshot-active`**\n..."
+        # The prefix matches; the rest of the line is dynamic.
+        assert _match_comment_title(body, "**✅ Snapshot created")
+
+    def test_non_match(self):
+        body = "**❌ Command rejected: `/create-snapshot` — State: `planned`**"
+        assert not _match_comment_title(body, "**✅ Snapshot created")
+
+    def test_skips_leading_blank_lines(self):
+        body = "\n\n**🗑️ Snapshot discarded — State: `planned`**\nmore"
+        assert _match_comment_title(body, "**🗑️ Snapshot discarded")
+
+    def test_empty_body(self):
+        assert not _match_comment_title("", "**✅ Snapshot created")
+        assert _first_nonblank_line("") == ""
+
+
+# ---------------------------------------------------------------------------
+# fetch_last_bot_comment
+# ---------------------------------------------------------------------------
+
+
+def _comment(at: str, login: str, body: str = "", html_url: str = "https://x/c") -> dict:
+    return {
+        "body": body,
+        "created_at": at,
+        "user": {"login": login},
+        "html_url": html_url,
+    }
+
+
+class TestFetchLastBotComment:
+    def test_returns_newest_bot_comment(self):
+        since = datetime(2026, 4, 23, 10, 0, 0, tzinfo=timezone.utc)
+        comments = [
+            _comment("2026-04-23T10:00:30Z", "github-actions[bot]", "first"),
+            _comment("2026-04-23T10:01:00Z", "camara-release-automation[bot]", "second"),
+            _comment("2026-04-23T10:00:45Z", "hdamker", "human comment ignored"),
+        ]
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            return_value=comments,
+        ):
+            result = fetch_last_bot_comment("o/r", 90, since)
+        assert result is not None
+        assert result["user"]["login"] == "camara-release-automation[bot]"
+        assert result["body"] == "second"
+
+    def test_ignores_comments_before_since(self):
+        since = datetime(2026, 4, 23, 10, 0, 0, tzinfo=timezone.utc)
+        comments = [
+            _comment("2026-04-23T09:59:00Z", "github-actions[bot]", "too old"),
+        ]
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            return_value=comments,
+        ):
+            result = fetch_last_bot_comment("o/r", 90, since)
+        assert result is None
+
+    def test_returns_none_when_only_human_comments(self):
+        since = datetime(2026, 4, 23, 10, 0, 0, tzinfo=timezone.utc)
+        comments = [
+            _comment("2026-04-23T10:05:00Z", "hdamker", "human"),
+        ]
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            return_value=comments,
+        ):
+            result = fetch_last_bot_comment("o/r", 90, since)
+        assert result is None
+
+    def test_handles_malformed_timestamps(self):
+        since = datetime(2026, 4, 23, 10, 0, 0, tzinfo=timezone.utc)
+        comments = [
+            _comment("not-a-timestamp", "github-actions[bot]", "broken"),
+            _comment("2026-04-23T10:05:00Z", "github-actions[bot]", "good"),
+        ]
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            return_value=comments,
+        ):
+            result = fetch_last_bot_comment("o/r", 90, since)
+        assert result is not None
+        assert result["body"] == "good"
+
+
+# ---------------------------------------------------------------------------
+# _build_command_body + _canary_run_url
+# ---------------------------------------------------------------------------
+
+
+class TestCanaryRunURL:
+    def test_composes_url_when_all_env_present(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "camaraproject/tooling")
+        monkeypatch.setenv("GITHUB_RUN_ID", "12345")
+        assert _canary_run_url() == "https://github.com/camaraproject/tooling/actions/runs/12345"
+
+    def test_none_when_any_missing(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_SERVER_URL", raising=False)
+        monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+        monkeypatch.setenv("GITHUB_RUN_ID", "1")
+        assert _canary_run_url() is None
+
+
+class TestBuildCommandBody:
+    def test_starts_with_command_and_blank_line(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_SERVER_URL", raising=False)
+        body = _build_command_body("/create-snapshot", "Smoke test.")
+        lines = body.split("\n")
+        assert lines[0] == "/create-snapshot"
+        assert lines[1] == ""
+        # The caller's startsWith check requires the first line to be exactly
+        # the command; the second line must be blank or whitespace so the
+        # reusable workflow's regex `/^\/cmd(?:\s|$)/` also matches.
+        assert body.startswith("/create-snapshot\n")
+
+    def test_attribution_includes_run_url_when_in_ci(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "camaraproject/tooling")
+        monkeypatch.setenv("GITHUB_RUN_ID", "99")
+        body = _build_command_body("/create-snapshot", "Smoke test.")
+        assert "(run: https://github.com/camaraproject/tooling/actions/runs/99)" in body
+        assert "Release Automation Regression canary" in body
+
+    def test_attribution_without_run_url_outside_ci(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_SERVER_URL", raising=False)
+        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+        monkeypatch.delenv("GITHUB_RUN_ID", raising=False)
+        body = _build_command_body("/create-snapshot", "Smoke test.")
+        assert "run:" not in body  # URL clause omitted
+        assert "Release Automation Regression canary" in body
+        assert "Smoke test." in body
+
+
+# ---------------------------------------------------------------------------
+# phase_fire_create_snapshot — failure classes after the polish
+# ---------------------------------------------------------------------------
+
+
+_EXPECTED = {
+    "create-snapshot": "**✅ Snapshot created",
+    "discard-snapshot": "**🗑️ Snapshot discarded",
+}
+
+
+def _gh_router(responses):
+    """Dispatch `gh(args, ...)` calls to responses keyed by a substring pattern."""
+    def router(args, parse_json=False):  # noqa: ARG001
+        joined = " ".join(args)
+        for pattern, value in responses:
+            if pattern in joined:
+                if callable(value):
+                    return value(joined)
+                return value
+        raise AssertionError(f"no mock configured for: {joined}")
+    return router
+
+
+class TestPhaseFireCreateSnapshotPolished:
+    def test_pass_on_matching_bot_reply(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_SERVER_URL", raising=False)
+        # Deterministic: skip polling delays and caller-run discovery delay.
+        monkeypatch.setattr(
+            "release_automation.scripts.regression_runner.time.sleep",
+            lambda *_a, **_k: None,
+        )
+        comments = [
+            _comment(
+                "2026-04-23T05:00:30Z",
+                "github-actions[bot]",
+                "**✅ Snapshot created — State: `snapshot-active`**\nRelease PR: #94",
+            ),
+        ]
+        caller_run = {
+            "databaseId": 999,
+            "createdAt": "2026-04-23T05:00:10Z",
+            "status": "completed",
+            "conclusion": "success",
+            "url": "https://x/run/999",
+        }
+        responses = [
+            ("issue comment", ""),  # post_issue_comment
+            ("run list", [caller_run]),  # find_recent_caller_run
+            ("run view", {"status": "completed", "conclusion": "success"}),  # poll_run
+            ("issues/90/comments", comments),  # fetch_last_bot_comment
+        ]
+        # find_recent_caller_run uses an internal loop; force its `since`
+        # to be in the past so any created_at compares pass.
+        monkeypatch.setattr(
+            "release_automation.scripts.regression_runner.datetime",
+            _FixedDatetime("2026-04-23T04:59:00Z"),
+        )
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            side_effect=_gh_router(responses),
+        ):
+            report, run_id = phase_fire_create_snapshot(
+                "camaraproject/ReleaseTest", 90,
+                poll_timeout=10, dry_run=False,
+                expected_titles=_EXPECTED,
+            )
+        assert report.passed is True
+        assert "Snapshot created" in report.detail
+        assert run_id == "999"
+
+    def test_fail_on_rejection_reply(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_SERVER_URL", raising=False)
+        monkeypatch.setattr(
+            "release_automation.scripts.regression_runner.time.sleep",
+            lambda *_a, **_k: None,
+        )
+        comments = [
+            _comment(
+                "2026-04-23T05:00:30Z",
+                "github-actions[bot]",
+                "**❌ Command rejected: `/create-snapshot` — State: `planned`**\nYour current permission: none",
+            ),
+        ]
+        caller_run = {
+            "databaseId": 999,
+            "createdAt": "2026-04-23T05:00:10Z",
+            "status": "completed",
+            "conclusion": "success",
+            "url": "https://x/run/999",
+        }
+        responses = [
+            ("issue comment", ""),
+            ("run list", [caller_run]),
+            ("run view", {"status": "completed", "conclusion": "success"}),
+            ("issues/90/comments", comments),
+        ]
+        monkeypatch.setattr(
+            "release_automation.scripts.regression_runner.datetime",
+            _FixedDatetime("2026-04-23T04:59:00Z"),
+        )
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            side_effect=_gh_router(responses),
+        ):
+            report, run_id = phase_fire_create_snapshot(
+                "camaraproject/ReleaseTest", 90,
+                poll_timeout=10, dry_run=False,
+                expected_titles=_EXPECTED,
+            )
+        assert report.passed is False
+        assert "Command rejected" in report.detail
+        assert run_id == "999"
+        # Extras carry the comment URL for operator diagnosis.
+        assert any("https://x/c" in extra for extra in report.extras)
+
+    def test_fail_when_caller_run_failed(self, monkeypatch):
+        monkeypatch.setattr(
+            "release_automation.scripts.regression_runner.time.sleep",
+            lambda *_a, **_k: None,
+        )
+        caller_run = {
+            "databaseId": 999,
+            "createdAt": "2026-04-23T05:00:10Z",
+            "status": "completed",
+            "conclusion": "failure",
+            "url": "https://x/run/999",
+        }
+        responses = [
+            ("issue comment", ""),
+            ("run list", [caller_run]),
+            ("run view", {"status": "completed", "conclusion": "failure"}),
+        ]
+        monkeypatch.setattr(
+            "release_automation.scripts.regression_runner.datetime",
+            _FixedDatetime("2026-04-23T04:59:00Z"),
+        )
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            side_effect=_gh_router(responses),
+        ):
+            report, _ = phase_fire_create_snapshot(
+                "camaraproject/ReleaseTest", 90,
+                poll_timeout=10, dry_run=False,
+                expected_titles=_EXPECTED,
+            )
+        assert report.passed is False
+        assert "failure" in report.detail
+        assert "RA workflow failed" in report.detail
+
+    def test_fail_when_no_bot_reply(self, monkeypatch):
+        monkeypatch.setattr(
+            "release_automation.scripts.regression_runner.time.sleep",
+            lambda *_a, **_k: None,
+        )
+        caller_run = {
+            "databaseId": 999,
+            "createdAt": "2026-04-23T05:00:10Z",
+            "status": "completed",
+            "conclusion": "success",
+            "url": "https://x/run/999",
+        }
+        responses = [
+            ("issue comment", ""),
+            ("run list", [caller_run]),
+            ("run view", {"status": "completed", "conclusion": "success"}),
+            ("issues/90/comments", []),  # no comments at all
+        ]
+        monkeypatch.setattr(
+            "release_automation.scripts.regression_runner.datetime",
+            _FixedDatetime("2026-04-23T04:59:00Z"),
+        )
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            side_effect=_gh_router(responses),
+        ):
+            report, _ = phase_fire_create_snapshot(
+                "camaraproject/ReleaseTest", 90,
+                poll_timeout=10, dry_run=False,
+                expected_titles=_EXPECTED,
+            )
+        assert report.passed is False
+        assert "no bot reply" in report.detail
+
+    def test_dry_run_skips_everything(self):
+        report, run_id = phase_fire_create_snapshot(
+            "camaraproject/ReleaseTest", 90,
+            poll_timeout=10, dry_run=True,
+            expected_titles=_EXPECTED,
+        )
+        assert report.passed is True
+        assert "DRY-RUN" in report.detail
+        assert run_id is None
+
+
+class _FixedDatetime:
+    """Freeze `datetime.now(...)` to a specific UTC moment; everything else passes through.
+
+    Used to make the fire-phase's UTC marker deterministic in tests so the
+    run-discovery and comment-lookup filters compare against a known point.
+    """
+
+    def __init__(self, iso: str):
+        self._now = datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        )
+
+    def now(self, tz=None):
+        return self._now if tz is None else self._now.astimezone(tz)
+
+    def strptime(self, *args, **kwargs):
+        return datetime.strptime(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(datetime, name)
