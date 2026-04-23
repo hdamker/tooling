@@ -20,6 +20,7 @@ from release_automation.scripts.regression_runner import (
     PhaseReport,
     _iso_to_dt,
     find_recent_caller_run,
+    find_release_issue,
     get_release_issue_state,
     phase_pre_check,
     phase_verify_post_create,
@@ -589,3 +590,93 @@ class TestRenderMarkdown:
         out = render_markdown(reports, "o/r", 90)
         assert "- state=snapshot-active" in out
         assert "- pr=#101" in out
+
+
+# ---------------------------------------------------------------------------
+# find_release_issue
+# ---------------------------------------------------------------------------
+
+
+MARKER = "<!-- release-automation:workflow-owned -->"
+
+
+class TestFindReleaseIssue:
+    def test_single_match(self):
+        issues = [
+            {"number": 93, "body": f"{MARKER}\n\nsome body text"},
+        ]
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            return_value=issues,
+        ):
+            assert find_release_issue("o/r") == 93
+
+    def test_zero_matches_raises(self):
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            return_value=[],
+        ):
+            with pytest.raises(InfrastructureError, match="no open Release Issue"):
+                find_release_issue("o/r")
+
+    def test_multiple_matches_raises(self):
+        issues = [
+            {"number": 90, "body": f"{MARKER}\n\nold cycle"},
+            {"number": 93, "body": f"{MARKER}\n\nnew cycle"},
+        ]
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            return_value=issues,
+        ):
+            with pytest.raises(InfrastructureError, match="multiple open Release Issues.*#90.*#93"):
+                find_release_issue("o/r")
+
+    def test_labeled_but_no_marker_is_excluded(self):
+        # gh API filters by label server-side, but a maintainer could
+        # hand-label an issue without the workflow-owned body marker.
+        # That's not a workflow-owned issue; it must not match.
+        issues = [
+            {"number": 42, "body": "This is a hand-labeled release issue, not the workflow's."},
+        ]
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            return_value=issues,
+        ):
+            with pytest.raises(InfrastructureError, match="no open Release Issue"):
+                find_release_issue("o/r")
+
+    def test_marker_case_sensitivity(self):
+        # The marker must match exactly — substring check on the body.
+        issues = [
+            {"number": 42, "body": "<!-- Release-Automation:Workflow-Owned -->"},  # wrong case
+        ]
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            return_value=issues,
+        ):
+            with pytest.raises(InfrastructureError, match="no open Release Issue"):
+                find_release_issue("o/r")
+
+    def test_null_body_is_tolerated(self):
+        # GitHub occasionally returns null for empty bodies; don't crash.
+        issues = [
+            {"number": 42, "body": None},
+        ]
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            return_value=issues,
+        ):
+            with pytest.raises(InfrastructureError, match="no open Release Issue"):
+                find_release_issue("o/r")
+
+    def test_marker_anywhere_in_body_matches(self):
+        # Marker may appear after other content (future-proofing if the
+        # template ever reorders).
+        issues = [
+            {"number": 93, "body": f"First line\n\nSecond line\n\n{MARKER}\n"},
+        ]
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            return_value=issues,
+        ):
+            assert find_release_issue("o/r") == 93

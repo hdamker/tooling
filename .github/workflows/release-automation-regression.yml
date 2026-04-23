@@ -72,7 +72,6 @@ jobs:
         run: |
           python3 release_automation/scripts/regression_runner.py \
             --repo camaraproject/ReleaseTest \
-            --release-issue 90 \
             --summary-file release-automation-regression-summary.md
 
       - name: Publish summary
