@@ -20,7 +20,7 @@ from release_automation.scripts.regression_runner import (
     PhaseReport,
     _build_command_body,
     _canary_run_url,
-    _first_nonblank_line,
+    _first_visible_line,
     _iso_to_dt,
     _match_comment_title,
     fetch_last_bot_comment,
@@ -742,9 +742,45 @@ class TestMatchCommentTitle:
         body = "\n\n**🗑️ Snapshot discarded — State: `planned`**\nmore"
         assert _match_comment_title(body, "**🗑️ Snapshot discarded")
 
+    def test_skips_html_comment_marker(self):
+        # The RA bot's post-bot-comment action prepends an HTML-comment
+        # identity marker (one per release tag) to every reply. The title
+        # is on the next non-marker line.
+        body = (
+            "<!-- release-bot:r1.2 -->\n"
+            "**✅ Snapshot created — State: `snapshot-active`**\n"
+            "Release PR: #96"
+        )
+        assert _match_comment_title(body, "**✅ Snapshot created")
+        assert _first_visible_line(body).startswith("**✅ Snapshot created")
+
+    def test_skips_multiple_html_markers_with_blank_lines(self):
+        # Belt-and-braces: marker + blank + marker + title should still work.
+        body = (
+            "<!-- release-bot:r1.2 -->\n\n"
+            "<!-- some other marker -->\n"
+            "**🗑️ Snapshot discarded — State: `planned`**\n"
+        )
+        assert _match_comment_title(body, "**🗑️ Snapshot discarded")
+
+    def test_html_comment_inline_with_content_is_not_skipped(self):
+        # If a line has BOTH an HTML comment and visible content, it
+        # shouldn't be treated as a pure marker — the title regex is
+        # anchored at the line boundaries.
+        body = "<!-- marker --> **✅ Snapshot created**"
+        # The line contains more than just a comment, so it's kept as the
+        # title line (and the match fails because the prefix expects the
+        # title to start the line).
+        assert not _match_comment_title(body, "**✅ Snapshot created")
+
     def test_empty_body(self):
         assert not _match_comment_title("", "**✅ Snapshot created")
-        assert _first_nonblank_line("") == ""
+        assert _first_visible_line("") == ""
+
+    def test_only_html_markers_returns_empty(self):
+        body = "<!-- release-bot:r1.2 -->\n\n<!-- another -->\n"
+        assert _first_visible_line(body) == ""
+        assert not _match_comment_title(body, "**✅ Snapshot created")
 
 
 # ---------------------------------------------------------------------------
@@ -898,11 +934,13 @@ class TestPhaseFireCreateSnapshotPolished:
             "release_automation.scripts.regression_runner.time.sleep",
             lambda *_a, **_k: None,
         )
+        # Shape matches real RA bot output: identity marker on line 1,
+        # title on line 2 (exercises the HTML-comment skip).
         comments = [
             _comment(
                 "2026-04-23T05:00:30Z",
                 "github-actions[bot]",
-                "**✅ Snapshot created — State: `snapshot-active`**\nRelease PR: #94",
+                "<!-- release-bot:r1.2 -->\n**✅ Snapshot created — State: `snapshot-active`**\nRelease PR: #94",
             ),
         ]
         caller_run = {
