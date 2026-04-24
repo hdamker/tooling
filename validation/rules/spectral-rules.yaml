@@ -9,155 +9,190 @@
 - id: S-001
   engine: spectral
   engine_rule: camara-discriminator-use
+  short_title: "Add discriminator for oneOf / anyOf"
 
 - id: S-002
   engine: spectral
   engine_rule: camara-get-no-request-body
+  short_title: "GET / DELETE must not have a request body"
 
 - id: S-003
   engine: spectral
   engine_rule: camara-http-methods
+  short_title: "Unsupported HTTP method on path"
 
 - id: S-004
   engine: spectral
   engine_rule: camara-language-avoid-telco
+  short_title: "Avoid telco-specific terminology"
 
 - id: S-005
   engine: spectral
   engine_rule: camara-oas-version
+  short_title: "OpenAPI version must be 3.0.3"
 
 - id: S-006
   engine: spectral
   engine_rule: camara-operation-summary
+  short_title: "Operation must have a summary"
 
 - id: S-007
   engine: spectral
   engine_rule: camara-operationid-casing-convention
+  short_title: "operationId must be camelCase"
 
 - id: S-008
   engine: spectral
   engine_rule: camara-parameter-casing-convention
+  short_title: "Path segments must be kebab-case"
 
 - id: S-009
   engine: spectral
   engine_rule: camara-parameters-descriptions
+  short_title: "Parameter must have a description"
 
 - id: S-010
   engine: spectral
   engine_rule: camara-path-param-id
+  short_title: "Use resource_id, not id, in path params"
 
 - id: S-011
   engine: spectral
   engine_rule: camara-properties-descriptions
+  short_title: "Schema property must have a description"
 
 - id: S-012
   engine: spectral
   engine_rule: camara-reserved-words
+  short_title: "Reserved word used in identifier"
 
 - id: S-013
   engine: spectral
   engine_rule: camara-response-descriptions
+  short_title: "Response must have a description"
 
 - id: S-014
   engine: spectral
   engine_rule: camara-routes-description
+  short_title: "Operation must have a description"
 
 - id: S-015
   engine: spectral
   engine_rule: camara-schema-casing-convention
+  short_title: "Schema name must be PascalCase"
 
 - id: S-016
   engine: spectral
   engine_rule: camara-schema-type-check
+  short_title: "Schema must declare a type or combiner"
 
 - id: S-017
   engine: spectral
   engine_rule: camara-security-no-secrets-in-path-or-query-parameters
+  short_title: "Sensitive data (e.g. MSISDN) in path/query"
 
 # ===== Phase 2a gap rules (S-018+) =====
 
 - id: S-018
   engine: spectral
   engine_rule: camara-license-name
+  short_title: "License name must be 'Apache 2.0'"
 
 - id: S-019
   engine: spectral
   engine_rule: camara-license-url-value
+  short_title: "License URL must be the Apache 2.0 URL"
 
 - id: S-020
   engine: spectral
   engine_rule: camara-no-contact
+  short_title: "info.contact must not be present"
 
 - id: S-021
   engine: spectral
   engine_rule: camara-tag-name-title-case
+  short_title: "Tag name must be Title Case"
 
 - id: S-022
   engine: spectral
   engine_rule: camara-api-root-default
+  short_title: "apiRoot default should be http://localhost:9091"
 
 - id: S-023
   engine: spectral
   engine_rule: camara-api-root-description
+  short_title: "apiRoot description should match standard text"
 
 - id: S-024
   engine: spectral
   engine_rule: camara-response-403
+  short_title: "Operation must document a 403 response"
   hint: "All operations must document a 403 Forbidden response (CAMARA Design Guide section 3.2)."
 
 - id: S-025
   engine: spectral
   engine_rule: camara-error-code-not-numeric
+  short_title: "Error code must not be numeric"
 
 - id: S-026
   engine: spectral
   engine_rule: camara-error-code-screaming-snake-case
+  short_title: "Error code must be SCREAMING_SNAKE_CASE"
   applicability:
     commonalities_release: ">=r4.0"
 
 - id: S-027
   engine: spectral
   engine_rule: camara-error-code-api-specific-format
+  short_title: "Prefixed error code must be API_NAME.CODE"
 
 - id: S-028
   engine: spectral
   engine_rule: camara-datetime-rfc3339-description
+  short_title: "date-time field must mention RFC 3339"
 
 - id: S-029
   engine: spectral
   engine_rule: camara-duration-rfc3339-description
+  short_title: "duration field must mention RFC 3339"
 
 - id: S-030
   engine: spectral
   engine_rule: camara-required-properties-exist
+  short_title: "Required property not defined in properties"
 
 - id: S-031
   engine: spectral
   engine_rule: camara-array-items-description
+  short_title: "Array items must have a description"
   applicability:
     commonalities_release: ">=r4.0"
 
 - id: S-032
   engine: spectral
   engine_rule: camara-cloudevent-specversion
+  short_title: "CloudEvent specversion must be '1.0'"
   applicability:
     api_pattern: [implicit-subscription, explicit-subscription]
 
 - id: S-033
   engine: spectral
   engine_rule: camara-subscription-protocol-http
+  short_title: "Subscription Protocol must be HTTP"
   applicability:
     api_pattern: [implicit-subscription, explicit-subscription]
 
 - id: S-034
   engine: spectral
   engine_rule: camara-subscription-sink-https
+  short_title: "Subscription sink must enforce HTTPS"
   applicability:
     api_pattern: [implicit-subscription, explicit-subscription]
 
 - id: S-035
   engine: spectral
   engine_rule: camara-notification-content-type
+  short_title: "Notification must use application/cloudevents+json"
   applicability:
     api_pattern: [implicit-subscription, explicit-subscription]
 
@@ -166,50 +201,62 @@
 - id: S-200
   engine: spectral
   engine_rule: duplicated-entry-in-enum
+  short_title: "Duplicate value in enum"
 
 - id: S-201
   engine: spectral
   engine_rule: info-description
+  short_title: "info.description must be present"
 
 - id: S-202
   engine: spectral
   engine_rule: info-license
+  short_title: "info.license must be present"
 
 - id: S-203
   engine: spectral
   engine_rule: license-url
+  short_title: "info.license.url must be present"
 
 - id: S-204
   engine: spectral
   engine_rule: no-$ref-siblings
+  short_title: "$ref must not have sibling fields"
 
 - id: S-205
   engine: spectral
   engine_rule: no-eval-in-markdown
+  short_title: "Markdown must not contain eval()"
 
 - id: S-206
   engine: spectral
   engine_rule: no-script-tags-in-markdown
+  short_title: "Markdown must not contain <script>"
 
 - id: S-207
   engine: spectral
   engine_rule: oas3-api-servers
+  short_title: "servers array must be present"
 
 - id: S-208
   engine: spectral
   engine_rule: oas3-examples-value-or-externalValue
+  short_title: "Example must have value or externalValue"
 
 - id: S-209
   engine: spectral
   engine_rule: oas3-schema
+  short_title: "OpenAPI document fails OAS 3.x schema"
 
 - id: S-210
   engine: spectral
   engine_rule: oas3-server-trailing-slash
+  short_title: "Server URL must not end with /"
 
 - id: S-211
   engine: spectral
   engine_rule: oas3-unused-component
+  short_title: "Component may be unused"
   hint: "Spectral does not follow discriminator mappings — verify the schema is truly unused."
   conditional_level:
     default: hint
@@ -217,134 +264,165 @@
 - id: S-212
   engine: spectral
   engine_rule: oas3-valid-media-example
+  short_title: "Media example does not match schema"
 
 - id: S-213
   engine: spectral
   engine_rule: oas3-valid-schema-example
+  short_title: "Schema example does not match schema"
 
 - id: S-214
   engine: spectral
   engine_rule: openapi-tags-uniqueness
+  short_title: "Duplicate tag name"
 
 - id: S-215
   engine: spectral
   engine_rule: operation-description
+  short_title: "Operation must have a description"
 
 - id: S-216
   engine: spectral
   engine_rule: operation-operationId
+  short_title: "Operation must have an operationId"
 
 - id: S-217
   engine: spectral
   engine_rule: operation-operationId-unique
+  short_title: "Duplicate operationId"
 
 - id: S-218
   engine: spectral
   engine_rule: operation-operationId-valid-in-url
+  short_title: "operationId has URL-unsafe characters"
 
 - id: S-219
   engine: spectral
   engine_rule: operation-parameters
+  short_title: "Duplicate operation parameter"
 
 - id: S-220
   engine: spectral
   engine_rule: operation-singular-tag
+  short_title: "Operation must have exactly one tag"
 
 - id: S-221
   engine: spectral
   engine_rule: operation-success-response
+  short_title: "Operation must define a 2xx response"
 
 - id: S-222
   engine: spectral
   engine_rule: operation-tag-defined
+  short_title: "Operation tag not defined in tags list"
 
 - id: S-223
   engine: spectral
   engine_rule: operation-tags
+  short_title: "Operation must define at least one tag"
 
 - id: S-224
   engine: spectral
   engine_rule: path-declarations-must-exist
+  short_title: "Path parameter declaration is empty"
 
 - id: S-225
   engine: spectral
   engine_rule: path-keys-no-trailing-slash
+  short_title: "Path must not end with /"
 
 - id: S-226
   engine: spectral
   engine_rule: path-not-include-query
+  short_title: "Path must not include query string"
 
 - id: S-227
   engine: spectral
   engine_rule: path-params
+  short_title: "Path parameter mismatch"
 
 - id: S-228
   engine: spectral
   engine_rule: typed-enum
+  short_title: "enum value does not match schema type"
 
 # ===== OWASP API Security Top 10 2023 (S-300+) =====
 
 - id: S-300
   engine: spectral
   engine_rule: "owasp:api1:2023-no-numeric-ids"
+  short_title: "Use non-numeric resource IDs"
   hint: "Use non-numeric (e.g. string) resource identifiers to prevent enumeration attacks."
 
 - id: S-301
   engine: spectral
   engine_rule: "owasp:api2:2023-no-credentials-in-url"
+  short_title: "Credentials must not appear in URL"
 
 - id: S-302
   engine: spectral
   engine_rule: "owasp:api2:2023-short-lived-access-tokens"
+  short_title: "Access tokens must be short-lived"
 
 - id: S-303
   engine: spectral
   engine_rule: "owasp:api2:2023-write-restricted"
+  short_title: "Write operation must be security-restricted"
 
 - id: S-304
   engine: spectral
   engine_rule: "owasp:api5:2023-admin-security-unique"
+  short_title: "Admin ops must use a distinct security scheme"
 
 - id: S-305
   engine: spectral
   engine_rule: "owasp:api8:2023-no-scheme-http"
+  short_title: "HTTP scheme not allowed"
 
 - id: S-306
   engine: spectral
   engine_rule: "owasp:api8:2023-no-server-http"
+  short_title: "Server URL must not use http://"
 
 - id: S-307
   engine: spectral
   engine_rule: "owasp:api8:2023-define-error-responses-401"
+  short_title: "Operation must document a 401 response"
   hint: "All secured operations must document a 401 Unauthorized response (CAMARA Design Guide section 3.2)."
 
 - id: S-308
   engine: spectral
   engine_rule: "owasp:api2:2023-read-restricted"
+  short_title: "Read operation must be security-restricted"
 
 - id: S-309
   engine: spectral
   engine_rule: "owasp:api4:2023-array-limit"
+  short_title: "Array must declare maxItems"
   hint: "Add maxItems to constrain array size (CAMARA Design Guide section 2.2)."
 
 - id: S-310
   engine: spectral
   engine_rule: "owasp:api4:2023-integer-format"
+  short_title: "Integer must declare int32 or int64 format"
   hint: "Add format: int32 or int64 to integer properties (CAMARA Design Guide section 2.2)."
 
 - id: S-311
   engine: spectral
   engine_rule: "owasp:api4:2023-integer-limit-legacy"
+  short_title: "Integer must declare minimum and maximum"
   hint: "Add minimum and maximum to integer properties (CAMARA Design Guide section 2.2)."
 
 - id: S-312
   engine: spectral
   engine_rule: "owasp:api4:2023-string-limit"
+  short_title: "String must declare maxLength, enum, or const"
   hint: "Add maxLength, enum, or const to string properties (CAMARA Design Guide section 2.2)."
 
 - id: S-313
   engine: spectral
   engine_rule: "owasp:api4:2023-string-restricted"
+  short_title: "String has no format/pattern/enum"
   hint: "Acceptable if free-form field or implementation-dependent — no fix needed."
   conditional_level:
     default: hint
@@ -373,24 +451,30 @@
 - id: S-314
   engine: spectral
   engine_rule: "owasp:api3:2023-constrained-additionalProperties"
+  short_title: "Constrain additionalProperties"
 
 - id: S-315
   engine: spectral
   engine_rule: "owasp:api3:2023-constrained-unevaluatedProperties"
+  short_title: "Constrain unevaluatedProperties"
 
 - id: S-316
   engine: spectral
   engine_rule: "owasp:api3:2023-no-additionalProperties"
+  short_title: "additionalProperties must be false"
 
 - id: S-317
   engine: spectral
   engine_rule: "owasp:api3:2023-no-unevaluatedProperties"
+  short_title: "unevaluatedProperties must be false"
 
 - id: S-318
   engine: spectral
   engine_rule: "owasp:api8:2023-define-error-validation"
+  short_title: "Operation must document a 400/422 response"
   hint: "Document 400 or 422 error responses for input validation (CAMARA Design Guide section 3.2)."
 
 - id: S-319
   engine: spectral
   engine_rule: "owasp:api7:2023-concerning-url-parameter"
+  short_title: "URL parameter name may forward external URL"

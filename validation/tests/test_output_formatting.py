@@ -10,6 +10,7 @@ from validation.output.formatting import (
     deduplicate_findings,
     format_finding_location,
     format_rule_label,
+    resolve_annotation_title,
     sort_findings_by_priority,
 )
 
@@ -308,3 +309,54 @@ class TestFormatFindingLocation:
 
     def test_empty_finding(self):
         assert format_finding_location({}) == ":0"
+
+
+# ---------------------------------------------------------------------------
+# resolve_annotation_title
+# ---------------------------------------------------------------------------
+
+
+class TestResolveAnnotationTitle:
+    def test_uses_short_title_when_present(self):
+        f = {"short_title": "Path must be kebab-case", "message": "Long message"}
+        assert resolve_annotation_title(f) == "Path must be kebab-case"
+
+    def test_falls_back_to_message_when_short_title_missing(self):
+        f = {"message": "Bad pattern"}
+        assert resolve_annotation_title(f) == "Bad pattern"
+
+    def test_falls_back_to_message_when_short_title_empty(self):
+        # Empty string is treated as absent — use message instead.
+        f = {"short_title": "", "message": "Bad pattern"}
+        assert resolve_annotation_title(f) == "Bad pattern"
+
+    def test_message_exactly_at_70_chars_passes_through(self):
+        msg = "x" * 70
+        assert resolve_annotation_title({"message": msg}) == msg
+
+    def test_message_at_71_chars_truncated(self):
+        msg = "x" * 71
+        result = resolve_annotation_title({"message": msg})
+        assert result == "x" * 69 + "…"
+        assert len(result) == 70
+
+    def test_long_message_truncated_with_ellipsis(self):
+        msg = "The quick brown fox jumps over the lazy dog and carries on for quite a while"
+        result = resolve_annotation_title({"message": msg})
+        assert result.endswith("…")
+        # Cap enforces ≤ 70; trailing whitespace is rstripped before the
+        # ellipsis so the title reads cleanly on a word boundary.
+        assert len(result) <= 70
+        # Prefix matches the first up-to-69 chars of the message, rstripped.
+        assert result[:-1] == msg[:69].rstrip()
+
+    def test_empty_message_returns_empty(self):
+        assert resolve_annotation_title({}) == ""
+        assert resolve_annotation_title({"message": ""}) == ""
+
+    def test_short_title_not_length_capped_at_read(self):
+        # The emitter assumes rule-metadata validation already enforced
+        # the 70-char cap.  If somehow a longer short_title slipped
+        # through, it is returned as-is (rather than silently truncated).
+        long_short = "x" * 80
+        assert resolve_annotation_title({"short_title": long_short}) == long_short

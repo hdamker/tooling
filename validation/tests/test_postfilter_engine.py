@@ -115,6 +115,7 @@ def _minimal_rule(
     default_level: str = "warn",
     applicability: dict | None = None,
     overrides: list[dict] | None = None,
+    short_title: str | None = None,
 ) -> dict:
     """Build a rule with conditional_level (full behavior)."""
     rule: dict = {
@@ -131,6 +132,8 @@ def _minimal_rule(
         rule["applicability"] = applicability
     if overrides:
         rule["conditional_level"]["overrides"] = overrides
+    if short_title is not None:
+        rule["short_title"] = short_title
     return rule
 
 
@@ -270,6 +273,27 @@ class TestRunPostFilter:
         assert f["hint"] == "Do this instead."
         assert f["level"] == "error"  # remapped from warn to error by metadata
         assert f["blocks"] is True
+        # No short_title in metadata → not added to finding
+        assert "short_title" not in f
+
+    def test_short_title_propagated_to_finding(self, tmp_path: Path):
+        """short_title in metadata is copied onto the enriched finding."""
+        _write_rules(tmp_path, [
+            _minimal_rule(
+                id="S-001",
+                engine_rule="some-rule",
+                short_title="Path must be kebab-case",
+            )
+        ])
+        ctx = _make_context(profile="standard")
+        findings = [_make_finding(message="Original msg")]
+        result = run_post_filter(findings, ctx, tmp_path)
+
+        assert len(result.findings) == 1
+        f = result.findings[0]
+        assert f["short_title"] == "Path must be kebab-case"
+        # Message is untouched — short_title supplements, never replaces.
+        assert f["message"] == "Original msg"
 
     def test_applicability_filters_finding(self, tmp_path: Path):
         """Non-applicable findings are silently removed."""

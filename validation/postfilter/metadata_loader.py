@@ -67,6 +67,9 @@ class RuleMetadata:
     Attributes:
         id: Stable ID with engine prefix (e.g. ``"S-042"``).
         name: Human-readable kebab-case name.  Defaults to ``engine_rule``.
+        short_title: Short human-readable label used as the annotation
+            title.  ``None`` means fall back to the message (truncated by
+            the emitter).
         engine: Engine responsible for producing the finding.
         engine_rule: Native rule identifier within the engine.
         message_override: Replaces the engine's finding message.  ``None``
@@ -90,6 +93,7 @@ class RuleMetadata:
     hint: Optional[str]
     applicability: dict
     conditional_level: Optional[ConditionalLevel]
+    short_title: Optional[str] = None
     suppress_schema_paths: Tuple[str, ...] = ()
 
 
@@ -163,6 +167,7 @@ def parse_rule_metadata(raw: dict) -> RuleMetadata:
         hint=raw.get("hint"),
         applicability=raw.get("applicability", {}),
         conditional_level=conditional_level,
+        short_title=raw.get("short_title"),
         suppress_schema_paths=suppress_schema_paths,
     )
 

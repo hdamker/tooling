@@ -333,3 +333,43 @@ class TestMetadataQuality:
         assert overrides[0].level == "warn"
         assert rule.hint is not None
         assert "Commonalities#608" in rule.hint
+
+
+# ---------------------------------------------------------------------------
+# short_title convention
+# ---------------------------------------------------------------------------
+
+# Maximum annotation title length that fits on one line in the GitHub
+# file-diff popover (matches rule-metadata-schema.yaml short_title.maxLength).
+_SHORT_TITLE_MAX = 70
+
+
+class TestShortTitleConvention:
+    """Verify every rule carries a short_title and the length cap holds.
+
+    short_title is schema-optional to keep rule-adding PRs unblocked, but
+    every rule in the current set must carry one (see the short-title
+    rollout plan in private-dev-docs).  The emitter's truncation fallback
+    keeps annotations usable when a future rule lands without one, but
+    this test flags the omission so reviewers know to add it.
+    """
+
+    def test_all_rules_have_short_title(self, all_rules):
+        missing = [r.id for r in all_rules if r.short_title is None]
+        assert not missing, (
+            f"Rules missing short_title ({len(missing)}): {missing}"
+        )
+
+    def test_short_titles_respect_length_cap(self, all_rules):
+        too_long = [
+            (r.id, len(r.short_title), r.short_title)
+            for r in all_rules
+            if r.short_title is not None and len(r.short_title) > _SHORT_TITLE_MAX
+        ]
+        assert not too_long, (
+            f"short_title exceeds {_SHORT_TITLE_MAX}-char cap: {too_long}"
+        )
+
+    def test_short_titles_are_non_empty(self, all_rules):
+        empty = [r.id for r in all_rules if r.short_title == ""]
+        assert not empty, f"Rules with empty short_title: {empty}"

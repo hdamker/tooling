@@ -121,6 +121,8 @@ def _enrich_finding(
         enriched["message"] = rule.message_override
     if rule.hint is not None:
         enriched["hint"] = rule.hint
+    if rule.short_title is not None:
+        enriched["short_title"] = rule.short_title
     return enriched
 
 

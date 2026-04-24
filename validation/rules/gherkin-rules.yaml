@@ -5,99 +5,124 @@
 - id: G-001
   engine: gherkin
   engine_rule: allowed-tags
+  short_title: "Tag not in allowed list"
 
 - id: G-002
   engine: gherkin
   engine_rule: indentation
+  short_title: "Inconsistent Gherkin indentation"
 
 - id: G-003
   engine: gherkin
   engine_rule: keywords-in-logical-order
+  short_title: "Gherkin keywords out of order"
 
 - id: G-004
   engine: gherkin
   engine_rule: max-scenarios-per-file
+  short_title: "Too many scenarios in feature file"
 
 - id: G-005
   engine: gherkin
   engine_rule: name-length
+  short_title: "Feature or scenario name too long"
 
 - id: G-006
   engine: gherkin
   engine_rule: no-background-only-scenario
+  short_title: "Background used with only one scenario"
 
 - id: G-007
   engine: gherkin
   engine_rule: no-dupe-feature-names
+  short_title: "Duplicate feature name"
 
 - id: G-008
   engine: gherkin
   engine_rule: no-dupe-scenario-names
+  short_title: "Duplicate scenario name"
 
 - id: G-009
   engine: gherkin
   engine_rule: no-duplicate-tags
+  short_title: "Duplicate tag on same element"
 
 - id: G-010
   engine: gherkin
   engine_rule: no-empty-background
+  short_title: "Background has no steps"
 
 - id: G-011
   engine: gherkin
   engine_rule: no-empty-file
+  short_title: "Feature file is empty"
 
 - id: G-012
   engine: gherkin
   engine_rule: no-files-without-scenarios
+  short_title: "Feature file has no scenarios"
 
 - id: G-013
   engine: gherkin
   engine_rule: no-homogenous-tags
+  short_title: "All scenarios share the same tag"
 
 - id: G-014
   engine: gherkin
   engine_rule: no-multiple-empty-lines
+  short_title: "Multiple consecutive empty lines"
 
 - id: G-015
   engine: gherkin
   engine_rule: no-partially-commented-tag-lines
+  short_title: "Comment on tag line"
 
 - id: G-016
   engine: gherkin
   engine_rule: no-restricted-tags
+  short_title: "Tag is on restricted list"
 
 - id: G-017
   engine: gherkin
   engine_rule: no-scenario-outlines-without-examples
+  short_title: "Scenario Outline has no Examples"
 
 - id: G-018
   engine: gherkin
   engine_rule: no-superfluous-tags
+  short_title: "Tag duplicates an inherited tag"
 
 - id: G-019
   engine: gherkin
   engine_rule: no-trailing-spaces
+  short_title: "Trailing whitespace"
 
 - id: G-020
   engine: gherkin
   engine_rule: no-unnamed-features
+  short_title: "Feature has no name"
 
 - id: G-021
   engine: gherkin
   engine_rule: no-unnamed-scenarios
+  short_title: "Scenario has no name"
 
 - id: G-022
   engine: gherkin
   engine_rule: no-unused-variables
+  short_title: "Unused Examples variable"
 
 - id: G-023
   engine: gherkin
   engine_rule: one-space-between-tags
+  short_title: "Tags must be single-space separated"
 
 - id: G-024
   engine: gherkin
   engine_rule: required-tags
+  short_title: "Required tag missing"
 
 - id: G-025
   engine: gherkin
   engine_rule: use-and
+  short_title: "Use And / But instead of repeating keyword"

@@ -15,7 +15,12 @@ from typing import List
 
 from validation.postfilter.engine import PostFilterResult
 
-from .formatting import deduplicate_findings, format_rule_label, sort_findings_by_priority
+from .formatting import (
+    deduplicate_findings,
+    format_rule_label,
+    resolve_annotation_title,
+    sort_findings_by_priority,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,9 +90,12 @@ def _build_command(finding: dict) -> str:
 
     rule_label = format_rule_label(finding)
 
-    # Title: human-readable message.  Rule ID in message body.
-    title = finding.get("message", "")
-    message = f"[{rule_label}] {title}"
+    # Title: short_title from rule metadata when present, otherwise the
+    # finding message truncated to fit the annotation UI.  The full
+    # untruncated message always goes in the body.
+    title = resolve_annotation_title(finding)
+    full_message = finding.get("message", "")
+    message = f"[{rule_label}] {full_message}"
     hint = finding.get("hint")
     if hint:
         message = f"{message} | Hint: {hint}"

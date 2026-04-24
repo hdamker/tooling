@@ -29,6 +29,18 @@ properties:
       Human-readable kebab-case name.  Optional — defaults to engine_rule
       when omitted.
 
+  short_title:
+    type: string
+    minLength: 1
+    maxLength: 70
+    description: >
+      Short human-readable label used as the annotation title in the
+      GitHub file-diff popover and Check Run annotations.  Soft target
+      50 chars, hard cap 70 to avoid wrapping in the annotation UI.
+      Optional — when omitted, the emitter falls back to the finding
+      message truncated to 69 chars + "…"; the full untruncated message
+      is always preserved in the annotation body.
+
   engine:
     type: string
     enum: [spectral, yamllint, gherkin, python, manual]

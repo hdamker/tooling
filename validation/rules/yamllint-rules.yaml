@@ -5,51 +5,64 @@
 - id: Y-001
   engine: yamllint
   engine_rule: braces
+  short_title: "Brace spacing error"
 
 - id: Y-002
   engine: yamllint
   engine_rule: brackets
+  short_title: "Bracket spacing error"
 
 - id: Y-003
   engine: yamllint
   engine_rule: colons
+  short_title: "Colon spacing error"
 
 - id: Y-004
   engine: yamllint
   engine_rule: commas
+  short_title: "Comma spacing error"
 
 - id: Y-005
   engine: yamllint
   engine_rule: comments
+  short_title: "Comment formatting error"
 
 - id: Y-006
   engine: yamllint
   engine_rule: comments-indentation
+  short_title: "Comment indentation mismatch"
 
 - id: Y-007
   engine: yamllint
   engine_rule: empty-lines
+  short_title: "Too many consecutive empty lines"
 
 - id: Y-008
   engine: yamllint
   engine_rule: hyphens
+  short_title: "Hyphen spacing error"
 
 - id: Y-009
   engine: yamllint
   engine_rule: indentation
+  short_title: "Inconsistent YAML indentation"
 
 - id: Y-010
   engine: yamllint
   engine_rule: key-duplicates
+  short_title: "Duplicate mapping key"
 
 - id: Y-011
   engine: yamllint
   engine_rule: new-line-at-end-of-file
+  short_title: "Missing newline at end of file"
 
 - id: Y-012
   engine: yamllint
   engine_rule: trailing-spaces
+  short_title: "Trailing whitespace"
 
 - id: Y-013
   engine: yamllint
   engine_rule: truthy
+  short_title: "Use true / false, not yes / no / on / off"
