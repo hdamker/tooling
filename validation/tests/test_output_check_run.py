@@ -48,6 +48,7 @@ def _make_finding(
     rule_id: str | None = None,
     engine_rule: str = "some-rule",
     hint: str | None = None,
+    short_title: str | None = None,
 ) -> dict:
     f: dict = {
         "engine": "spectral",
@@ -63,6 +64,8 @@ def _make_finding(
         f["rule_id"] = rule_id
     if hint is not None:
         f["hint"] = hint
+    if short_title is not None:
+        f["short_title"] = short_title
     return f
 
 
@@ -164,12 +167,39 @@ class TestAnnotationContent:
         assert ann["start_line"] == 42
         assert ann["end_line"] == 42
 
-    def test_title_uses_message(self):
+    def test_title_falls_back_to_short_message(self):
+        # No short_title, message <= 70 chars — passes through unchanged.
         findings = [_make_finding(rule_id="S-042", message="Bad pattern")]
         payload = generate_check_run_payload(
             _make_result(findings), _make_context(),
         )
         assert payload.annotations[0]["title"] == "Bad pattern"
+
+    def test_title_truncates_long_message_when_no_short_title(self):
+        long = "x" * 80
+        findings = [_make_finding(rule_id="S-042", message=long)]
+        payload = generate_check_run_payload(
+            _make_result(findings), _make_context(),
+        )
+        ann = payload.annotations[0]
+        # Title is truncated to 70 chars ending in "…".
+        assert ann["title"] == "x" * 69 + "…"
+        # Full untruncated message stays in the body.
+        assert long in ann["message"]
+
+    def test_short_title_used_when_present(self):
+        findings = [_make_finding(
+            rule_id="S-042",
+            message="Long-form engine explanation with details",
+            short_title="Path must be kebab-case",
+        )]
+        payload = generate_check_run_payload(
+            _make_result(findings), _make_context(),
+        )
+        ann = payload.annotations[0]
+        assert ann["title"] == "Path must be kebab-case"
+        # Full message still appears in the body with rule-ID prefix.
+        assert "[S-042] Long-form engine explanation" in ann["message"]
 
     def test_rule_id_in_message_body(self):
         findings = [_make_finding(rule_id="S-042", message="Bad pattern")]

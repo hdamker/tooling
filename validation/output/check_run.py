@@ -25,6 +25,7 @@ from .formatting import (
     count_findings,
     deduplicate_findings,
     format_rule_label,
+    resolve_annotation_title,
     sort_findings_by_priority,
 )
 
@@ -88,10 +89,12 @@ def _build_annotation(finding: dict) -> dict:
     line = finding.get("line", 1)
     rule_label = format_rule_label(finding)
 
-    # Title: human-readable message (rendered as bold heading in Check Run).
-    # Rule ID goes into the message body to reduce visual weight.
-    title = finding.get("message", "")
-    message = f"[{rule_label}] {title}"
+    # Title: short_title from rule metadata when present, otherwise the
+    # finding message truncated to fit (rendered as bold heading in
+    # Check Run).  Rule ID and full message go in the body.
+    title = resolve_annotation_title(finding)
+    full_message = finding.get("message", "")
+    message = f"[{rule_label}] {full_message}"
     hint = finding.get("hint")
     if hint:
         message = f"{message}\n\nHint: {hint}"

@@ -207,6 +207,29 @@ def format_rule_label(finding: dict) -> str:
     return finding.get("rule_id") or finding.get("engine_rule", "unknown")
 
 
+# Hard cap matches rule-metadata-schema.yaml maxLength for short_title.
+# Titles wider than this wrap in the GitHub file-diff annotation UI.
+_ANNOTATION_TITLE_MAX = 70
+
+
+def resolve_annotation_title(finding: dict) -> str:
+    """Return the annotation title for a finding.
+
+    Uses ``short_title`` when present (populated from rule metadata by
+    the post-filter).  Otherwise falls back to the finding ``message``,
+    truncated with an ellipsis when it would exceed
+    :data:`_ANNOTATION_TITLE_MAX`.  The full, untruncated message
+    remains available on the finding for the annotation body.
+    """
+    short = finding.get("short_title")
+    if short:
+        return short
+    message = finding.get("message", "")
+    if len(message) <= _ANNOTATION_TITLE_MAX:
+        return message
+    return message[: _ANNOTATION_TITLE_MAX - 1].rstrip() + "…"
+
+
 def format_finding_location(finding: dict) -> str:
     """Format a finding's location as ``path:line`` or ``path:line:column``."""
     path = finding.get("path", "")

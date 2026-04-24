@@ -9,6 +9,7 @@
 - id: P-001
   engine: python
   engine_rule: check-filename-kebab-case
+  short_title: "API filename must be kebab-case"
   conditional_level:
     default: error
 
@@ -16,6 +17,7 @@
 - id: P-002
   engine: python
   engine_rule: check-filename-matches-api-name
+  short_title: "API definition file must match release-plan api_name"
   conditional_level:
     default: error
 
@@ -23,6 +25,7 @@
 - id: P-003
   engine: python
   engine_rule: check-info-version-format
+  short_title: "info.version must be wip on main or maintenance"
   conditional_level:
     default: error
 
@@ -30,6 +33,7 @@
 - id: P-004
   engine: python
   engine_rule: check-server-url-version
+  short_title: "Server URL must include version segment"
   conditional_level:
     default: error
 
@@ -37,6 +41,7 @@
 - id: P-005
   engine: python
   engine_rule: check-server-url-api-name
+  short_title: "Server URL api-name must match release-plan"
   conditional_level:
     default: error
 
@@ -49,6 +54,7 @@
 - id: P-006
   engine: python
   engine_rule: check-test-files-exist
+  short_title: "Missing test definition file for API"
   conditional_level:
     default: hint
     overrides:
@@ -74,6 +80,7 @@
 - id: P-007
   engine: python
   engine_rule: check-test-file-version
+  short_title: "Test file: feature-line version mismatch"
   conditional_level:
     default: hint
     overrides:
@@ -86,6 +93,7 @@
 - id: P-008
   engine: python
   engine_rule: check-test-directory-exists
+  short_title: "Test_definitions directory is missing"
   conditional_level:
     default: hint
     overrides:
@@ -97,6 +105,7 @@
 - id: P-009
   engine: python
   engine_rule: check-release-plan-semantics
+  short_title: "release-plan.yaml has semantic error"
   applicability:
     release_plan_changed: true
   conditional_level:
@@ -106,6 +115,7 @@
 - id: P-010
   engine: python
   engine_rule: check-changelog-format
+  short_title: "CHANGELOG.md or CHANGELOG/ is required"
   conditional_level:
     default: warn
 
@@ -115,6 +125,7 @@
 - id: P-011
   engine: python
   engine_rule: check-commonalities-version
+  short_title: "info.x-camara-commonalities missing or wrong"
   conditional_level:
     default: error
 
@@ -122,6 +133,7 @@
 - id: P-012
   engine: python
   engine_rule: check-release-review-file-restriction
+  short_title: "Release Review PR: only docs may change"
   applicability:
     is_release_review_pr: true
   conditional_level:
@@ -131,6 +143,7 @@
 - id: P-013
   engine: python
   engine_rule: check-readme-placeholder-removal
+  short_title: "Remove placeholder README alongside API definitions"
   conditional_level:
     default: warn
 
@@ -139,6 +152,7 @@
 - id: P-014
   engine: python
   engine_rule: check-subscription-filename
+  short_title: "Subscription API name must end with -subscriptions"
   applicability:
     api_pattern: [explicit-subscription]
   conditional_level:
@@ -157,6 +171,7 @@
 - id: P-015
   engine: python
   engine_rule: check-event-type-format
+  short_title: "CloudEvent type format is wrong"
   applicability:
     api_pattern: [explicit-subscription, implicit-subscription]
     commonalities_release: ">=r4.2"
@@ -178,6 +193,7 @@
 - id: P-016
   engine: python
   engine_rule: check-sinkcredential-not-in-response
+  short_title: "sinkCredential must not appear in response"
   applicability:
     api_pattern: [explicit-subscription]
   conditional_level:
@@ -188,6 +204,7 @@
 - id: P-017
   engine: python
   engine_rule: check-conflict-deprecated
+  short_title: "CONFLICT error code is deprecated"
   applicability:
     commonalities_release: ">=r4.0"
   conditional_level:
@@ -198,6 +215,7 @@
 - id: P-018
   engine: python
   engine_rule: check-contextcode-format
+  short_title: "contextCode must be SCREAMING_SNAKE_CASE enum"
   applicability:
     commonalities_release: ">=r4.0"
   conditional_level:
@@ -208,6 +226,7 @@
 - id: P-019
   engine: python
   engine_rule: check-orphan-api-definitions
+  short_title: "API YAML not listed in release-plan.yaml"
   conditional_level:
     default: warn
 
@@ -223,6 +242,7 @@
 - id: P-020
   engine: python
   engine_rule: check-cloudevent-via-ref
+  short_title: "CloudEvent should be $ref, not inline"
   applicability:
     api_pattern: [explicit-subscription, implicit-subscription]
     commonalities_release: ">=r4.2"
@@ -244,6 +264,7 @@
 - id: P-021
   engine: python
   engine_rule: check-common-cache-sync
+  short_title: "code/common/ is missing or out of sync"
   applicability:
     release_plan_changed: false
     commonalities_release: ">=r4.2"
@@ -265,6 +286,7 @@
 - id: P-022
   engine: python
   engine_rule: check-release-plan-exclusivity
+  short_title: "release-plan.yaml must change in its own PR"
   applicability:
     release_plan_changed: true
   conditional_level:
@@ -282,6 +304,7 @@
 - id: P-023
   engine: python
   engine_rule: check-declared-dependency-tags-exist
+  short_title: "Declared dependency tag not found upstream"
   applicability:
     release_plan_changed: true
   conditional_level:
@@ -299,6 +322,7 @@
 - id: P-024
   engine: python
   engine_rule: check-test-file-feature-line-untransformable
+  short_title: "Feature line has no wip/vwip/version token"
   conditional_level:
     default: error
 
@@ -312,5 +336,6 @@
 - id: P-025
   engine: python
   engine_rule: check-feature-file-url-version
+  short_title: "Feature-step URL version segment wrong"
   conditional_level:
     default: error

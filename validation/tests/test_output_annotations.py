@@ -28,6 +28,7 @@ def _make_finding(
     engine_rule: str = "some-rule",
     api_name: str | None = "quality-on-demand",
     blocks: bool = False,
+    short_title: str | None = None,
 ) -> dict:
     f: dict = {
         "engine": "spectral",
@@ -45,6 +46,8 @@ def _make_finding(
         f["rule_id"] = rule_id
     if hint is not None:
         f["hint"] = hint
+    if short_title is not None:
+        f["short_title"] = short_title
     return f
 
 
@@ -114,10 +117,38 @@ class TestBuildCommand:
         cmd = _build_command(f)
         assert "col=" not in cmd
 
-    def test_title_uses_message(self):
+    def test_title_falls_back_to_short_message(self):
+        # No short_title — short message passes through unchanged.
         f = _make_finding(rule_id="S-042", message="Bad path")
         cmd = _build_command(f)
         assert "title=Bad path" in cmd
+
+    def test_title_truncates_long_message_when_no_short_title(self):
+        # > 70 chars triggers "…"-terminated truncation in the title.
+        long = "x" * 80
+        f = _make_finding(rule_id="S-042", message=long)
+        cmd = _build_command(f)
+        # Title is 70 chars ending in "…"; full message still appears in body.
+        assert "title=" + "x" * 69 + "…" in cmd
+        assert "[S-042] " + long in cmd
+
+    def test_short_title_used_when_present(self):
+        f = _make_finding(
+            rule_id="S-042",
+            message="Long-form engine message explaining the violation in detail",
+            short_title="Path must be kebab-case",
+        )
+        cmd = _build_command(f)
+        # Title is the short_title, not the message.
+        assert "title=Path must be kebab-case" in cmd
+        # Full untruncated message still appears in the body.
+        assert "[S-042] Long-form engine message explaining" in cmd
+
+    def test_short_title_sanitized(self):
+        # Edge chars (:, %, newline) must be encoded in the title param.
+        f = _make_finding(short_title="key:value %25 with\nnewline")
+        cmd = _build_command(f)
+        assert "key%3Avalue %2525 with newline" in cmd
 
     def test_rule_id_in_message_body(self):
         f = _make_finding(rule_id="S-042", message="Bad path")
