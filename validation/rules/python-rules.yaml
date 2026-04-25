@@ -14,12 +14,23 @@
     default: error
 
 # P-002: check-filename-matches-api-name
+# Draft entries are intentionally allowed to have no spec file yet
+# (placeholder for upcoming work). Downgrade to hint for draft so the
+# missing file still surfaces in the codeowner annotation list, but
+# stays an error for alpha/rc/public where it gates release advancement.
 - id: P-002
   engine: python
   engine_rule: check-filename-matches-api-name
   short_title: "API definition file must match release-plan api_name"
   conditional_level:
     default: error
+    overrides:
+      - condition:
+          target_api_status: [draft]
+        level: hint
+  hint: >-
+    Spec file not yet present. For draft entries this is acceptable;
+    add the spec file before advancing target_api_status to alpha.
 
 # P-003: check-info-version-format
 - id: P-003
