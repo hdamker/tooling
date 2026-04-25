@@ -18,7 +18,7 @@ summary:
   total_gap: 0
   total_manual: 25
   total_pending: 0
-  total_tested: 76
+  total_tested: 83
   by_engine:
     spectral: 84
     gherkin: 25
@@ -311,6 +311,9 @@ tested_rules:
   P-004: [regression/r4.1-broken-spec-test-files]
   P-005: [regression/r4.1-broken-spec-test-files]
   P-006: [regression/r4.1-main-baseline]
+  P-015: [regression/r4.2-broken-spec-subscriptions]
+  P-016: [regression/r4.2-broken-spec-subscriptions]
+  P-020: [regression/r4.2-broken-spec-subscriptions]
   S-002: [regression/r4.1-broken-spec-routing]
   S-003: [regression/r4.1-broken-spec-routing]
   S-005: [regression/r4.1-broken-spec-yaml-fundamentals]
@@ -337,6 +340,10 @@ tested_rules:
   S-029: [regression/r4.1-broken-spec-descriptions]
   S-030: [regression/r4.1-broken-spec-schema-constraints]
   S-031: [regression/r4.1-broken-spec-descriptions]
+  S-032: [regression/r4.2-broken-spec-subscriptions]
+  S-033: [regression/r4.2-broken-spec-subscriptions]
+  S-034: [regression/r4.2-broken-spec-subscriptions]
+  S-035: [regression/r4.2-broken-spec-subscriptions]
   S-201: [regression/r4.1-broken-spec-api-metadata]
   S-210: [regression/r4.1-broken-spec-api-metadata]
   S-211: [regression/r4.1-main-baseline]
