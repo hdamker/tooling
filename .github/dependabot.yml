@@ -29,3 +29,17 @@ updates:
       - "dependencies"
       - "github-actions"
     open-pull-requests-limit: 5
+
+  # npm on validation-framework (validation/) - until it merges into main
+  - package-ecosystem: "npm"
+    directory: "/validation"
+    target-branch: "validation-framework"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "javascript"
+    open-pull-requests-limit: 5
