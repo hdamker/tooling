@@ -154,11 +154,23 @@ class TestCheckInfoVersionFormat:
         assert len(findings) == 1
         assert "not a valid semantic version" in findings[0]["message"]
 
-    def test_wip_on_maintenance_error(self, tmp_path: Path):
+    def test_wip_on_maintenance_ok(self, tmp_path: Path):
+        """Maintenance is a source branch like main; wip is required."""
         _write_spec(tmp_path, "qod", "wip")
+        ctx = _make_context("qod", branch_type="maintenance")
+        assert check_info_version_format(tmp_path, ctx) == []
+
+    def test_semver_on_maintenance_error(self, tmp_path: Path):
+        """Pinned versions on maintenance fail like they do on main —
+        version pinning happens at snapshot via T2b, not on the source
+        branch itself."""
+        _write_spec(tmp_path, "qod", "1.2.3")
         ctx = _make_context("qod", branch_type="maintenance")
         findings = check_info_version_format(tmp_path, ctx)
         assert len(findings) == 1
+        assert findings[0]["level"] == "error"
+        assert "wip" in findings[0]["message"]
+        assert "maintenance" in findings[0]["message"]
 
     def test_feature_branch_no_constraint(self, tmp_path: Path):
         _write_spec(tmp_path, "qod", "anything-goes")

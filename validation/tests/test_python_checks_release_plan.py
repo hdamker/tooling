@@ -540,3 +540,49 @@ class TestCheckDeclaredDependencyTagsExist:
         findings = check_declared_dependency_tags_exist(tmp_path, context)
         assert len(findings) == 1
         assert "icm_release" in findings[0]["message"]
+
+    def test_commonalities_invalid_format_emits_format_error(
+        self, tmp_path: Path
+    ):
+        """Malformed tag emits a format error before the existence lookup.
+
+        Pre-fix this surfaced as the misleading "tag does not exist"
+        even though the tag was rejected at the workflow layer for
+        format reasons. The format precheck short-circuits the lookup.
+        """
+        _write_release_plan_with_dependencies(tmp_path, commonalities="r0.0")
+        context = _context_with_dependency_changes(
+            commonalities_release_changed=True,
+            # Lookup result intentionally non-False to prove the format
+            # error fires regardless of what the workflow layer returned.
+            commonalities_tag_exists=True,
+        )
+        findings = check_declared_dependency_tags_exist(tmp_path, context)
+        assert len(findings) == 1
+        assert findings[0]["level"] == "error"
+        assert "r0.0" in findings[0]["message"]
+        assert "not a valid CAMARA release tag format" in findings[0]["message"]
+        assert "does not exist" not in findings[0]["message"]
+
+    def test_icm_invalid_format_emits_format_error(self, tmp_path: Path):
+        _write_release_plan_with_dependencies(tmp_path, icm="r4.x")
+        context = _context_with_dependency_changes(
+            icm_release_changed=True,
+            icm_tag_exists=None,
+        )
+        findings = check_declared_dependency_tags_exist(tmp_path, context)
+        assert len(findings) == 1
+        assert findings[0]["level"] == "error"
+        assert "r4.x" in findings[0]["message"]
+        assert "not a valid CAMARA release tag format" in findings[0]["message"]
+
+    def test_valid_tag_passes_precheck(self, tmp_path: Path):
+        """Valid tag falls through to existence handling (regression
+        check: precheck does not eat valid tags)."""
+        _write_release_plan_with_dependencies(tmp_path, commonalities="r4.2")
+        context = _context_with_dependency_changes(
+            commonalities_release_changed=True,
+            commonalities_tag_exists=True,
+        )
+        # Tag exists → no finding (existence handling reached normally).
+        assert check_declared_dependency_tags_exist(tmp_path, context) == []

@@ -27,11 +27,20 @@ def check_common_cache_sync(
 
     Repo-level check — runs once, not per-API.
 
+    Skipped when ``release-plan.yaml`` is absent at the repo root
+    (release-review/snapshot branches post-bundling per DEC-021):
+    ``code/common/`` is intentionally absent in the same context, so
+    there is nothing to verify. ``commonalities_release`` may still be
+    populated from the release-metadata.yaml fallback in those cases.
+
     Builds the expected-releases dict from *context* and delegates to
     :func:`~tooling_lib.cache_sync.check_sync_status`.  Returns an
     empty list when no expected releases can be determined (e.g. no
     ``release-plan.yaml``).
     """
+    if not (repo_path / "release-plan.yaml").is_file():
+        return []
+
     expected = _build_expected_releases(context)
     if not expected:
         return []

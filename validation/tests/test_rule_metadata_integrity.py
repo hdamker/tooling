@@ -306,14 +306,32 @@ class TestMetadataQuality:
         """
         with_hints = [r.id for r in all_rules if r.hint is not None]
         with_overrides = [r.id for r in all_rules if r.message_override is not None]
-        assert len(with_hints) == 15, (
-            f"Expected 15 explicit hints (update test if adding hints): "
+        assert len(with_hints) == 16, (
+            f"Expected 16 explicit hints (update test if adding hints): "
             f"{with_hints}"
         )
         assert len(with_overrides) == 0, (
             f"Expected 0 message overrides (update test if adding overrides): "
             f"{with_overrides}"
         )
+
+    def test_p002_conditional_on_target_api_status(self, rule_index):
+        """P-002 stays error by default, downgrades to hint for draft entries.
+
+        Draft entries are intentionally allowed to have no spec file yet
+        (placeholder for upcoming work). Keep error for alpha/rc/public so
+        missing files still gate release advancement.
+        """
+        rule = rule_index[("python", "check-filename-matches-api-name")]
+        assert rule.id == "P-002"
+        assert rule.conditional_level is not None
+        assert rule.conditional_level.default == "error"
+        overrides = rule.conditional_level.overrides
+        assert len(overrides) == 1
+        assert overrides[0].condition == {"target_api_status": ["draft"]}
+        assert overrides[0].level == "hint"
+        assert rule.hint is not None
+        assert "draft" in rule.hint.lower()
 
     def test_p015_conditional_on_api_pattern(self, rule_index):
         """P-015 stays error on explicit-subscription, warn on implicit.

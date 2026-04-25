@@ -102,8 +102,9 @@ def check_info_version_format(
 ) -> List[dict]:
     """Validate info.version format based on branch type.
 
-    On main: must be ``"wip"``.
-    On release/maintenance: must be a valid semantic version (not wip).
+    On main and maintenance: must be ``"wip"`` (both are source
+    branches; version pinning happens at snapshot time via T2b).
+    On release: must be a valid semantic version (not wip).
     On feature branches: no constraint (skip).
     """
     api = context.apis[0]
@@ -129,22 +130,23 @@ def check_info_version_format(
 
     info_version = str(info_version).strip()
 
-    if context.branch_type == "main":
+    if context.branch_type in ("main", "maintenance"):
         if info_version != "wip":
             return [
                 make_finding(
                     engine_rule="check-info-version-format",
                     level="error",
                     message=(
-                        f"info.version must be 'wip' on main branch, "
-                        f"found '{info_version}'"
+                        f"info.version must be 'wip' on "
+                        f"{context.branch_type} branch, found "
+                        f"'{info_version}'"
                     ),
                     path=api.spec_file,
                     line=1,
                     api_name=api.api_name,
                 )
             ]
-    elif context.branch_type in ("release", "maintenance"):
+    elif context.branch_type == "release":
         if info_version == "wip":
             return [
                 make_finding(
