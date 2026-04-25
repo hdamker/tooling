@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from validation.context import ValidationContext
+from validation.context.release_plan_parser import is_valid_release_tag
 
 from ._types import load_yaml_safe, make_finding
 
@@ -444,6 +445,27 @@ def check_declared_dependency_tags_exist(
         if not declared_tag:
             # Declaration advanced to null/removed — not P-023's concern
             # (schema or P-009 semantics handle this).
+            continue
+
+        if not is_valid_release_tag(str(declared_tag)):
+            # Format-invalid tags (e.g. "r0.0", "r4.x") would otherwise
+            # surface as the misleading "tag does not exist" message
+            # below. Emit a dedicated format error and skip the
+            # existence lookup.
+            findings.append(
+                make_finding(
+                    engine_rule="check-declared-dependency-tags-exist",
+                    level="error",
+                    message=(
+                        f"Declared {display_name} tag '{declared_tag}' "
+                        f"is not a valid CAMARA release tag format. "
+                        f"Expected r<major>.<minor> with positive "
+                        f"integer components (e.g. r4.2)."
+                    ),
+                    path=_RELEASE_PLAN_PATH,
+                    line=1,
+                )
+            )
             continue
 
         exists = getattr(context, exists_attr, None)

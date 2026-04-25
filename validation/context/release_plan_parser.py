@@ -12,6 +12,7 @@ Design doc references:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
@@ -20,6 +21,31 @@ import yaml
 from jsonschema import Draft7Validator
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Tag-format validation
+# ---------------------------------------------------------------------------
+
+# CAMARA release tag format: r<major>.<minor>, both positive integers.
+# Excludes r0.x and components with leading zeros.
+_VALID_RELEASE_TAG_RE = re.compile(r"^r[1-9]\d*\.[1-9]\d*$")
+
+
+def is_valid_release_tag(tag: str) -> bool:
+    """Check whether a string is a valid CAMARA release tag.
+
+    Valid format: ``r<major>.<minor>`` with positive integer components
+    (e.g. ``r1.1``, ``r4.2``, ``r10.20``). Excludes ``r0.x`` and tags
+    with leading-zero components.
+
+    Used as a precheck for dependency tags (commonalities_release,
+    icm_release) before lookup/existence checks — distinguishes
+    "tag is malformed" from "tag does not exist".
+    """
+    if not tag:
+        return False
+    return bool(_VALID_RELEASE_TAG_RE.fullmatch(tag))
 
 # ---------------------------------------------------------------------------
 # Dataclasses

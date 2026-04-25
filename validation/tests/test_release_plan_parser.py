@@ -7,6 +7,7 @@ import yaml
 
 from validation.context.release_plan_parser import (
     ReleasePlanData,
+    is_valid_release_tag,
     load_release_plan,
     parse_release_plan,
 )
@@ -140,3 +141,41 @@ class TestLoadReleasePlan:
         plan_path.write_text("", encoding="utf-8")
         result = load_release_plan(plan_path, schema_path)
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# is_valid_release_tag
+# ---------------------------------------------------------------------------
+
+
+class TestIsValidReleaseTag:
+    """CAMARA release-tag format precheck used by P-023."""
+
+    @pytest.mark.parametrize(
+        "tag",
+        ["r1.1", "r1.2", "r4.2", "r10.20", "r99.99"],
+    )
+    def test_valid_tags(self, tag: str):
+        assert is_valid_release_tag(tag) is True
+
+    @pytest.mark.parametrize(
+        "tag",
+        [
+            "r0.0",  # zero major
+            "r0.1",  # zero major
+            "r1.0",  # zero minor (not used in CAMARA history)
+            "r4.x",  # non-numeric minor
+            "r4",  # missing minor
+            "4.2",  # missing leading r
+            "R4.2",  # uppercase R
+            "r04.2",  # leading-zero major
+            "r4.02",  # leading-zero minor
+            "r4.2-rc.1",  # extra suffix
+            "r4.2 (1.2.0-rc.1)",  # enriched format — not a valid raw tag
+            "",  # empty
+            " r4.2",  # leading whitespace
+            "r4.2 ",  # trailing whitespace
+        ],
+    )
+    def test_invalid_tags(self, tag: str):
+        assert is_valid_release_tag(tag) is False
