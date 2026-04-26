@@ -143,6 +143,7 @@ class TestParseArgs:
         assert result.repo_path == Path(".")
         assert result.tooling_path == Path(".tooling")
         assert result.output_dir == Path("validation-output")
+        assert result.config_path == ""
         assert result.repo_name == ""
         assert result.pr_number is None
         assert result.release_plan_changed is None
@@ -152,6 +153,7 @@ class TestParseArgs:
             "VALIDATION_REPO_PATH": "/my/repo",
             "VALIDATION_TOOLING_PATH": "/my/tooling",
             "VALIDATION_OUTPUT_DIR": "/my/output",
+            "VALIDATION_CONFIG_PATH": "/my/runner/.tooling-config/config/validation-settings.yaml",
             "VALIDATION_REPO_NAME": "camaraproject/QoD",
             "VALIDATION_REPO_OWNER": "camaraproject",
             "VALIDATION_EVENT_NAME": "pull_request",
@@ -169,6 +171,7 @@ class TestParseArgs:
             result = parse_args()
         assert result.repo_path == Path("/my/repo")
         assert result.repo_name == "camaraproject/QoD"
+        assert result.config_path == "/my/runner/.tooling-config/config/validation-settings.yaml"
         assert result.mode == "pre-snapshot"
         assert result.profile == "strict"
         assert result.pr_number == 42
@@ -203,11 +206,35 @@ class TestResolveToolingPaths:
 
     def test_paths_resolved(self):
         result = resolve_tooling_paths(Path("/tooling"))
-        assert result.config_file == Path("/tooling/validation/config/validation-config.yaml")
-        assert result.config_schema == Path("/tooling/validation/schemas/validation-config-schema.yaml")
+        assert result.config_file == Path("/tooling/config/validation-settings.yaml")
+        assert result.config_schema == Path("/tooling/validation/schemas/validation-settings-schema.yaml")
         assert result.release_plan_schema == Path("/tooling/validation/schemas/release-plan-schema.yaml")
         assert result.linting_config_dir == Path("/tooling/linting/config")
         assert result.rules_dir == Path("/tooling/validation/rules")
+
+    def test_paths_use_config_path_override(self):
+        """When config_path_override is set, the orchestrator reads from
+        that absolute path instead of the in-tree fallback.  This is the
+        path the workflow uses to point at config/validation-settings.yaml
+        fetched from main of camaraproject/tooling."""
+        result = resolve_tooling_paths(
+            Path("/tooling"),
+            config_path_override="/runner/.tooling-config/config/validation-settings.yaml",
+        )
+        assert result.config_file == Path(
+            "/runner/.tooling-config/config/validation-settings.yaml"
+        )
+        # Schema always travels with the workflow code at the pinned ref,
+        # so it stays resolved against tooling_path.
+        assert result.config_schema == Path(
+            "/tooling/validation/schemas/validation-settings-schema.yaml"
+        )
+
+    def test_paths_in_tree_fallback_when_override_empty(self):
+        result = resolve_tooling_paths(Path("/tooling"), config_path_override="")
+        assert result.config_file == Path(
+            "/tooling/config/validation-settings.yaml"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -609,8 +636,6 @@ class TestMainPipeline:
         mock_gate.return_value = MagicMock(
             stage="enabled",
             should_continue=True,
-            is_fork=False,
-            fork_override_applied=False,
             reason="",
             pr_profile="standard",
             release_profile="standard",
@@ -644,8 +669,7 @@ class TestMainPipeline:
         (tmp_path / "tooling").mkdir()
 
         mock_gate.return_value = MagicMock(
-            stage="enabled", should_continue=True, is_fork=False,
-            fork_override_applied=False, reason="",
+            stage="enabled", should_continue=True, reason="",
             pr_profile="standard", release_profile="standard",
         )
         mock_context.return_value = _make_context()
@@ -671,7 +695,6 @@ class TestMainPipeline:
 
         mock_gate.return_value = MagicMock(
             stage="disabled", should_continue=False,
-            is_fork=False, fork_override_applied=False,
             reason="Validation is not enabled for this repository",
         )
 
@@ -695,8 +718,7 @@ class TestMainPipeline:
         (tmp_path / "tooling").mkdir()
 
         mock_gate.return_value = MagicMock(
-            stage="enabled", should_continue=True, is_fork=False,
-            fork_override_applied=False, reason="",
+            stage="enabled", should_continue=True, reason="",
             pr_profile="standard", release_profile="standard",
         )
         mock_context.return_value = _make_context()
