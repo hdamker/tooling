@@ -286,8 +286,12 @@
           trigger_types: [release-automation]
         level: error
   hint: >-
-    Merge the auto-created sync PR or trigger the release automation
-    workflow manually (workflow_dispatch) to update code/common/ files.
+    `code/common/` is managed by the sync mechanism. If your PR diff
+    includes manual edits to `code/common/`, revert them. If your branch
+    is missing files that should be present, merge `main` into your
+    branch — it carries the latest synced files; if `main` is also
+    behind, merge the auto-created sync PR or dispatch the release
+    automation workflow.
 
 # P-022: check-release-plan-exclusivity
 # release-plan.yaml changes must be in their own PR — any co-changed
