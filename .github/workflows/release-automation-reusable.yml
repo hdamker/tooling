@@ -998,6 +998,74 @@ jobs:
         with:
           node-version: "24"
 
+      # ── Central validation settings (main) ─────────────────────────
+      #
+      # Pre-snapshot validation reads `config/validation-settings.yaml`
+      # from `main` of camaraproject/tooling so a stage flip on main takes
+      # effect on the next snapshot run without a tag move.
+      #
+      # No fallback to the pinned-ref copy here — release automation
+      # produces durable artifacts (snapshots, release branches, eventually
+      # tags and releases) and must not silently use stale config. If main
+      # is unreachable, this step fails before any irreversible action.
+      # This differs from the validation reusable workflow, which is
+      # read-only and falls back to the pinned-ref copy with a warning.
+      - name: Checkout central validation settings (main)
+        uses: actions/checkout@v6
+        with:
+          repository: camaraproject/tooling
+          ref: main
+          sparse-checkout: config
+          path: _tooling-config
+
+      - name: Validate central settings against schema
+        shell: bash
+        run: |
+          pip install --quiet pyyaml==6.0.3 jsonschema==4.26.0
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+
+          import yaml
+          from jsonschema import Draft202012Validator
+
+          config_path = Path("_tooling-config/config/validation-settings.yaml")
+          schema_path = Path("_tooling/validation/schemas/validation-settings-schema.yaml")
+
+          if not config_path.exists():
+              print(
+                  f"::error title=Validation settings missing::"
+                  f"{config_path} not present on tooling/main; "
+                  f"aborting before snapshot creation"
+              )
+              sys.exit(1)
+          if not schema_path.exists():
+              print(
+                  f"::error title=Validation settings schema missing::"
+                  f"{schema_path} not present on the pinned tooling ref"
+              )
+              sys.exit(1)
+
+          config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+          schema = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+
+          errors = list(Draft202012Validator(schema).iter_errors(config))
+          if errors:
+              for err in errors:
+                  loc = ".".join(str(p) for p in err.absolute_path) or "(root)"
+                  print(
+                      f"::error title=Validation settings invalid::"
+                      f"{loc}: {err.message}"
+                  )
+              print(
+                  "::error::Aborting before snapshot creation — "
+                  "validation settings on tooling/main fail schema validation"
+              )
+              sys.exit(1)
+
+          print(f"Validation settings: {config_path} (main) — schema-valid")
+          PY
+
       - name: Run pre-snapshot validation
         id: validation
         uses: ./_tooling/shared-actions/run-validation
@@ -1006,6 +1074,7 @@ jobs:
           tooling_path: ${{ github.workspace }}/_tooling
           mode: pre-snapshot
           tooling_ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          config_path: ${{ github.workspace }}/_tooling-config/config/validation-settings.yaml
 
       - name: Gate on validation result
         id: validation-gate
