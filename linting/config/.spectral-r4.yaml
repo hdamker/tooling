@@ -116,12 +116,14 @@ rules:
     recommended: true  # Set to true/false to enable/disable this rule
 
   camara-security-no-secrets-in-path-or-query-parameters:
-    message: "Sensitive data found in path: {{error}} Consider avoiding the use of sensitive data "
+    message: "{{error}}"
     severity: warn
     description: |
-      This rule checks for sensitive data ('MSISDN' and 'IMSI') in API paths and suggests avoiding their use.
+      Flags 'MSISDN', 'IMSI', and 'phoneNumber' appearing as standalone
+      tokens in path strings or in path/query parameter names.
     given:
       - "$.paths"
+      - "$..parameters[?(@.in != 'header')]"
     then:
       function: camara-security-no-secrets-in-path-or-query-parameters
     recommended: true  # Set to true/false to enable/disable this rule
@@ -149,18 +151,20 @@ rules:
     recommended: true  # Set to true/false to enable/disable this rule
 
   camara-reserved-words:
-    message: "Reserved words found {{error}} Consider avoiding the use of reserved word "
+    message: "{{error}}"
     severity: warn
     description: |
-      This rule checks Reserved words must not be used in the following parts of an API specification [Paths, Request Body properties, Component, Operation Id, Security Schema]
+      Reserved words (Java/etc. language keywords used by code-generation
+      tooling) must not appear as standalone tokens in path segments,
+      parameter names, schema/property/component names, security scheme
+      names, or operationId values.
     given:
       - "$.paths"                              # Paths
-      - "$..parameters[*]"                     # Path or Query Parameter Names:
-      - "$..components.schemas.*.properties.*"   # Request and Response body parameter
-      - "$.paths.*."                           # Path and Operation Names:
-      - "$.components.securitySchemes"         # Security Schemes:
-      - "$.components.*.*"                     # Component Names:
-      - "$.paths.*.*.operationId"              # OperationIds:
+      - "$..parameters[*]"                     # Path or Query Parameter Names
+      - "$..components.schemas.*.properties.*" # Request and Response body parameter names
+      - "$.components.securitySchemes"         # Security Schemes
+      - "$.components.*.*"                     # Component Names
+      - "$.paths.*.*.operationId"              # OperationIds
     then:
       function: camara-reserved-words
     recommended: true  # Set to true/false to enable/disable this rule
