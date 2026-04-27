@@ -72,6 +72,12 @@ class OrchestratorArgs:
     tooling_path: Path
     output_dir: Path
 
+    # Optional override for the validation settings file path.  When set
+    # by the workflow, points at the central settings file fetched from
+    # main of camaraproject/tooling (independent of the pinned tooling ref).
+    # When empty, falls back to the in-tree copy at the pinned ref.
+    config_path: str
+
     repo_name: str  # e.g. "camaraproject/QualityOnDemand"
     repo_owner: str  # e.g. "camaraproject"
     event_name: str  # e.g. "pull_request", "workflow_dispatch"
@@ -155,6 +161,7 @@ def parse_args() -> OrchestratorArgs:
         repo_path=Path(_env("REPO_PATH", ".")),
         tooling_path=Path(_env("TOOLING_PATH", ".tooling")),
         output_dir=Path(_env("OUTPUT_DIR", "validation-output")),
+        config_path=_env("CONFIG_PATH"),
         repo_name=_env("REPO_NAME"),
         repo_owner=_env("REPO_OWNER"),
         event_name=_env("EVENT_NAME"),
@@ -200,11 +207,27 @@ class ToolingPaths:
     rules_dir: Path
 
 
-def resolve_tooling_paths(tooling_path: Path) -> ToolingPaths:
-    """Build all paths relative to the tooling checkout."""
+def resolve_tooling_paths(
+    tooling_path: Path, config_path_override: str = ""
+) -> ToolingPaths:
+    """Build all paths relative to the tooling checkout.
+
+    Args:
+        tooling_path: The OIDC-pinned tooling checkout root.
+        config_path_override: Optional absolute path to the validation
+            settings file.  When set, this takes precedence over the in-tree
+            copy and lets the workflow point the orchestrator at a separately
+            checked-out copy of `config/validation-settings.yaml` from main
+            of the tooling repo.  When empty, the in-tree copy at the pinned
+            ref is used (the last-known-good fallback).
+    """
+    if config_path_override:
+        config_file = Path(config_path_override)
+    else:
+        config_file = tooling_path / "config" / "validation-settings.yaml"
     return ToolingPaths(
-        config_file=tooling_path / "validation" / "config" / "validation-config.yaml",
-        config_schema=tooling_path / "validation" / "schemas" / "validation-config-schema.yaml",
+        config_file=config_file,
+        config_schema=tooling_path / "validation" / "schemas" / "validation-settings-schema.yaml",
         release_plan_schema=tooling_path / "validation" / "schemas" / "release-plan-schema.yaml",
         release_metadata_schema=tooling_path / "validation" / "schemas" / "release-metadata-schema.yaml",
         linting_config_dir=tooling_path / "linting" / "config",
@@ -454,7 +477,8 @@ def main() -> int:
     )
 
     # Resolve tooling paths
-    paths = resolve_tooling_paths(args.tooling_path)
+    paths = resolve_tooling_paths(args.tooling_path, args.config_path)
+    logger.info("Validation settings: %s", paths.config_file)
 
     # ------------------------------------------------------------------
     # Step 1: Config gate
@@ -467,12 +491,9 @@ def main() -> int:
         trigger_type=args.event_name,
     )
     logger.info(
-        "Config gate: stage=%s continue=%s fork=%s override=%s "
-        "pr_profile=%s release_profile=%s",
+        "Config gate: stage=%s continue=%s pr_profile=%s release_profile=%s",
         stage_result.stage,
         stage_result.should_continue,
-        stage_result.is_fork,
-        stage_result.fork_override_applied,
         stage_result.pr_profile,
         stage_result.release_profile,
     )

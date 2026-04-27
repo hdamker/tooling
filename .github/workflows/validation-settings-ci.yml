@@ -1,0 +1,76 @@
+name: Validation Settings CI
+
+# Schema-validates config/validation-settings.yaml on every PR that touches it
+# or its schema.  This is the gate that protects production from a malformed
+# central settings file landing on main, since main is the authoritative
+# runtime source for every caller.
+#
+# The reusable validation workflow has a pinned-ref fallback for runtime
+# breakage, but the cheaper line of defense is to never let a malformed file
+# merge in the first place.
+
+on:
+  pull_request:
+    paths:
+      - "config/validation-settings.yaml"
+      - "validation/schemas/validation-settings-schema.yaml"
+      - ".github/workflows/validation-settings-ci.yml"
+  push:
+    branches:
+      - main
+      - validation-framework
+    paths:
+      - "config/validation-settings.yaml"
+      - "validation/schemas/validation-settings-schema.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Schema-validate validation-settings.yaml
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install --quiet pyyaml==6.0.3 jsonschema==4.26.0
+
+      - name: Schema validation
+        run: |
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+
+          import yaml
+          from jsonschema import Draft202012Validator
+
+          config_path = Path("config/validation-settings.yaml")
+          schema_path = Path("validation/schemas/validation-settings-schema.yaml")
+
+          if not config_path.exists():
+              print(f"::error::{config_path} is missing")
+              sys.exit(1)
+          if not schema_path.exists():
+              print(f"::error::{schema_path} is missing")
+              sys.exit(1)
+
+          config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+          schema = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+
+          validator = Draft202012Validator(schema)
+          errors = list(validator.iter_errors(config))
+          if errors:
+              for err in errors:
+                  loc = ".".join(str(p) for p in err.absolute_path) or "(root)"
+                  print(f"::error file={config_path}::{loc}: {err.message}")
+              sys.exit(1)
+
+          print(f"OK: {config_path} validates against {schema_path}")
+          PY

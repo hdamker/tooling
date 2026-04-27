@@ -1,11 +1,16 @@
 """Central config gate for the CAMARA validation framework.
 
-Reads validation-config.yaml, validates it against its JSON Schema,
-and resolves the effective rollout stage for a given repository.
+Reads validation-settings.yaml, validates it against its JSON Schema, and
+resolves the effective rollout stage for a given repository.
 
-Design doc references:
-  - Section 6.2: central config schema
-  - Section 8.1 steps 1-7: config gate logic
+The configuration data is read from main of camaraproject/tooling at runtime
+(independent of the caller's pinned tooling ref); the schema lives next to
+this code at the pinned ref so the schema and the consuming code stay in
+lockstep.
+
+Forward-compatibility model: schema additions are always backward compatible.
+Older callers reading newer config files ignore unknown keys; only known
+field values are enum/type-checked.
 """
 
 from dataclasses import dataclass
@@ -19,10 +24,6 @@ from jsonschema import Draft202012Validator
 # Constants
 # ---------------------------------------------------------------------------
 
-# Upstream GitHub org names.  Repos owned by these orgs are "upstream";
-# all others are forks.
-UPSTREAM_ORGS = frozenset({"camaraproject", "GSMA-Open-Gateway"})
-
 STAGE_DISABLED = "disabled"
 STAGE_ADVISORY = "advisory"
 STAGE_ENABLED = "enabled"
@@ -33,7 +34,7 @@ STAGE_ENABLED = "enabled"
 
 
 class ConfigValidationError(Exception):
-    """Raised when validation-config.yaml fails schema validation."""
+    """Raised when validation-settings.yaml fails schema validation."""
 
     def __init__(self, errors: List[str]):
         self.errors = errors
@@ -53,18 +54,16 @@ class StageGateResult:
     """Result of stage gate resolution.
 
     Attributes:
-        stage: The resolved stage (disabled, advisory, standard).
+        stage: The resolved stage (disabled, advisory, enabled).
         should_continue: Whether the validation pipeline should proceed.
         reason: Human-readable explanation when should_continue is False.
-        is_fork: Whether the workflow is running in a fork.
-        fork_override_applied: Whether the fork owner override changed the stage.
+        pr_profile: Resolved PR-time profile (default: standard).
+        release_profile: Resolved release-time profile (default: standard).
     """
 
     stage: str
     should_continue: bool
     reason: str = ""
-    is_fork: bool = False
-    fork_override_applied: bool = False
     pr_profile: str = "standard"
     release_profile: str = "standard"
 
@@ -77,11 +76,11 @@ class StageGateResult:
 def load_and_validate_config(
     config_path: Path, schema_path: Path
 ) -> dict:
-    """Load validation-config.yaml and validate against its JSON Schema.
+    """Load validation-settings.yaml and validate against its JSON Schema.
 
     Args:
-        config_path: Path to validation-config.yaml.
-        schema_path: Path to validation-config-schema.yaml.
+        config_path: Path to validation-settings.yaml.
+        schema_path: Path to validation-settings-schema.yaml.
 
     Returns:
         Parsed and validated config dict.
@@ -122,61 +121,44 @@ def resolve_stage(
 ) -> StageGateResult:
     """Resolve the effective rollout stage for a repository.
 
-    Pure function — no I/O.  Implements design doc section 8.1, steps 2-7.
+    Pure function — no I/O.
 
     Args:
         config: Validated config dict (output of load_and_validate_config).
         repo_full_name: Full GitHub repository name (e.g. "camaraproject/QoD").
-        repo_owner: GitHub repository owner (e.g. "camaraproject").
+        repo_owner: GitHub repository owner.  Retained in the signature for
+            caller stability; not used for stage resolution.
         trigger_type: Raw GitHub event name (e.g. "pull_request",
             "workflow_dispatch").
 
     Returns:
         StageGateResult with the resolved stage and gate decision.
     """
-    # Step 2: extract repo name (strip owner prefix)
+    del repo_owner  # accepted for caller stability, not used
+
     repo_name = repo_full_name.split("/", 1)[-1]
 
-    # Step 3: look up stage (fall back to defaults.stage)
     repositories = config.get("repositories") or {}
     repo_entry = repositories.get(repo_name)
-    stage = repo_entry["stage"] if repo_entry else config["defaults"]["stage"]
-
-    # Step 4: fork override
-    is_fork = repo_owner not in UPSTREAM_ORGS
-    fork_override_applied = False
-
-    if is_fork:
-        fork_owners = config.get("fork_owners") or []
-        if repo_owner in fork_owners:
-            stage = STAGE_ENABLED
-            fork_override_applied = True
-
-    # Resolve profiles from config
     defaults = config.get("defaults") or {}
-    if fork_override_applied:
-        pr_profile = "standard"
-        release_profile = "standard"
-    else:
-        pr_profile = (
-            (repo_entry or {}).get("pr_profile")
-            or defaults.get("pr_profile")
-            or "standard"
-        )
-        release_profile = (
-            (repo_entry or {}).get("release_profile")
-            or defaults.get("release_profile")
-            or "standard"
-        )
+    stage = repo_entry["stage"] if repo_entry else defaults["stage"]
 
-    # Steps 5-7: gate decisions
+    pr_profile = (
+        (repo_entry or {}).get("pr_profile")
+        or defaults.get("pr_profile")
+        or "standard"
+    )
+    release_profile = (
+        (repo_entry or {}).get("release_profile")
+        or defaults.get("release_profile")
+        or "standard"
+    )
+
     if stage == STAGE_DISABLED:
         return StageGateResult(
             stage=stage,
             should_continue=False,
             reason="Validation is not enabled for this repository",
-            is_fork=is_fork,
-            fork_override_applied=fork_override_applied,
             pr_profile=pr_profile,
             release_profile=release_profile,
         )
@@ -187,10 +169,8 @@ def resolve_stage(
             should_continue=False,
             reason=(
                 "Validation is in advisory mode "
-                "\u2014 use workflow_dispatch to run"
+                "— use workflow_dispatch to run"
             ),
-            is_fork=is_fork,
-            fork_override_applied=fork_override_applied,
             pr_profile=pr_profile,
             release_profile=release_profile,
         )
@@ -198,8 +178,6 @@ def resolve_stage(
     return StageGateResult(
         stage=stage,
         should_continue=True,
-        is_fork=is_fork,
-        fork_override_applied=fork_override_applied,
         pr_profile=pr_profile,
         release_profile=release_profile,
     )

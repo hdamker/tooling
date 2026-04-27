@@ -1,12 +1,26 @@
-# JSON Schema for the central validation configuration file.
-# Located at validation-config.yaml in the tooling repository root.
-# Read by the reusable workflow on every run to determine per-repo behavior.
+# JSON Schema for the central validation settings file.
+#
+# Lives next to the workflow code so a tagged release of the workflow validates
+# against exactly the schema shape that release knows how to consume.  The data
+# (config/validation-settings.yaml) lives on `main` of camaraproject/tooling
+# and is read at runtime independent of the caller's pinned tooling ref.
+#
+# Forward-compatibility rules baked into the schema:
+#   - additionalProperties is `true` at every level so older callers do not
+#     reject configs that contain fields added in newer schema revisions.
+#     This makes hotfix-gated fields (introduced by a hotfix tag and applied
+#     to a subset of repositories) safe to ship without re-cutting any
+#     already-deployed tag.
+#   - Known fields keep their enum / type constraints, so value-level typos
+#     (e.g. `stage: enable`) are still rejected loudly at PR-CI time.
+#   - `version` is an integer; schema additions are always backward
+#     compatible (additive only), so no `version: 2` is planned.
 
 $schema: "https://json-schema.org/draft/2020-12/schema"
-title: CAMARA Validation Config
+title: CAMARA Validation Settings
 description: >
   Central configuration controlling which repositories have validation
-  enabled and at what rollout stage.
+  enabled and at what rollout stage.  Read from main of tooling at runtime.
 
 type: object
 required:
@@ -16,8 +30,7 @@ required:
 properties:
   version:
     type: integer
-    const: 1
-    description: Schema version.  Allows future evolution.
+    description: Schema version.  Informational; no breaking-change bumps planned.
 
   defaults:
     type: object
@@ -43,20 +56,11 @@ properties:
         description: >
           Default profile for release-automation and release-review
           validation.
-    additionalProperties: false
-
-  fork_owners:
-    type: array
-    items:
-      type: string
-    description: >
-      GitHub usernames allowed to test in forks.  When the workflow runs
-      in a fork owned by a listed user, the stage is overridden to
-      "enabled" regardless of the upstream repo's configured stage.
+    additionalProperties: true
 
   repositories:
     type: object
-    description: Per-repository stage overrides.
+    description: Per-repository overrides keyed by repository name.
     additionalProperties:
       type: object
       required: [stage]
@@ -75,6 +79,6 @@ properties:
           description: >
             Profile for release-automation and release-review validation
             on this repository.
-      additionalProperties: false
+      additionalProperties: true
 
-additionalProperties: false
+additionalProperties: true

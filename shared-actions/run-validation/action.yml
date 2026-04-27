@@ -74,6 +74,15 @@ inputs:
     description: 'Tooling ref used for this run (for diagnostics)'
     required: false
     default: ''
+  config_path:
+    description: >
+      Absolute path to the validation settings file (`validation-settings.yaml`).
+      When set, the orchestrator reads from this path instead of the in-tree
+      copy at the pinned tooling ref.  Used by the workflow to point at a
+      copy fetched from main of the tooling repo, decoupling stage flips
+      from tag moves.  When empty, falls back to the pinned-ref copy.
+    required: false
+    default: ''
 
 outputs:
   result:
@@ -162,6 +171,7 @@ runs:
         VALIDATION_WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         VALIDATION_TOOLING_REF: ${{ inputs.tooling_ref }}
         VALIDATION_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        VALIDATION_CONFIG_PATH: ${{ inputs.config_path }}
       run: |
         export PATH="${PATH_NODE_MODULES}:${PATH}"
         python -m validation.orchestrator

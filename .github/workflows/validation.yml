@@ -129,11 +129,57 @@ jobs:
           repository: ${{ steps.resolve-ref.outputs.tooling_checkout_repo }}
           ref: ${{ steps.resolve-ref.outputs.tooling_checkout_ref }}
           sparse-checkout: |
+            config
             linting/config
             validation
             shared-actions
             tooling_lib
           path: .tooling
+
+      # ── Step 3b: Checkout central validation settings (main) ───────
+      #
+      # The validation settings file lives on `main` of camaraproject/tooling
+      # so per-repo stage flips (and any other forward-compatible settings
+      # change) take effect on the next workflow run without re-tagging the
+      # workflow.  Schema for this file ships with the workflow code at the
+      # pinned ref (`validation/schemas/validation-settings-schema.yaml`).
+      #
+      # `continue-on-error: true` lets the run fall back to the in-tree copy
+      # at the pinned ref if main is unreachable; the fallback decision is
+      # logged in the next step and surfaced as an annotation.
+      - name: Checkout central validation settings (main)
+        id: checkout-config
+        continue-on-error: true
+        uses: actions/checkout@v6
+        with:
+          repository: camaraproject/tooling
+          ref: main
+          sparse-checkout: config
+          path: .tooling-config
+
+      - name: Resolve validation settings path
+        id: resolve-config
+        shell: bash
+        env:
+          CHECKOUT_OUTCOME: ${{ steps.checkout-config.outcome }}
+        run: |
+          MAIN_PATH="${GITHUB_WORKSPACE}/.tooling-config/config/validation-settings.yaml"
+          FALLBACK_PATH="${GITHUB_WORKSPACE}/.tooling/config/validation-settings.yaml"
+
+          if [ "$CHECKOUT_OUTCOME" = "success" ] && [ -f "$MAIN_PATH" ]; then
+            echo "config_path=${MAIN_PATH}" >> "$GITHUB_OUTPUT"
+            echo "source=main" >> "$GITHUB_OUTPUT"
+            echo "Validation settings: ${MAIN_PATH} (main)"
+          elif [ -f "$FALLBACK_PATH" ]; then
+            echo "config_path=${FALLBACK_PATH}" >> "$GITHUB_OUTPUT"
+            echo "source=fallback" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Validation settings::Falling back to pinned-ref copy of validation-settings.yaml — main checkout failed or file missing on main"
+          else
+            echo "config_path=" >> "$GITHUB_OUTPUT"
+            echo "source=missing" >> "$GITHUB_OUTPUT"
+            echo "::error title=Validation settings missing::Neither main nor pinned-ref copy of validation-settings.yaml is available"
+            exit 1
+          fi
 
       # ── Step 4: Setup Python ───────────────────────────────────────
       - name: Setup Python
@@ -219,6 +265,7 @@ jobs:
           icm_tag_exists: ${{ steps.detect-deps.outputs.icm_tag_exists || '' }}
           non_release_plan_files_changed: ${{ steps.detect-changes.outputs.non_release_plan_files_changed || '[]' }}
           tooling_ref: ${{ steps.resolve-ref.outputs.tooling_checkout_ref }}
+          config_path: ${{ steps.resolve-config.outputs.config_path }}
 
       # ── Step 8: Mint validation app token (PR only) ──────────────
       - name: Mint validation app token

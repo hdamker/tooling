@@ -17,13 +17,15 @@ from validation.config.config_gate import (
 # ---------------------------------------------------------------------------
 
 SCHEMA_PATH = (
-    Path(__file__).resolve().parent.parent / "schemas" / "validation-config-schema.yaml"
+    Path(__file__).resolve().parent.parent
+    / "schemas"
+    / "validation-settings-schema.yaml"
 )
 
 
 @pytest.fixture
 def schema_path():
-    """Path to the real validation-config schema."""
+    """Path to the real validation-settings schema."""
     return SCHEMA_PATH
 
 
@@ -33,7 +35,6 @@ def sample_config():
     return {
         "version": 1,
         "defaults": {"stage": "disabled"},
-        "fork_owners": ["hdamker", "rartych"],
         "repositories": {
             "ReleaseTest": {"stage": "advisory"},
             "QualityOnDemand": {"stage": "enabled"},
@@ -63,18 +64,11 @@ class TestLoadAndValidateConfig:
         assert "ReleaseTest" in result["repositories"]
 
     def test_minimal_config(self, tmp_path, schema_path):
-        """Only required fields — no fork_owners, no repositories."""
+        """Only required fields — no repositories."""
         cfg = {"version": 1, "defaults": {"stage": "disabled"}}
         cfg_path = _write_yaml(tmp_path / "config.yaml", cfg)
         result = load_and_validate_config(cfg_path, schema_path)
         assert result["version"] == 1
-
-    def test_invalid_version_rejected(self, tmp_path, schema_path):
-        cfg = {"version": 2, "defaults": {"stage": "disabled"}}
-        cfg_path = _write_yaml(tmp_path / "config.yaml", cfg)
-        with pytest.raises(ConfigValidationError) as exc_info:
-            load_and_validate_config(cfg_path, schema_path)
-        assert "version" in str(exc_info.value).lower()
 
     def test_invalid_stage_rejected(self, tmp_path, schema_path):
         cfg = {"version": 1, "defaults": {"stage": "blocking"}}
@@ -96,26 +90,12 @@ class TestLoadAndValidateConfig:
             load_and_validate_config(cfg_path, schema_path)
         assert "defaults" in str(exc_info.value).lower()
 
-    def test_extra_properties_rejected(self, tmp_path, schema_path):
-        cfg = {"version": 1, "defaults": {"stage": "disabled"}, "unknown_key": True}
-        cfg_path = _write_yaml(tmp_path / "config.yaml", cfg)
-        with pytest.raises(ConfigValidationError):
-            load_and_validate_config(cfg_path, schema_path)
-
     def test_empty_file_rejected(self, tmp_path, schema_path):
         cfg_path = tmp_path / "config.yaml"
         cfg_path.write_text("", encoding="utf-8")
         with pytest.raises(ConfigValidationError) as exc_info:
             load_and_validate_config(cfg_path, schema_path)
         assert "empty" in str(exc_info.value).lower()
-
-    def test_multiple_errors_collected(self, tmp_path, schema_path):
-        """Config with several violations — all should be reported."""
-        cfg = {"version": 99, "extra": True}  # wrong version, missing defaults, extra key
-        cfg_path = _write_yaml(tmp_path / "config.yaml", cfg)
-        with pytest.raises(ConfigValidationError) as exc_info:
-            load_and_validate_config(cfg_path, schema_path)
-        assert len(exc_info.value.errors) >= 2
 
     def test_profiles_in_defaults_accepted(self, tmp_path, schema_path):
         """Default profiles are valid optional fields."""
@@ -149,11 +129,74 @@ class TestLoadAndValidateConfig:
         assert result["repositories"]["TestRepo"]["pr_profile"] == "advisory"
 
     def test_invalid_profile_value_rejected(self, tmp_path, schema_path):
-        """Profile values must be advisory/standard/strict."""
+        """Profile values must be advisory/standard/strict — value-level
+        typos are still caught even with permissive schema."""
         cfg = {
             "version": 1,
             "defaults": {"stage": "disabled", "pr_profile": "blocking"},
         }
+        cfg_path = _write_yaml(tmp_path / "config.yaml", cfg)
+        with pytest.raises(ConfigValidationError):
+            load_and_validate_config(cfg_path, schema_path)
+
+
+# ---------------------------------------------------------------------------
+# TestForwardCompat — exercises the additionalProperties: true rule across
+# all levels.  These tests defend the hotfix-gated-field scenario: a newer
+# tag may add a field that older callers must silently ignore rather than
+# reject.
+# ---------------------------------------------------------------------------
+
+
+class TestForwardCompat:
+    """Schema accepts unknown keys at every level; older callers ignore them."""
+
+    def test_unknown_top_level_key_accepted(self, tmp_path, schema_path):
+        cfg = {
+            "version": 1,
+            "defaults": {"stage": "disabled"},
+            "release_automation": {"placeholder": True},
+        }
+        cfg_path = _write_yaml(tmp_path / "config.yaml", cfg)
+        result = load_and_validate_config(cfg_path, schema_path)
+        assert result["defaults"]["stage"] == "disabled"
+
+    def test_unknown_key_in_defaults_accepted(self, tmp_path, schema_path):
+        cfg = {
+            "version": 1,
+            "defaults": {"stage": "disabled", "future_default": 42},
+        }
+        cfg_path = _write_yaml(tmp_path / "config.yaml", cfg)
+        result = load_and_validate_config(cfg_path, schema_path)
+        assert result["defaults"]["future_default"] == 42
+
+    def test_unknown_key_in_repo_entry_accepted(self, tmp_path, schema_path):
+        """Hotfix scenario: a hotfix tag adds use_hotfix_path; older callers
+        ignore the field but still resolve stage from the known fields."""
+        cfg = {
+            "version": 1,
+            "defaults": {"stage": "disabled"},
+            "repositories": {
+                "AffectedRepo": {"stage": "enabled", "use_hotfix_path": True},
+            },
+        }
+        cfg_path = _write_yaml(tmp_path / "config.yaml", cfg)
+        result = load_and_validate_config(cfg_path, schema_path)
+        repo = result["repositories"]["AffectedRepo"]
+        assert repo["stage"] == "enabled"
+        assert repo["use_hotfix_path"] is True
+
+        gate = resolve_stage(
+            result, "camaraproject/AffectedRepo", "camaraproject", "pull_request"
+        )
+        assert gate.stage == "enabled"
+        assert gate.should_continue is True
+
+    def test_value_typo_still_rejected(self, tmp_path, schema_path):
+        """`stage: enable` (typo) must still be rejected — the enum
+        constraint is what catches misconfigured *values*; permissive
+        additionalProperties does not relax value-level checks."""
+        cfg = {"version": 1, "defaults": {"stage": "enable"}}
         cfg_path = _write_yaml(tmp_path / "config.yaml", cfg)
         with pytest.raises(ConfigValidationError):
             load_and_validate_config(cfg_path, schema_path)
@@ -213,47 +256,6 @@ class TestResolveStage:
         assert result.should_continue is True
         assert result.stage == "enabled"
 
-    def test_fork_listed_owner_overrides_to_enabled(self, sample_config):
-        result = resolve_stage(
-            sample_config,
-            "hdamker/QualityOnDemand",
-            "hdamker",
-            "pull_request",
-        )
-        assert result.stage == "enabled"
-        assert result.is_fork is True
-        assert result.fork_override_applied is True
-        assert result.should_continue is True
-
-    def test_fork_unlisted_owner_keeps_resolved_stage(self, sample_config):
-        result = resolve_stage(
-            sample_config,
-            "unknown-user/QualityOnDemand",
-            "unknown-user",
-            "pull_request",
-        )
-        # QualityOnDemand is "enabled" in config, but no fork override for
-        # an unlisted owner — the stage stays as looked up.
-        assert result.stage == "enabled"
-        assert result.is_fork is True
-        assert result.fork_override_applied is False
-
-    def test_upstream_owner_not_fork(self, sample_config):
-        result = resolve_stage(
-            sample_config, "camaraproject/ReleaseTest", "camaraproject", "workflow_dispatch"
-        )
-        assert result.is_fork is False
-        assert result.fork_override_applied is False
-
-    def test_gsma_owner_is_upstream(self, sample_config):
-        result = resolve_stage(
-            sample_config,
-            "GSMA-Open-Gateway/SomeAPI",
-            "GSMA-Open-Gateway",
-            "pull_request",
-        )
-        assert result.is_fork is False
-
     def test_repo_name_extracted_from_full_name(self, sample_config):
         """'camaraproject/QualityOnDemand' should look up 'QualityOnDemand'."""
         result = resolve_stage(
@@ -264,47 +266,23 @@ class TestResolveStage:
         )
         assert result.stage == "enabled"
 
-    def test_fork_disabled_unlisted_stays_disabled(self, sample_config):
-        """Unlisted fork owner of a disabled repo -> stays disabled."""
+    def test_fork_owner_no_special_treatment(self, sample_config):
+        """Forks no longer receive an automatic stage override.  A fork PR
+        falls under the same default stage as upstream; fork developers
+        use workflow_dispatch (or tooling_ref_override) to run validation."""
         result = resolve_stage(
             sample_config,
-            "stranger/UnknownRepo",
-            "stranger",
-            "workflow_dispatch",
-        )
-        assert result.stage == "disabled"
-        assert result.should_continue is False
-        assert result.is_fork is True
-        assert result.fork_override_applied is False
-
-    def test_fork_disabled_listed_overrides_to_enabled(self, sample_config):
-        """Listed fork owner of a disabled repo -> overrides to enabled."""
-        result = resolve_stage(
-            sample_config,
-            "hdamker/UnknownRepo",
+            "hdamker/QualityOnDemand",
             "hdamker",
-            "workflow_dispatch",
+            "pull_request",
         )
+        # QualityOnDemand is enabled in config, so the fork PR continues
+        # with the same stage as upstream — no `is_fork` or override surface.
         assert result.stage == "enabled"
         assert result.should_continue is True
-        assert result.fork_override_applied is True
-
-    def test_empty_fork_owners(self):
-        cfg = {
-            "version": 1,
-            "defaults": {"stage": "disabled"},
-            "fork_owners": [],
-            "repositories": {},
-        }
-        result = resolve_stage(cfg, "hdamker/Repo", "hdamker", "workflow_dispatch")
-        assert result.stage == "disabled"
-        assert result.fork_override_applied is False
-
-    def test_no_fork_owners_key(self):
-        cfg = {"version": 1, "defaults": {"stage": "disabled"}, "repositories": {}}
-        result = resolve_stage(cfg, "hdamker/Repo", "hdamker", "workflow_dispatch")
-        assert result.stage == "disabled"
-        assert result.fork_override_applied is False
+        # The result no longer carries fork-related fields.
+        assert not hasattr(result, "is_fork")
+        assert not hasattr(result, "fork_override_applied")
 
     def test_no_repositories_key(self):
         cfg = {"version": 1, "defaults": {"stage": "enabled"}}
@@ -393,25 +371,6 @@ class TestResolveStageProfiles:
         result = resolve_stage(cfg, "camaraproject/Repo", "camaraproject", "pull_request")
         assert result.pr_profile == "strict"
         assert result.release_profile == "strict"
-
-    def test_fork_override_forces_profiles_to_standard(self):
-        """Fork override sets both profiles to standard regardless of config."""
-        cfg = {
-            "version": 1,
-            "defaults": {"stage": "disabled"},
-            "fork_owners": ["hdamker"],
-            "repositories": {
-                "Repo": {
-                    "stage": "enabled",
-                    "pr_profile": "strict",
-                    "release_profile": "strict",
-                },
-            },
-        }
-        result = resolve_stage(cfg, "hdamker/Repo", "hdamker", "pull_request")
-        assert result.fork_override_applied is True
-        assert result.pr_profile == "standard"
-        assert result.release_profile == "standard"
 
     def test_profiles_present_even_when_disabled(self):
         """Profiles are resolved even when stage is disabled (for diagnostics)."""
