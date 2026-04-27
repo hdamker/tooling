@@ -31,7 +31,7 @@ from validation.engines.spectral_adapter import (
 
 # A typical Spectral JSON finding (one element of the --format json array).
 SAMPLE_SPECTRAL_FINDING = {
-    "code": "camara-parameter-casing-convention",
+    "code": "camara-path-casing-convention",
     "path": ["paths", "/qualityOnDemand", "post"],
     "message": "qualityOnDemand is not kebab-case",
     "severity": 0,
@@ -213,7 +213,7 @@ class TestNormalizeFinding:
     def test_standard_finding(self):
         finding = normalize_finding(SAMPLE_SPECTRAL_FINDING)
         assert finding["engine"] == "spectral"
-        assert finding["engine_rule"] == "camara-parameter-casing-convention"
+        assert finding["engine_rule"] == "camara-path-casing-convention"
         assert finding["level"] == "error"
         assert finding["message"] == "qualityOnDemand is not kebab-case"
         assert finding["path"] == "code/API_definitions/quality-on-demand.yaml"
@@ -339,7 +339,7 @@ class TestParseSpectralOutput:
         raw = json.dumps([SAMPLE_SPECTRAL_FINDING, SAMPLE_SPECTRAL_WARN])
         findings = parse_spectral_output(raw)
         assert len(findings) == 2
-        assert findings[0]["engine_rule"] == "camara-parameter-casing-convention"
+        assert findings[0]["engine_rule"] == "camara-path-casing-convention"
         assert findings[1]["engine_rule"] == "camara-path-param-id"
 
     def test_empty_array(self):
@@ -461,7 +461,7 @@ class TestRunSpectral:
         )
         assert result.success is True
         assert len(result.findings) == 1
-        assert result.findings[0]["engine_rule"] == "camara-parameter-casing-convention"
+        assert result.findings[0]["engine_rule"] == "camara-path-casing-convention"
 
     @patch("validation.engines.spectral_adapter.subprocess.run")
     def test_exit_2_runtime_error(self, mock_run, tmp_path):

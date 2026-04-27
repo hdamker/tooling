@@ -248,6 +248,50 @@ class TestGroupA:
         findings = _run_spectral(spec)
         assert "camara-response-403" in _codes(findings)
 
+    def test_parameter_name_lowerCamelCase_passes(self):
+        spec = _VALID_SPEC.replace(
+            "      summary: Get test",
+            "      parameters:\n"
+            "        - name: sessionId\n"
+            "          in: query\n"
+            "          required: false\n"
+            "          schema:\n"
+            "            type: string\n"
+            "      summary: Get test",
+        )
+        findings = _run_spectral(spec)
+        assert "camara-parameter-name-casing-convention" not in _codes(findings)
+
+    def test_parameter_name_non_lowerCamelCase_fails(self):
+        spec = _VALID_SPEC.replace(
+            "      summary: Get test",
+            "      parameters:\n"
+            "        - name: Session_id\n"
+            "          in: query\n"
+            "          required: false\n"
+            "          schema:\n"
+            "            type: string\n"
+            "      summary: Get test",
+        )
+        findings = _run_spectral(spec)
+        assert "camara-parameter-name-casing-convention" in _codes(findings)
+
+    def test_parameter_name_header_excluded(self):
+        # Header parameter names are excluded — HTTP headers are
+        # case-insensitive per RFC; CAMARA documents x-correlator etc.
+        spec = _VALID_SPEC.replace(
+            "      summary: Get test",
+            "      parameters:\n"
+            "        - name: X-Correlator\n"
+            "          in: header\n"
+            "          required: false\n"
+            "          schema:\n"
+            "            type: string\n"
+            "      summary: Get test",
+        )
+        findings = _run_spectral(spec)
+        assert "camara-parameter-name-casing-convention" not in _codes(findings)
+
 
 class TestGroupB:
     """Group B: Error code checks."""

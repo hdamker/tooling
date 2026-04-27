@@ -279,7 +279,7 @@ rules:
       function: camara-schema-casing-convention
     recommended: true  # Set to true/false to enable/disable this rule
 
-  camara-parameter-casing-convention:
+  camara-path-casing-convention:
     description: Paths should be kebab-case.
     severity: error
     message: "{{property}} is not kebab-case: {{error}}"
@@ -289,6 +289,17 @@ rules:
       functionOptions:
         match: "^\/([a-z0-9]+(-[a-z0-9]+)*)?(\/[a-z0-9]+(-[a-z0-9]+)*|\/{.+})*$"  # doesn't allow /asasd{asdas}sadas pattern or not closed braces
     recommended: true  # Set to true/false to enable/disable this rule
+
+  camara-parameter-name-casing-convention:
+    description: Parameter names (path and query) must be lowerCamelCase.
+    message: "{{property}} is not lowerCamelCase: {{error}}"
+    severity: warn
+    given: $.paths[*][*].parameters[?(@.in != 'header')].name
+    then:
+      function: pattern
+      functionOptions:
+        match: "^[a-z][a-zA-Z0-9]*$"
+    recommended: true
 
   camara-schema-type-check:
     description: >

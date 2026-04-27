@@ -259,7 +259,7 @@ rules:
         type: pascal
     recommended: true  # Set to true/false to enable/disable this rule
 
-  camara-parameter-casing-convention:
+  camara-path-casing-convention:
     description: Paths should be kebab-case.
     severity: error
     message: "{{property}} is not kebab-case: {{error}}"

@@ -43,7 +43,7 @@
 
 - id: S-008
   engine: spectral
-  engine_rule: camara-parameter-casing-convention
+  engine_rule: camara-path-casing-convention
   short_title: "Path segments must be kebab-case"
 
 - id: S-009
@@ -195,6 +195,11 @@
   short_title: "Notification must use application/cloudevents+json"
   applicability:
     api_pattern: [implicit-subscription, explicit-subscription]
+
+- id: S-036
+  engine: spectral
+  engine_rule: camara-parameter-name-casing-convention
+  short_title: "Parameter names (path/query) must be lowerCamelCase"
 
 # ===== Built-in OAS rules (S-200+) =====
 
