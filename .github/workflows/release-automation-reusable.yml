@@ -9,7 +9,7 @@
 #
 # Called by: release-automation-caller.yml in API repositories
 
-name: Release Automation
+name: CAMARA Release Automation
 
 on:
   workflow_call:
