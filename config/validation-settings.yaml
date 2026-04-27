@@ -1,0 +1,28 @@
+# Central CAMARA validation settings.
+#
+# This file is the authoritative runtime configuration for the validation
+# framework. It is read directly from `main` of camaraproject/tooling on every
+# validation workflow run, independent of which tag the caller workflow has
+# pinned. Routine stage flips for individual repositories are PR-merges to this
+# file; no tag-move is required for the validation framework caller workflow.
+#
+# Schema: validation/schemas/validation-settings-schema.yaml
+#
+# Forward-compatibility rule: schema additions are always backward compatible.
+# Older callers reading this file ignore unknown keys; only known fields are
+# enum/type-checked. This makes hotfix-gated fields (added in a hotfix tag and
+# applied to a subset of repositories) safe to introduce without re-cutting any
+# already-deployed tag.
+
+version: 1
+
+defaults:
+  stage: advisory
+  pr_profile: standard
+  release_profile: standard
+
+repositories:
+  ReleaseTest:
+    stage: enabled
+  SimpleEdgeDiscovery:
+    stage: enabled
