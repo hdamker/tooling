@@ -28,12 +28,14 @@ repositories:
     stage: enabled  # 2026-04-29
   ConsentManagement:
     stage: enabled  # 2026-04-29
+  CustomerInsights:
+    stage: enabled  # 2026-04-30 (pre-staged; effective when CustomerInsights#70 merges)
   DedicatedNetworks:
     stage: enabled  # 2026-04-29
   DeviceIdentifier:
     stage: enabled  # 2026-04-29 (pre-staged; effective when DeviceIdentifier#161 merges)
   EdgeApplicationManagement:
-    stage: enabled  # 2026-04-29 (pre-staged; effective when EdgeApplicationManagement#20 merges)
+    stage: enabled  # 2026-04-29
   IoTSIMFraudPrevention:
     stage: enabled  # 2026-04-29
   MultiPointVPN:
