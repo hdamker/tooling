@@ -22,7 +22,35 @@ defaults:
   release_profile: standard
 
 repositories:
+  ClickToDial:
+    stage: enabled  # 2026-04-29
+  ConsentInfo:
+    stage: enabled  # 2026-04-29
+  ConsentManagement:
+    stage: enabled  # 2026-04-29
+  DedicatedNetworks:
+    stage: enabled  # 2026-04-29
+  DeviceIdentifier:
+    stage: enabled  # 2026-04-29 (pre-staged; effective when DeviceIdentifier#161 merges)
+  EdgeApplicationManagement:
+    stage: enabled  # 2026-04-29 (pre-staged; effective when EdgeApplicationManagement#20 merges)
+  IoTSIMFraudPrevention:
+    stage: enabled  # 2026-04-29
+  MultiPointVPN:
+    stage: enabled  # 2026-04-29
+  NetworkInsights:
+    stage: enabled  # 2026-04-29
+  NetworkSliceBooking:
+    stage: enabled  # 2026-04-29
+  QoSBooking:
+    stage: enabled  # 2026-04-29
+  QualityOnDemand:
+    stage: enabled  # 2026-04-29
   ReleaseTest:
-    stage: enabled
+    stage: enabled  # 2026-04-26 (centralized)
+  SessionInsights:
+    stage: enabled  # 2026-04-29
   SimpleEdgeDiscovery:
-    stage: enabled
+    stage: enabled  # 2026-04-26 (centralized)
+  WebRTC:
+    stage: enabled  # 2026-04-29
