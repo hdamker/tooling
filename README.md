@@ -15,6 +15,9 @@ Maintained under the supervision of Commonalities Working Group.
 * Commonalities Working Group: https://github.com/camaraproject/Commonalities
 * Working Group wiki: https://lf-camaraproject.atlassian.net/wiki/x/_QPe
 
+> **CAMARA Validation and Release Automation V1 is in release candidate phase.**
+> See the [release candidate documentation](https://github.com/camaraproject/tooling/blob/validation-framework/documentation/README.md) for codeowners and contributors using the new framework on their API repositories.
+
 ## Purpose
 
 This repository provides:
@@ -39,62 +42,31 @@ This repository provides:
 
 ## Current Content
 
-### Linting
+The repository ships two consumption lines:
 
-OpenAPI and test definition linting using Spectral and other linters.
+* **v1-rc** — unified validation framework (linting, validation, release automation) in release candidate phase for volunteer repositories (to get onboarded, update your `release-plan.yaml` file with a planned next release (`target_release_type: pre-release-alpha` or `pre-release-rc`). If not yet onboarded you will receive a PR with the caller workflows at latest on the next working day.)
+* **v0** — legacy linting only, kept for repositories not yet onboarded to v1-rc
 
-* **Location**: [linting/](linting/)
-* **Configuration**: [linting/config/.spectral.yaml](linting/config/.spectral.yaml)
-* **Documentation**: [linting/docs/](linting/docs/)
-* **Workflows**: `spectral-oas.yml`, `pr_validation.yml`
+### v1-rc — CAMARA Validation and Release Automation V1
 
-#### Caller Workflow Templates
+A single tag (`v1-rc`, lightweight, on the [`validation-framework`](https://github.com/camaraproject/tooling/tree/validation-framework) branch) covers:
 
-Templates for API repositories to add to their `.github/workflows/` folder:
+* **Linting** — OpenAPI and test definition Spectral rulesets, including the Spring26 (Commonalities rc2) ruleset
+* **Validation** — API definitions, test files, and release-plan / release-metadata files; results appear on pull requests and Release Issues
+* **Release automation** — `/create-snapshot` → `/publish-release` workflow
 
-* [spectral-oas-caller.yml](linting/workflows/spectral-oas-caller.yml) - OpenAPI linting
-* [pr_validation_caller.yml](linting/workflows/pr_validation_caller.yml) - PR validation
+See the [release candidate documentation](https://github.com/camaraproject/tooling/blob/validation-framework/documentation/README.md) for linting and validation, and the [Release Process Guide](https://github.com/camaraproject/ReleaseManagement/blob/main/documentation/README.md) (in ReleaseManagement) for release automation.
 
-### Validation
+### v0 (legacy)
 
-Schema and semantic validation for release planning files.
+v0 ships linting only, kept available for repositories not yet onboarded to v1-rc. **There is no v0 release automation**, and Release Management no longer supports manual releases. Repositories that need to create a release must onboard to v1-rc.
 
-* **Location**: [validation/](validation/)
-* **Schemas**: [validation/schemas/](validation/schemas/) - release-plan, release-metadata
-* **Scripts**: [validation/scripts/](validation/scripts/)
+#### v0 Linting
 
-#### Release Plan Validation
+Spectral ruleset and MegaLinter invoked through `pr_validation.yml` and `spectral-oas.yml`.
 
-Validates `release-plan.yaml` and `release-metadata.yaml` files against CAMARA schemas.
-
-```bash
-# Basic validation
-python3 validation/scripts/validate-release-plan.py path/to/release-plan.yaml
-
-# With file existence checks
-python3 validation/scripts/validate-release-plan.py release-plan.yaml --check-files
-```
-
-### API Review (Deprecated)
-
-Legacy API review validation system (Fall25 meta-release specific).
-
-* **Location**: [api-review/](api-review/), [scripts/](scripts/)
-* **Status**: Deprecated - not maintained for future releases
-* **Workflow**: `api-review-reusable.yml`
-
-### Release Automation
-
-Automated release workflow for CAMARA API repositories, handling release planning, snapshot creation, review PR generation, changelog updates, and publication.
-
-* **Location**: [release_automation/](release_automation/)
-* **Reusable workflow**: `release-automation-reusable.yml`
-* **Caller template**: [release-automation-caller.yml](release_automation/workflows/release-automation-caller.yml)
-* **User documentation**: [Release Process Guide](https://github.com/camaraproject/ReleaseManagement/blob/main/documentation/README.md) (in ReleaseManagement repository)
-* **Technical documentation**:
-  * [repository-setup.md](release_automation/docs/repository-setup.md) — onboarding guide
-  * [technical-architecture.md](release_automation/docs/technical-architecture.md) — system design
-  * [branching-model.md](release_automation/docs/branching-model.md) — branch and tag conventions
+* **Configuration**: [.spectral.yaml](linting/config/.spectral.yaml)
+* **Caller templates**: [spectral-oas-caller.yml](linting/workflows/spectral-oas-caller.yml), [pr_validation_caller.yml](linting/workflows/pr_validation_caller.yml)
 
 ### Shared Actions
 
@@ -106,61 +78,77 @@ Reusable GitHub Actions for cross-repository use.
   * `create-snapshot` — create release snapshot branches
   * `derive-release-state` — determine release state from repository artifacts
   * `post-bot-comment` — post formatted bot comments on issues
+  * `run-validation` — invoke the v1-rc validation framework
   * `sync-release-issue` — synchronize release issue state and body
   * `update-issue-section` — update marked sections in issue bodies
   * `update-readme-release-info` — update README release information block
 
-## Repository Structure
+## Repository Structure (v1-rc)
+
+This is the structure on the `validation-framework` branch (the active v1-rc line) and will soon become the structure on `main`.
 
 ```text
 tooling/
 ├── .github/
-│   └── workflows/               # Reusable workflows (public interface)
-│       ├── api-review-reusable.yml  # Deprecated
-│       ├── pr_validation.yml
+│   ├── ISSUE_TEMPLATE/
+│   └── workflows/                    # Reusable workflows (public interface)
+│       ├── pr_validation.yml         # v0 linting
+│       ├── release-automation-regression.yml
 │       ├── release-automation-reusable.yml
-│       ├── spectral-oas.yml
-│       └── update-floating-tag.yml
-├── api-review/                  # Deprecated
-│   ├── docs/
-│   └── workflows/
+│       ├── spectral-oas.yml          # v0 linting
+│       ├── update-floating-tag.yml
+│       ├── validation-regression.yml
+│       ├── validation-settings-ci.yml
+│       └── validation.yml
+├── config/
+│   └── validation-settings.yaml      # Central per-repo validation settings
+├── documentation/                    # User-facing documentation
+│   └── validation/
 ├── linting/
-│   ├── config/                  # Spectral and linting configuration
+│   ├── config/                       # Spectral rulesets (.spectral.yaml, .spectral-r3.4.yaml, .spectral-r4.yaml) and lint functions
 │   ├── docs/
-│   └── workflows/               # Caller workflow templates
+│   └── workflows/                    # Caller workflow templates
 ├── release_automation/
-│   ├── config/                  # Transformation rules
-│   ├── docs/                    # Setup, architecture, branching model
-│   ├── scripts/                 # Python modules
-│   ├── templates/               # Mustache templates
-│   ├── tests/                   # Unit tests (565 tests)
-│   └── workflows/               # Caller workflow template
-├── scripts/                     # Deprecated
-│   └── api_review_validator_v0_6.py
+│   ├── config/
+│   ├── docs/
+│   ├── regression/                   # Release Automation regression fixtures
+│   ├── scripts/
+│   ├── templates/                    # Mustache templates for issues, PRs, comments
+│   ├── tests/
+│   └── workflows/                    # Caller workflow template
 ├── shared-actions/
 │   ├── create-snapshot/
 │   ├── derive-release-state/
 │   ├── post-bot-comment/
+│   ├── run-validation/
 │   ├── sync-release-issue/
 │   ├── update-issue-section/
 │   ├── update-readme-release-info/
 │   └── validate-release-plan/
-└── validation/
-    ├── schemas/                 # JSON/YAML schemas
-    │   ├── release-plan-schema.yaml
-    │   └── release-metadata-schema.yaml
-    └── scripts/
-        └── validate-release-plan.py
+├── tooling_lib/                      # Shared Python library
+│   └── tests/
+└── validation/                       # CAMARA Validation Framework v1
+    ├── bundling/                     # Redocly bundling pipeline
+    ├── config/
+    ├── context/
+    ├── docs/
+    ├── engines/                      # Engine adapters (Spectral, yamllint, gherkin, Python)
+    │   └── python_checks/
+    ├── output/                       # Summary, annotations, PR comment, status
+    ├── postfilter/
+    ├── rules/                        # Rule metadata YAML
+    ├── schemas/                      # JSON/YAML schemas (findings, rule metadata, release-plan, release-metadata)
+    ├── scripts/
+    ├── tests/
+    └── workflows/                    # Caller workflow template
 ```
 
 ## Release Information
 
-The latest release is [v0.3.0](https://github.com/camaraproject/tooling/releases/tag/v0.3.0).
-
-* API repositories reference the `v0` floating tag, which tracks the latest stable release
-* CAMARA Release Automation is included since v0.3.0 (see [repository-setup.md](release_automation/docs/repository-setup.md) for onboarding)
-* Tested versions are in the `main` branch
-* Versions under development are in feature branches
+* **`v1-rc`** — lightweight tag on the `validation-framework` branch; promoted to `v1` (release 1.0.0) at GA
+* **`v0`** — floating tag tracking the latest v0.x release ([v0.3.0](https://github.com/camaraproject/tooling/releases/tag/v0.3.0))
+* **`main`** — tested v0 line
+* **`validation-framework`** — active development for v1-rc
 
 ## Contributing
 
