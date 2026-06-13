@@ -1,0 +1,11 @@
+name: Negative actionlint probe
+
+on:
+  workflow_dispatch:
+
+jobs:
+  broken:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deliberately invalid expression
+        run: echo "${{ negative.probe }}"
