@@ -17,7 +17,7 @@ env:
 
 jobs:
   changes:
-    name: Detect changed trust-chain paths
+    name: Detect changed validation and release paths
     runs-on: ubuntu-latest
     outputs:
       npm: ${{ steps.plan.outputs.npm }}
