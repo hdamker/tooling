@@ -140,7 +140,7 @@ tooling/
 * **[`VERSION.yaml`](VERSION.yaml)** — records the current numbered tooling release version.
 * **[`CHANGELOG.md`](CHANGELOG.md)** — records numbered release notes and links to GitHub comparisons.
 * **`v1-rc`** — floating lightweight tag covering the validation and release automation framework v1 release candidate. This is the active consumption line for CAMARA API repositories.
-* **Numbered release tags** — immutable tags such as `v0.8.0` mark release points on `main`.
+* **Numbered release tags** — immutable tags such as `v0.8.1` mark release points on `main`.
 * **`v0`** — retired legacy linting tag. It is kept for historical compatibility and is not advanced for new releases.
 * **`main`** — active development branch.
 

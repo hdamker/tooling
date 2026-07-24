@@ -2,6 +2,7 @@
 
 ## Table of Contents
 
+- **[v0.8.1](#v081)**
 - **[v0.8.0](#v080)**
 - **[v0.7.1](#v071)**
 - **[v0.7.0](#v070)**
@@ -13,6 +14,20 @@
 - **[v0.2.2](#v022)**
 - **[v0.2.1](#v021)**
 - **[v0.2.0](#v020)**
+
+# v0.8.1
+
+## Release Notes
+
+**v0.8.1 is a patch release for the CAMARA tooling repository.**
+
+This release fixes two P-025 false positives found while evaluating the blast radius of the `v0.8.0` S-211 fix: a scenario-step line that reuses the API name as a resource-path segment later in the same line (e.g. `/qos-profiles/vwip/qos-profiles/{name}`), and a `#` comment documenting the raw operation being misread as a scenario step. No new rule ID.
+
+### Fixed
+
+* Fix two P-025 false positives on real-world feature-file lines by @hdamker in https://github.com/camaraproject/tooling/pull/395
+
+**Full Changelog**: https://github.com/camaraproject/tooling/compare/v0.8.0...v0.8.1
 
 # v0.8.0
 
