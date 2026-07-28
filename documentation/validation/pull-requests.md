@@ -32,6 +32,8 @@ When the short message is not enough to act, look up the rule code in the [Valid
 
 Codeowners should not intentionally merge errors to `main` unless the repository has explicitly accepted the resulting release-process risk. The release process at `/create-snapshot` will block until the errors are gone. Warnings and hints are not blocking, but a codeowner reviewing for merge should at least scan the workflow summary and confirm the warnings make sense in context — many of them indicate something that will block a later release type.
 
+For what each severity obligates your team to do, and why the same rule can report differently as your API's status advances, see [What a validation result obligates your team to do](severity-obligations.md).
+
 ## What to open next
 
 - For where each kind of result appears: [Where to see validation results](where-to-see-results.md).
@@ -42,6 +44,7 @@ Codeowners should not intentionally merge errors to `main` unless the repository
 
 - [Where to see validation results](where-to-see-results.md)
 - [Validation problem messages](problem-messages.md)
+- [What a validation result obligates your team to do](severity-obligations.md)
 - [Validation FAQ](faq.md)
 - [Bundled API definitions](bundled-api-definitions.md)
 - [Validation during snapshot creation](release-snapshots.md)

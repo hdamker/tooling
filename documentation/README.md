@@ -11,6 +11,7 @@ CAMARA Validation checks API definitions, test files, and release planning files
 - [Find the validation results](validation/where-to-see-results.md)
 - [Fix validation problems on a pull request](validation/pull-requests.md)
 - [Understand error, warning, and hint messages](validation/problem-messages.md)
+- [Understand what a result obligates your team to do](validation/severity-obligations.md)
 - [Read guidance for common validation problems](validation/faq.md)
 
 ### Preparing a release
