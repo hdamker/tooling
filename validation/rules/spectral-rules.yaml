@@ -477,6 +477,7 @@
     - components.schemas.ErrorInfo.properties.code
     - components.schemas.ErrorInfo.properties.message
     - components.schemas.NetworkAccessIdentifier
+    - components.headers.link.schema
     # CAMARA_event_common.yaml
     - components.schemas.CloudEvent.properties.id
     - components.schemas.CloudEvent.properties.type
