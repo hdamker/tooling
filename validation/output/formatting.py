@@ -12,6 +12,7 @@ Design doc references:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Dict, List
 
@@ -260,14 +261,31 @@ def resolve_annotation_title(finding: dict) -> str:
     return message[: _ANNOTATION_TITLE_MAX - 1].rstrip() + "…"
 
 
+# Matches the Spectral-engine ``schema_path`` (a dot-joined JSONPath) for a
+# named OpenAPI component, capturing the component name.
+_COMPONENT_PATH_RE = re.compile(
+    r"^components\.(?:schemas|parameters|responses|requestBodies|headers)\.([^.]+)"
+)
+
+
 def format_finding_location(finding: dict) -> str:
-    """Format a finding's location as ``path:line`` or ``path:line:column``."""
+    """Format a finding's location as ``path:line`` or ``path:line:column``.
+
+    When ``schema_path`` identifies a named OpenAPI component (Spectral-engine
+    findings only), the component name is appended in parens, e.g.
+    ``spec.yaml:42 (QosProfile)``.
+    """
     path = finding.get("path", "")
     line = finding.get("line", 0)
     column = finding.get("column")
     if column is not None:
-        return f"{path}:{line}:{column}"
-    return f"{path}:{line}"
+        location = f"{path}:{line}:{column}"
+    else:
+        location = f"{path}:{line}"
+    match = _COMPONENT_PATH_RE.match(finding.get("schema_path") or "")
+    if match:
+        return f"{location} ({match.group(1)})"
+    return location
 
 
 # Inline-syntax characters that GFM interprets specially.  Backslash is

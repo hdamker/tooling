@@ -311,6 +311,16 @@ class TestFormatFindingLocation:
     def test_empty_finding(self):
         assert format_finding_location({}) == ":0"
 
+    def test_component_schema_path_appends_name(self):
+        f = _make_finding(path="spec.yaml", line=42)
+        f["schema_path"] = "components.schemas.QosProfile"
+        assert format_finding_location(f) == "spec.yaml:42 (QosProfile)"
+
+    def test_non_component_schema_path_unchanged(self):
+        f = _make_finding(path="spec.yaml", line=42)
+        f["schema_path"] = "paths./foo.get.parameters.0.schema"
+        assert format_finding_location(f) == "spec.yaml:42"
+
 
 # ---------------------------------------------------------------------------
 # resolve_annotation_title
