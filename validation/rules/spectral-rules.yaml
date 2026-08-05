@@ -486,6 +486,8 @@
     - components.schemas.SubscriptionStarted.properties.initiationDescription
     - components.schemas.SubscriptionUpdated.properties.updateDescription
     - components.schemas.SubscriptionEnded.properties.terminationDescription
+    - components.schemas.AccessTokenCredential.allOf.1.properties.accessToken
+    - components.schemas.PrivateKeyJWTCredential.allOf.1.properties.clientId
 
 # MUTED: muted in linting/config/.spectral-r4.yaml (set to `off`) since
 # 2026-04-28 pending Commonalities#615 (HTTPSettings.headers — remove or
