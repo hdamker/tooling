@@ -10,6 +10,7 @@ proxy/alias is never flagged).
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import tempfile
@@ -23,7 +24,6 @@ from ._types import make_finding
 _ENGINE_RULE = "check-component-renaming-conflict"
 _EXECUTION_ERROR_RULE = "component-renaming-conflict-execution-error"
 _EXTERNAL_REF_RE = re.compile(r'\$ref\s*:\s*["\']?\.\.')
-_ANSI_ESCAPE_RE = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
 _CONFLICT_RE = re.compile(
     r'\[\d+\]\s+\S+:\d+:\d+\s+at\s+\S+\s*\n+'
     r"Two schemas are referenced with the same name but different content\. "
@@ -65,6 +65,11 @@ def check_component_renaming_conflict(
                 text=True,
                 timeout=_TIMEOUT_SECONDS,
                 check=False,
+                # GitHub Actions sets GITHUB_ACTIONS unconditionally, which
+                # redocly's color library treats as reason enough to force
+                # ANSI color into captured (non-TTY) output; NO_COLOR
+                # suppresses it. Verified against a real Actions run.
+                env={**os.environ, "NO_COLOR": "1"},
             )
         except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
             return [
@@ -81,7 +86,7 @@ def check_component_renaming_conflict(
     if result.returncode == 0:
         return []
 
-    output = _ANSI_ESCAPE_RE.sub("", result.stdout + result.stderr)
+    output = result.stdout + result.stderr
     matches = list(_CONFLICT_RE.finditer(output))
     if not matches:
         return []
