@@ -596,3 +596,35 @@
     Prefer block-style YAML for examples. Rewrite invalid JSON-like flow-style
     YAML mappings or sequences so the file parses with YAML 1.2-conformant
     parsers.
+
+# P-038: check-externaldocs-repository (DG §5.4)
+# externalDocs must reference the canonical CAMARA GitHub repository for
+# this API. Fires when externalDocs is missing entirely, or url is not
+# exactly https://github.com/camaraproject/{repo-name}. No carve-out for
+# intentional cross-repository references — Design Guide §5.4 is a hard
+# SHALL and a full upstream/apis/* sweep found zero legitimate cross-repo
+# cases; every mismatch was a stale copy-paste or repo rename.
+- id: P-038
+  engine: python
+  engine_rule: check-externaldocs-repository
+  short_title: "externalDocs.url must reference this repository"
+  conditional_level:
+    default: warn
+  suggestion: >-
+    Set externalDocs.url to https://github.com/camaraproject/{repo-name},
+    replacing {repo-name} with this repository's actual name.
+
+# P-039: check-externaldocs-description (DG §5.4)
+# externalDocs.description must exactly match the Design Guide template
+# text. Satellite rule emitted by check_externaldocs() alongside P-038 —
+# only fires when externalDocs is present at all (a missing object is a
+# single P-038 finding, not P-038 + P-039).
+- id: P-039
+  engine: python
+  engine_rule: check-externaldocs-description
+  short_title: "externalDocs.description must match the DG template"
+  conditional_level:
+    default: hint
+  suggestion: >-
+    Set externalDocs.description to exactly "Product documentation at
+    CAMARA".
