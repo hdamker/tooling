@@ -23,6 +23,7 @@ from ._types import make_finding
 _ENGINE_RULE = "check-component-renaming-conflict"
 _EXECUTION_ERROR_RULE = "component-renaming-conflict-execution-error"
 _EXTERNAL_REF_RE = re.compile(r'\$ref\s*:\s*["\']?\.\.')
+_ANSI_ESCAPE_RE = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
 _CONFLICT_RE = re.compile(
     r'\[\d+\]\s+\S+:\d+:\d+\s+at\s+\S+\s*\n+'
     r"Two schemas are referenced with the same name but different content\. "
@@ -80,7 +81,7 @@ def check_component_renaming_conflict(
     if result.returncode == 0:
         return []
 
-    output = result.stdout + result.stderr
+    output = _ANSI_ESCAPE_RE.sub("", result.stdout + result.stderr)
     matches = list(_CONFLICT_RE.finditer(output))
     if not matches:
         return []
