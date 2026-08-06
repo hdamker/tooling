@@ -596,3 +596,31 @@
     Prefer block-style YAML for examples. Rewrite invalid JSON-like flow-style
     YAML mappings or sequences so the file parses with YAML 1.2-conformant
     parsers.
+
+# P-040: check-component-renaming-conflict
+# Redocly's bundler silently disambiguates when a local component and a
+# different-content component pulled in via an external $ref compete for the
+# same name: the local definition keeps the name, the external one is
+# renamed to <Name>-2 and every use site that resolved to it is repointed.
+# A same-name-same-content proxy/alias is never flagged. error only at
+# public, warn everywhere else — deliberately skips both the "new
+# requirement" warn-only ramp and the initial-API (0.x) relaxation: the fix
+# has no wire-format/backward-compatibility cost, so there is nothing for
+# either convention to protect. See
+# private-dev-docs/validation-rules/bundler-renaming-conflict-detection-design.md
+# for the full rationale.
+- id: P-040
+  engine: python
+  engine_rule: check-component-renaming-conflict
+  short_title: "Component-renaming collision during bundling"
+  documentation_url: "https://github.com/camaraproject/tooling/blob/main/documentation/validation/faq.md#p-040-component-renaming-conflict"
+  conditional_level:
+    default: error
+    overrides:
+      - condition:
+          target_api_status: [draft, alpha, rc]
+        level: warn
+  suggestion: >-
+    Give the local component a distinct, API-specific name — the common
+    definition isn't yours to rename. If it isn't actually needed locally,
+    reference the common component directly instead.

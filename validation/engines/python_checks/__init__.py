@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from ._types import CheckDescriptor, CheckScope
 
+from .bundling_checks import check_component_renaming_conflict
 from .error_code_checks import check_conflict_deprecated, check_contextcode_format
 from .filename_checks import check_filename_kebab_case, check_filename_matches_api_name
 from .info_description_checks import check_info_description_templates
@@ -69,6 +70,11 @@ CHECKS: list[CheckDescriptor] = [
         "check-info-description-mandatory-missing",
         CheckScope.API,
         check_info_description_templates,
+    ),
+    CheckDescriptor(
+        "check-component-renaming-conflict",
+        CheckScope.API,
+        check_component_renaming_conflict,
     ),
     # --- Repo-level checks (run once) ---
     CheckDescriptor("check-test-directory-exists", CheckScope.REPO, check_test_directory_exists),
