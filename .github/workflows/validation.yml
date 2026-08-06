@@ -514,6 +514,11 @@ jobs:
         if: always() && steps.validation.outcome == 'success'
         env:
           PATH_NODE_MODULES: ${{ github.workspace }}/.tooling/validation/node_modules/.bin
+          # Redocly forces ANSI color into captured output on this runner
+          # (colorette detects GITHUB_ACTIONS unconditionally); without this,
+          # a trailing color-reset line clobbers the ${err##*$'\n'} extraction
+          # below, making the warning annotation illegible.
+          NO_COLOR: "1"
         run: |
           export PATH="${PATH_NODE_MODULES}:${PATH}"
           mkdir -p validation-output/bundled
