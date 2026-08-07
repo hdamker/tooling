@@ -2,6 +2,7 @@
 
 ## Table of Contents
 
+- **[v0.9.0](#v090)**
 - **[v0.8.1](#v081)**
 - **[v0.8.0](#v080)**
 - **[v0.7.1](#v071)**
@@ -14,6 +15,38 @@
 - **[v0.2.2](#v022)**
 - **[v0.2.1](#v021)**
 - **[v0.2.0](#v020)**
+
+# v0.9.0
+
+## Release Notes
+
+**v0.9.0 is a minor release for the CAMARA tooling repository.**
+
+This release adds externalDocs validation against Design Guide §5.4 (new rules P-038 and P-039) and a bundler component-renaming-collision check (new rule P-040). It also improves Spectral finding locations with component/schema names and aligns the per-API CHANGELOG's Commonalities/ICM dependency line with `release-metadata.yaml`.
+
+### Added
+
+* Validate `externalDocs.url` and `description` against Design Guide §5.4 — new rules P-038 (repository URL) and P-039 (description) by @hdamker in https://github.com/camaraproject/tooling/pull/410
+* Detect component-renaming collisions from bundling — new rule P-040 by @hdamker in https://github.com/camaraproject/tooling/pull/412
+
+### Changed
+
+* Show the component/schema name in Spectral finding locations (S-211/S-313 and similar) by @hdamker in https://github.com/camaraproject/tooling/pull/404
+* Drop the `@stoplight/spectral-rulesets` pin now that upstream has shipped the null-guard fix by @hdamker in https://github.com/camaraproject/tooling/pull/405
+* Suppress the unactionable S-313 finding on the common pagination `Link` header by @hdamker in https://github.com/camaraproject/tooling/pull/406
+* Suppress the unactionable S-313 finding on SinkCredential discriminator subtype fields by @hdamker in https://github.com/camaraproject/tooling/pull/408
+* Suppress ANSI color in the bundling-failure annotation by @hdamker in https://github.com/camaraproject/tooling/pull/414
+* Align the per-API CHANGELOG's Commonalities/ICM dependency line with `release-metadata.yaml`'s tag+version format by @hdamker in https://github.com/camaraproject/tooling/pull/416
+
+### Dependencies
+
+* Bump @redocly/cli from 2.39.0 to 2.41.0 by @dependabot in https://github.com/camaraproject/tooling/pull/397
+* Bump js-yaml from 5.2.1 to 5.2.2 by @dependabot in https://github.com/camaraproject/tooling/pull/398
+* Bump brace-expansion to a patched version (security) by @hdamker in https://github.com/camaraproject/tooling/pull/400
+* Bump @redocly/cli from 2.41.0 to 2.43.2 by @dependabot in https://github.com/camaraproject/tooling/pull/402
+* Bump fast-uri to a patched version (security) by @hdamker in https://github.com/camaraproject/tooling/pull/403
+
+**Full Changelog**: https://github.com/camaraproject/tooling/compare/v0.8.1...v0.9.0
 
 # v0.8.1
 
