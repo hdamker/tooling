@@ -597,6 +597,38 @@
     YAML mappings or sequences so the file parses with YAML 1.2-conformant
     parsers.
 
+# P-038: check-externaldocs-repository (DG §5.4)
+# externalDocs must reference the canonical CAMARA GitHub repository for
+# this API. Fires when externalDocs is missing entirely, or url is not
+# exactly https://github.com/camaraproject/{repo-name}. No carve-out for
+# intentional cross-repository references — Design Guide §5.4 is a hard
+# SHALL and a full upstream/apis/* sweep found zero legitimate cross-repo
+# cases; every mismatch was a stale copy-paste or repo rename.
+- id: P-038
+  engine: python
+  engine_rule: check-externaldocs-repository
+  short_title: "externalDocs.url must reference this repository"
+  conditional_level:
+    default: warn
+  suggestion: >-
+    Set externalDocs.url to https://github.com/camaraproject/{repo-name},
+    replacing {repo-name} with this repository's actual name.
+
+# P-039: check-externaldocs-description (DG §5.4)
+# externalDocs.description must exactly match the Design Guide template
+# text. Satellite rule emitted by check_externaldocs() alongside P-038 —
+# only fires when externalDocs is present at all (a missing object is a
+# single P-038 finding, not P-038 + P-039).
+- id: P-039
+  engine: python
+  engine_rule: check-externaldocs-description
+  short_title: "externalDocs.description must match the DG template"
+  conditional_level:
+    default: hint
+  suggestion: >-
+    Set externalDocs.description to exactly "Product documentation at
+    CAMARA".
+
 # P-040: check-component-renaming-conflict
 # Redocly's bundler silently disambiguates when a local component and a
 # different-content component pulled in via an external $ref compete for the
@@ -606,9 +638,7 @@
 # public, warn everywhere else — deliberately skips both the "new
 # requirement" warn-only ramp and the initial-API (0.x) relaxation: the fix
 # has no wire-format/backward-compatibility cost, so there is nothing for
-# either convention to protect. See
-# private-dev-docs/validation-rules/bundler-renaming-conflict-detection-design.md
-# for the full rationale.
+# either convention to protect.
 - id: P-040
   engine: python
   engine_rule: check-component-renaming-conflict

@@ -431,6 +431,74 @@ class TestCreateSnapshot:
         assert result.release_pr_number == 42
         assert "quality-on-demand" in result.api_versions
 
+    @patch("release_automation.scripts.snapshot_creator.ChangelogGenerator")
+    @patch("release_automation.scripts.snapshot_creator.tempfile.mkdtemp")
+    @patch("release_automation.scripts.snapshot_creator.shutil.rmtree")
+    @patch("release_automation.scripts.snapshot_creator.GitOperations")
+    @patch("builtins.open", create=True)
+    def test_changelog_keeps_release_tag_in_dependency_line(
+        self,
+        mock_open,
+        mock_git_ops_class,
+        mock_rmtree,
+        mock_mkdtemp,
+        mock_changelog_cls,
+        snapshot_creator,
+        mock_github_client,
+        mock_metadata_generator,
+        sample_release_plan,
+    ):
+        """CHANGELOG's dependency line states the release tag, not just the version.
+
+        release-metadata.yaml's own dependencies.commonalities_release carries
+        "<tag> (<version>)"; the CHANGELOG draft must reuse that string as-is
+        instead of resolving it down to the bare semantic version.
+        """
+        mock_mkdtemp.return_value = "/tmp/test-snapshot"
+
+        mock_git_ops = MagicMock()
+        mock_git_ops_class.return_value = mock_git_ops
+        mock_git_ops.create_pr.return_value = PullRequestInfo(
+            number=42, url="https://github.com/owner/repo/pull/42"
+        )
+        mock_github_client.get_releases.return_value = []
+        mock_github_client.generate_release_notes.return_value = None
+
+        mock_metadata_generator.generate.return_value = {
+            "repository": {
+                "repository_name": "TestRepo-QoD",
+                "release_tag": "r4.1",
+                "release_type": "pre-release-rc",
+            },
+            "apis": [{"api_name": "quality-on-demand", "api_version": "3.2.0-rc.1"}],
+            "dependencies": {
+                "commonalities_release": "r3.4 (0.7.0-rc.1)",
+                "identity_consent_management_release": "r3.3 (0.5.0-rc.1)",
+            },
+        }
+
+        mock_changelog_instance = Mock()
+        mock_changelog_instance.generate_draft.return_value = "# r4.1\n\nContent\n"
+        mock_changelog_instance.write_changelog.return_value = (
+            "CHANGELOG/CHANGELOG-r4.md"
+        )
+        mock_changelog_cls.return_value = mock_changelog_instance
+
+        config = SnapshotConfig(release_tag="r4.1")
+        snapshot_creator.create_snapshot(sample_release_plan, config)
+
+        draft_metadata = mock_changelog_instance.generate_draft.call_args.kwargs[
+            "metadata"
+        ]
+        assert (
+            draft_metadata["dependencies"]["commonalities_release"]
+            == "r3.4 (0.7.0-rc.1)"
+        )
+        assert (
+            draft_metadata["dependencies"]["identity_consent_management_release"]
+            == "r3.3 (0.5.0-rc.1)"
+        )
+
     @patch("release_automation.scripts.snapshot_creator.tempfile.mkdtemp")
     @patch("release_automation.scripts.snapshot_creator.shutil.rmtree")
     @patch("release_automation.scripts.snapshot_creator.GitOperations")
@@ -1371,10 +1439,10 @@ class TestReleaseDocumentation:
         mock_instance.write_changelog.assert_called_once()
 
     @patch("release_automation.scripts.snapshot_creator.ChangelogGenerator")
-    def test_generate_changelog_uses_commonalities_version_only(
+    def test_generate_changelog_keeps_metadata_dependency_display_string(
         self, mock_gen_cls, snapshot_creator, mock_github_client, tmp_path
     ):
-        """CHANGELOG generation uses semantic version instead of metadata display string."""
+        """CHANGELOG generation keeps release-metadata.yaml's tag+version string."""
         mock_github_client.get_releases.return_value = []
         mock_github_client.generate_release_notes.return_value = None
 
@@ -1399,15 +1467,16 @@ class TestReleaseDocumentation:
             {},
             metadata,
             "TestRepo-QoD",
-            commonalities_version="0.7.0-rc.1",
-            icm_version="0.5.0-rc.1",
         )
 
         draft_metadata = mock_instance.generate_draft.call_args.kwargs["metadata"]
-        assert draft_metadata["dependencies"]["commonalities_release"] == "0.7.0-rc.1"
+        assert (
+            draft_metadata["dependencies"]["commonalities_release"]
+            == "r4.1 (0.7.0-rc.1)"
+        )
         assert (
             draft_metadata["dependencies"]["identity_consent_management_release"]
-            == "0.5.0-rc.1"
+            == "r4.1 (0.5.0-rc.1)"
         )
 
     @patch("release_automation.scripts.snapshot_creator.ChangelogGenerator")

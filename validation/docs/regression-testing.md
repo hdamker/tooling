@@ -47,14 +47,16 @@ exactly which rules now report differently and against which files.
 ## Why ReleaseTest is special
 
 Most CAMARA repositories use the **stable** version of the framework — a
-tag called `v1-rc`. That tag only moves when the framework team
-deliberately rolls out a new version to all repositories.
+tag called `v1-rc`. That tag only moves after the gates in
+[branching-model.md](../../release_automation/docs/branching-model.md)
+pass.
 
 `camaraproject/ReleaseTest` is different on purpose. Its caller workflow
-targets `validation.yml@validation-framework` — that is, the **HEAD of the
-development branch**, not the stable tag. Every push to the
-`validation-framework` branch is exercised against ReleaseTest's regression
-fixtures **before** `v1-rc` is moved for the rest of the org. If a change
+pins `tooling_ref_override: main` — that is, **`main` HEAD**, not the
+stable tag. `main` is this project's only long-lived branch; there is no
+separate development branch to point at. Every push to `main`, from any
+merged PR, is exercised against ReleaseTest's regression fixtures
+**before** `v1-rc` is moved for the rest of the org. If a change
 accidentally breaks something, the canary catches it minutes after the
 push, in isolation, before any production API repository sees the change.
 
@@ -176,23 +178,28 @@ is one set of bugs, not two.
 
 Every validation run writes its resolved tooling SHA into `context.json`
 in the diagnostics artifact (the orchestrator already does this for the
-workflow summary). The runner reads it directly from there, so the value
-in the fixture is the SHA the run actually used, regardless of which ref
-the caller targets. On ReleaseTest that's the `validation-framework` HEAD
-at run time; on dark / production repos it would be whatever `v1-rc`
-points at.
+workflow summary). The runner reads it directly from there — but only
+accepts a 40-character SHA; anything else is dropped, with a warning,
+before the fixture is written.
+
+On dark / production repos this is always a real SHA: `v1-rc`'s resolved
+commit, or whatever the OIDC-resolved workflow SHA is. On ReleaseTest,
+though, `tooling_ref_override` is pinned to the literal name `main`, not a
+SHA — so `context.json`'s `tooling_ref` comes through as the string
+`"main"`, fails the 40-character check, and the runner omits the field
+from ReleaseTest fixtures entirely. That's expected, not a bug.
 
 ## Day-to-day usage
 
-### Automatic runs on `validation-framework`
+### Automatic runs on `main`
 
-The regression runner fires automatically on every push to
-`validation-framework` that touches `validation/**`, `shared-actions/**`,
-or the workflow itself. The workflow lives at
-[.github/workflows/validation-regression.yml](../../.github/workflows/validation-regression.yml)
-on this same branch (so it only exists where it matters and does not
-run on `main`). Manual dispatch is available via the Actions UI for
-fix-then-verify cycles.
+The regression runner fires automatically on every push to `main` that
+touches `validation/**`, `shared-actions/**`, `tooling_lib/**`,
+`.github/workflows/validation.yml`, or the regression workflow itself. The
+workflow lives at
+[.github/workflows/validation-regression.yml](../../.github/workflows/validation-regression.yml).
+Manual dispatch is available via the Actions UI for fix-then-verify
+cycles.
 
 Cross-repo access to ReleaseTest is provided by a short-lived
 `camara-validation` GitHub App installation token minted with
@@ -233,7 +240,7 @@ The runner exits 1 and prints a per-branch diff. Three classes of failure:
 - **Missing**: a finding in the fixture didn't appear in the actual run.
   Either the rule was deleted, or its conditions changed and it no longer
   fires on that file. If intentional → recapture. If not → fix the
-  framework before merging the change to `validation-framework`.
+  framework before merging the change to `main`.
 - **Unexpected**: a finding appeared that wasn't in the fixture. Either a
   new rule was added (or activated) and is now firing, or a rule's
   conditions changed and it now fires where it didn't before. Same
@@ -257,7 +264,8 @@ python3 validation/scripts/regression_runner.py \
 Review `/tmp/expected.yaml` against the previous version, commit it to
 the branch at `.regression/regression-expected.yaml`, and re-run the
 runner without `--capture` to confirm PASS. The fixture's `tooling_ref`
-field will reflect the current `validation-framework` HEAD.
+field will typically be omitted — see "How `tooling_ref` is recorded"
+above.
 
 ### Adding a new regression branch
 
@@ -388,10 +396,11 @@ rename on minor bumps, preserve across majors.
 
 - **Tooling-ref pinning is set by the caller workflow.** A local
   `gh workflow run` cannot override which tooling SHA runs server-side.
-  ReleaseTest pins to `validation-framework` HEAD by design (canary).
-  Production API repos pin to `@v1-rc`. There is currently no way to
-  test an un-published developer SHA against the runner — that's a
-  separate piece of design work.
+  ReleaseTest pins to `main` HEAD by design (canary), via a literal
+  `tooling_ref_override: main` — not a resolved SHA; see "How
+  `tooling_ref` is recorded" above. Production API repos pin to `@v1-rc`.
+  There is currently no way to test an un-published developer SHA against
+  the runner — that's a separate piece of design work.
 - **Dispatch → run-id race.** `gh workflow run` does not return a run
   ID. The runner records a UTC timestamp before dispatch and polls
   `gh run list` for a `workflow_dispatch` run with a matching branch

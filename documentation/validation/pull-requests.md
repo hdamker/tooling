@@ -30,7 +30,8 @@ When the short message is not enough to act, look up the rule code in the [Valid
 
 ## Codeowner guidance
 
-Codeowners should not intentionally merge errors to `main` unless the repository has explicitly accepted the resulting release-process risk. The release process at `/create-snapshot` will block until the errors are gone. Warnings and hints are not blocking, but a codeowner reviewing for merge should at least scan the workflow summary and confirm the warnings make sense in context — many of them indicate something that will block a later release type.
+- Do not intentionally merge errors to `main` unless the repository has explicitly accepted the resulting release-process risk. The release process at `/create-snapshot` will block until the errors are gone. Warnings and hints are not blocking, but scan the workflow summary before merge and confirm the warnings make sense in context — many of them indicate something that will block a later release type.
+- Some pull requests need a maintainer to approve the workflow run before it can start at all. GitHub does this for pull requests it doesn't yet trust to run automatically — most commonly, someone's first pull request to the repository. Until a maintainer approves the run, it will not start, so the **CAMARA Validation** check is missing from the checks list entirely, not passing or failing. If a pull request has no CAMARA Validation check yet, open its **Conversation** tab and look near the merge box for a banner asking to approve the pending workflow run, rather than assuming there was nothing to check.
 
 For what each severity obligates your team to do, and why the same rule can report differently as your API's status advances, see [What a validation result obligates your team to do](severity-obligations.md).
 
