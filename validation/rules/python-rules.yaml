@@ -294,11 +294,11 @@
     schema. See implicit-events API template in Commonalities
     artifacts/api-templates/.
 
-# P-021: check-common-cache-sync (DEC-027/030)
+# P-021: check-common-cache-sync
 # Safety check: code/common/ files must match the sync manifest written
 # by the RA sync-common handler.  Suppressed on bump PRs via the
-# three-step consistency model (DEC-029).  Version-gated to repos
-# adopting $ref consumption (>=r4.2).
+# three-step consistency model.  Version-gated to repos adopting $ref
+# consumption (>=r4.2).
 - id: P-021
   engine: python
   engine_rule: check-common-cache-sync

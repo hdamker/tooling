@@ -18,7 +18,7 @@ summary:
   total_gap: 0
   total_manual: 25
   total_pending: 0
-  total_tested: 95
+  total_tested: 96
   by_engine:
     spectral: 85
     gherkin: 25
@@ -205,8 +205,7 @@ gap_rules:
     status: implemented
     rule_id: P-020
 
-  - audit_id: DEC-027
-    description: "Common file cache sync safety check — code/common/ must match sync manifest from Commonalities artifacts"
+  - description: "Common file cache sync safety check — code/common/ must match sync manifest from Commonalities artifacts"
     target_engine: python
     status: implemented
     rule_id: P-021
@@ -331,6 +330,7 @@ tested_rules:
   P-031: [regression/r4.3-broken-spec-info-description-missing-canonical]
   P-032: [regression/r4.3-broken-spec-test-files]
   P-037: [regression/r4.3-broken-spec-subscriptions, regression/r4.3-broken-spec-yaml-fundamentals]
+  P-040: [regression/r4.3-broken-spec-bundler-collision]
   S-002: [regression/r4.3-broken-spec-routing]
   S-003: [regression/r4.3-broken-spec-routing]
   S-005: [regression/r4.3-broken-spec-yaml-fundamentals]
