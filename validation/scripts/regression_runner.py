@@ -21,8 +21,7 @@ Exit codes:
     1  one or more branches FAIL (diff mismatch)
     2  infrastructure failure (gh error, timeout, missing artifact, invalid schema)
 
-Design reference: private-dev-docs/validation-framework/session-logs/
-  (initial session — WS07 Phase 3 regression infrastructure)
+See validation/docs/regression-testing.md for the full design.
 """
 
 from __future__ import annotations
@@ -700,7 +699,9 @@ def capture_branch(
     # The actually-used tooling SHA comes from the validation context
     # written by the orchestrator. This is the canonical answer and works
     # regardless of which ref the caller targets (@v1-rc on dark repos,
-    # @validation-framework HEAD on the ReleaseTest canary, etc.).
+    # literal @main on the ReleaseTest canary, etc.) — though ReleaseTest's
+    # literal-name override never resolves to a SHA, so this ends up None
+    # for it; see validation/docs/regression-testing.md.
     tooling_ref: str | None = (context or {}).get("tooling_ref") or None
     if tooling_ref and not re.match(r"^[0-9a-f]{40}$", tooling_ref):
         logger.warning(

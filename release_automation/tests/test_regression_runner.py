@@ -4,8 +4,8 @@ Unit tests for the Release Automation regression runner.
 Pure-logic coverage only — network and subprocess calls are mocked at the
 `gh()` boundary. These tests verify state-label parsing, run-discovery
 filtering, markdown rendering, phase decision matrix, and branch-name
-parsing. Integration behaviour is covered by CI staging (see
-private-dev-docs/validation-framework/prompts/prompt-project-session.md).
+parsing. Integration behaviour is covered by the release-automation
+regression canary against `camaraproject/ReleaseTest`.
 """
 
 from __future__ import annotations
