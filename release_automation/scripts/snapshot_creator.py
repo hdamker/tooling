@@ -340,8 +340,6 @@ class SnapshotCreator:
                     api_versions,
                     metadata,
                     repo_name,
-                    commonalities_version=commonalities_version,
-                    icm_version=icm_version,
                     compare_base=compare_base,
                     api_comparison_baselines=api_comparison_baselines,
                 )
@@ -991,8 +989,6 @@ class SnapshotCreator:
         api_versions: Dict[str, str],
         metadata: Dict[str, Any],
         repo_name: str,
-        commonalities_version: str = "",
-        icm_version: str = "",
         compare_base: Any = COMPARE_BASE_UNSET,
         api_comparison_baselines: Optional[Dict[str, str]] = None,
     ) -> str:
@@ -1020,14 +1016,6 @@ class SnapshotCreator:
             baseline = api_comparison_baselines.get(api.get("api_name", ""))
             if baseline:
                 api["comparison_baseline"] = baseline
-        if commonalities_version:
-            changelog_metadata.setdefault("dependencies", {})[
-                "commonalities_release"
-            ] = commonalities_version
-        if icm_version:
-            changelog_metadata.setdefault("dependencies", {})[
-                "identity_consent_management_release"
-            ] = icm_version
 
         generator = ChangelogGenerator()
         content = generator.generate_draft(
