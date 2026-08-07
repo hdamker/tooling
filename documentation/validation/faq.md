@@ -177,6 +177,30 @@ Do not edit `code/common/info-description-templates.yaml` in the API repository.
 
 </details>
 
+<a name="p-040-component-renaming-conflict"></a>
+<details>
+<summary>[P-040] Why does bundling rename a component I didn't touch?</summary>
+
+Applies to: `[P-040] Component-renaming collision during bundling`
+
+Two different components — one defined locally, one pulled in from a common file via an
+external `$ref` — are competing for the same name with different content. When the spec is
+bundled, the local definition keeps the name; the externally-referenced one is renamed to
+`<Name>-2`, and every use site that resolved to it is silently repointed at the renamed copy.
+This is not a bundler quirk to ignore: a reader of the bundled spec sees the wrong schema at
+those use sites.
+
+This only fires for a genuine conflict — same name, **different** content. A local component
+that intentionally proxies a common one under the same name, with identical content, is not
+flagged.
+
+**What you do:** rename the *local* definition to a distinct, API-specific name — you can't
+rename the common definition, since Commonalities owns it. If the local definition isn't
+actually needed (it has no reason to diverge from the common one), delete it and reference the
+common component directly instead.
+
+</details>
+
 ## Related
 
 - [Validation problem messages](problem-messages.md) — the shape of each message
