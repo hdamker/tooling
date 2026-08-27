@@ -300,6 +300,18 @@ class SnapshotCreator:
             if os.path.exists(plan_path):
                 os.remove(plan_path)
 
+            # Step 9c: Update README Release Information
+            # Mechanical, like the transforms above — committed with the snapshot,
+            # not left editable on the release-review branch.
+            try:
+                self._update_readme(
+                    temp_dir, config, release_plan, api_versions, metadata
+                )
+            except ReadmeUpdateError as e:
+                result.warnings.append(f"README update skipped: {e}")
+            except Exception as e:
+                result.warnings.append(f"README update failed: {e}")
+
             # Step 10: Commit changes
             commit_message = f"Release automation: create snapshot {snapshot_id}"
             git_ops.commit_all(commit_message)
@@ -310,21 +322,7 @@ class SnapshotCreator:
             # Step 12a: Create release-review branch from snapshot
             git_ops.create_branch(release_review_branch, from_ref="HEAD")
 
-            # Step 12b: Update README Release Information
-            try:
-                readme_changed = self._update_readme(
-                    temp_dir, config, release_plan, api_versions, metadata
-                )
-                if readme_changed:
-                    git_ops.commit_all(
-                        f"Update README Release Information for {config.release_tag}"
-                    )
-            except ReadmeUpdateError as e:
-                result.warnings.append(f"README update skipped: {e}")
-            except Exception as e:
-                result.warnings.append(f"README update failed: {e}")
-
-            # Step 12c: Generate CHANGELOG draft
+            # Step 12b: Generate CHANGELOG draft
             api_comparison_baselines: Dict[str, str] = {}
             try:
                 repo_name = self.gh.repo.split("/")[-1]

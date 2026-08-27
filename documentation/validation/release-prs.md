@@ -12,7 +12,7 @@ The Release PR is a **transparency check** on release content. It helps reviewer
 
 ## What you can change in the Release PR
 
-You may review or refine reviewable release content according to the release process — typically the changelog entry and the README release information.
+You may review or refine reviewable release content according to the release process — the changelog entry. The README release information is a mechanical change committed with the snapshot before the Release PR opens; it is not editable there.
 
 ## What you must not change there
 

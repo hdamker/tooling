@@ -52,8 +52,8 @@ class TestIsAllowed:
     def test_changelog_md(self):
         assert _is_allowed("CHANGELOG.md") is True
 
-    def test_readme_md(self):
-        assert _is_allowed("README.md") is True
+    def test_readme_md_rejected(self):
+        assert _is_allowed("README.md") is False
 
     def test_changelog_dir_file(self):
         assert _is_allowed("CHANGELOG/r1.0.md") is True
@@ -82,9 +82,19 @@ class TestCheckReleaseReviewFileRestriction:
         "validation.engines.python_checks.release_review_checks._get_changed_files"
     )
     def test_allowed_files_only(self, mock_changed, tmp_path: Path):
-        mock_changed.return_value = ["CHANGELOG.md", "README.md"]
+        mock_changed.return_value = ["CHANGELOG.md", "CHANGELOG/r1.0.md"]
         ctx = _make_context()
         assert check_release_review_file_restriction(tmp_path, ctx) == []
+
+    @patch(
+        "validation.engines.python_checks.release_review_checks._get_changed_files"
+    )
+    def test_readme_md_disallowed(self, mock_changed, tmp_path: Path):
+        mock_changed.return_value = ["CHANGELOG.md", "README.md"]
+        ctx = _make_context()
+        findings = check_release_review_file_restriction(tmp_path, ctx)
+        assert len(findings) == 1
+        assert "README.md" in findings[0]["message"]
 
     @patch(
         "validation.engines.python_checks.release_review_checks._get_changed_files"
