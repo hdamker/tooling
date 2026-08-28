@@ -35,10 +35,6 @@ on:
       - '.github/workflows/validation-regression.yml'
   workflow_dispatch:
 
-concurrency:
-  group: validation-regression-${{ github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
 
@@ -50,6 +46,15 @@ jobs:
   regression:
     name: ReleaseTest canary
     runs-on: ubuntu-latest
+    # Scoped to this job, not the whole workflow: a workflow-level
+    # concurrency group cancels every job in the run, including the
+    # commonalities-regression job below, which calls into a reusable
+    # workflow that must not be cancelled mid-push (see its own
+    # concurrency comments). This job only dispatches and diffs, so
+    # cancelling a stale run in favor of a fresher one is safe here.
+    concurrency:
+      group: validation-regression-release-test-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout tooling
         uses: actions/checkout@v7
