@@ -707,6 +707,31 @@ class TestRunPostFilter:
         assert result.findings[0]["suggestion"] == "Custom guidance."
         assert result.findings[0]["rule_id"] == "S-018"
 
+    def test_invalid_ref_enriches_to_s229(self, tmp_path: Path):
+        """Spectral's built-in `invalid-ref` maps to S-229 (validation-rules/039):
+        it previously reached the reader via the unmapped pass-through branch
+        with no rule_id, no short_title, and native `error` level."""
+        _write_rules(tmp_path, [{
+            "id": "S-229",
+            "engine": "spectral",
+            "engine_rule": "invalid-ref",
+            "short_title": "$ref target does not exist",
+            "suggestion": "Fix the reference in this API definition.",
+        }])
+        ctx = _make_context()
+        findings = [_make_finding(
+            engine_rule="invalid-ref",
+            level="error",
+            message="'#/components/schemas/Config' does not exist @ 'code/common/x.yaml'",
+        )]
+        result = run_post_filter(findings, ctx, tmp_path)
+
+        f = result.findings[0]
+        assert f["rule_id"] == "S-229"
+        assert f["short_title"] == "$ref target does not exist"
+        assert f["suggestion"] == "Fix the reference in this API definition."
+        assert f["level"] == "error"  # identity-only: engine level preserved
+
     def test_mapped_rule_without_suggestion_preserves_message(self, tmp_path: Path):
         """Rule without suggestion/message_override preserves engine message."""
         _write_rules(tmp_path, [{

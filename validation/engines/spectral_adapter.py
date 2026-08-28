@@ -178,6 +178,44 @@ def _normalize_path(source: str, repo_root: Optional[str] = None) -> str:
     return source
 
 
+def _normalize_message(message: str, repo_root: Optional[str] = None) -> str:
+    """Strip repo-root absolute-path prefixes embedded in message text.
+
+    Unlike ``source``, ``message`` is free text where an absolute runner
+    path can appear anywhere in the string (e.g. an ``invalid-ref``
+    diagnostic: ``"... does not exist @ '/home/runner/work/Repo/Repo/code/
+    common/x.yaml'"``), so every occurrence of the root prefix is replaced
+    rather than only a matching start.
+    """
+    if not message or not repo_root:
+        return message
+    root = repo_root.rstrip("/") + "/"
+    return message.replace(root, "")
+
+
+def _is_resolver_artifact(schema_path: Optional[str]) -> bool:
+    """Detect a Spectral resolver-hoisting artifact.
+
+    When a ``$ref`` under ``components.<type>.<Name>.properties.<prop>``
+    points to a missing JSON pointer in a file that otherwise exists,
+    Spectral hoists the external ref into a synthetic
+    ``components.<targetType>`` node in the referencing document and
+    source-maps findings against it to the *target* file. The finding's
+    JSONPath is truncated to that 2-segment container path because the
+    synthetic node has no deeper source map of its own.
+
+    No field-level ``given`` expression can legitimately bottom out at a
+    bare ``components.<container>`` path — every real check descends into
+    a named component or one of its properties — so a finding at exactly
+    that depth is always this hoisting artifact, never a real defect,
+    regardless of which rule produced it.
+    """
+    if not schema_path:
+        return False
+    segments = schema_path.split(".")
+    return len(segments) == 2 and segments[0] == "components"
+
+
 def normalize_finding(raw: dict, repo_root: Optional[str] = None) -> dict:
     """Convert one Spectral JSON finding to the common findings model.
 
@@ -232,7 +270,7 @@ def normalize_finding(raw: dict, repo_root: Optional[str] = None) -> dict:
         "engine": ENGINE_NAME,
         "engine_rule": raw.get("code", "unknown"),
         "level": level,
-        "message": raw.get("message", ""),
+        "message": _normalize_message(raw.get("message", ""), repo_root),
         "path": source,
         "schema_path": schema_path,
         "line": line,
@@ -259,6 +297,8 @@ def parse_spectral_output(
     Returns:
         List of findings conforming to the common findings model.
         Returns an empty list if *raw_json* is empty or not valid JSON.
+        Findings identified as Spectral resolver-hoisting artifacts (see
+        :func:`_is_resolver_artifact`) are dropped.
     """
     if not raw_json.strip():
         return []
@@ -276,9 +316,13 @@ def parse_spectral_output(
     findings = []
     for item in data:
         try:
-            findings.append(normalize_finding(item, repo_root=repo_root))
+            finding = normalize_finding(item, repo_root=repo_root)
         except (KeyError, TypeError) as exc:
             logger.warning("Skipping malformed Spectral finding: %s", exc)
+            continue
+        if _is_resolver_artifact(finding["schema_path"]):
+            continue
+        findings.append(finding)
     return findings
 
 

@@ -379,6 +379,14 @@
   engine_rule: typed-enum
   short_title: "enum value does not match schema type"
 
+# S-229 is appended out of alphabetical order (see validation-rules/039) —
+# the S-200 band is no longer strictly alphabetical by engine_rule.
+- id: S-229
+  engine: spectral
+  engine_rule: invalid-ref
+  short_title: "$ref target does not exist"
+  suggestion: "The $ref points to a JSON pointer that does not exist in the target file. Check the pointer name against the target's components section — a schema renamed or removed in a newer Commonalities release is the usual cause. Fix the reference in this API definition; do not edit code/common/."
+
 # ===== OWASP API Security Top 10 2023 (S-300+) =====
 # S-300 (owasp:api1:2023-no-numeric-ids) retired — replaced by S-037
 # (camara-no-numeric-resource-ids) in the custom-rule range. See tooling#282
