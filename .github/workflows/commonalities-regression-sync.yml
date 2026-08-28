@@ -49,7 +49,7 @@ permissions:
 jobs:
   # ── Sync: diff-check, sync-common, cherry-pick, mirror-regen ────────────
   sync:
-    name: Diff, sync, cherry-pick, regenerate mirror templates
+    name: Sync
     runs-on: ubuntu-latest
     # Fixed group name rather than one keyed on github.ref: this job is
     # called from several places (the scheduled/dispatch caller, the
@@ -233,7 +233,7 @@ jobs:
 
   # ── Sweep: regression_runner.py against every regression/* branch ──────
   sweep:
-    name: Sweep CommonalitiesTest
+    name: Sweep
     needs: sync
     if: >-
       always() &&

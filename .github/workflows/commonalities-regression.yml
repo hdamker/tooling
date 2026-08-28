@@ -22,7 +22,7 @@ on:
 
 jobs:
   sync-and-sweep:
-    name: Sync and sweep
+    name: CommonalitiesTest
     uses: ./.github/workflows/commonalities-regression-sync.yml
     with:
       force: ${{ inputs.force || false }}

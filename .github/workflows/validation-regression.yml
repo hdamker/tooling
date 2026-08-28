@@ -48,7 +48,7 @@ env:
 
 jobs:
   regression:
-    name: Regression canary
+    name: ReleaseTest canary
     runs-on: ubuntu-latest
     steps:
       - name: Checkout tooling
@@ -103,7 +103,7 @@ jobs:
           retention-days: 30
 
   commonalities-regression:
-    name: CommonalitiesTest regression (forced)
+    name: CommonalitiesTest
     uses: ./.github/workflows/commonalities-regression-sync.yml
     with:
       force: true
