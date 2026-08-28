@@ -15,6 +15,12 @@
 # The default GITHUB_TOKEN is only used for the initial checkout.
 #
 # See validation/docs/regression-testing.md for the full picture.
+#
+# Also sweeps camaraproject/CommonalitiesTest via the same trigger, forced
+# unconditionally: a tooling push has no correlation with Commonalities'
+# own content, so without `force` the CommonalitiesTest diff-check would
+# almost always come back empty here, and the sweep would essentially
+# never fire from this path.
 
 name: Validation Regression
 
@@ -95,3 +101,10 @@ jobs:
           path: validation-regression-summary.md
           if-no-files-found: warn
           retention-days: 30
+
+  commonalities-regression:
+    name: CommonalitiesTest regression (forced)
+    uses: ./.github/workflows/commonalities-regression-sync.yml
+    with:
+      force: true
+    secrets: inherit
