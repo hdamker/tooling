@@ -14,13 +14,13 @@ version: 1
 generated: 2026-04-07
 
 summary:
-  total_implemented: 149
+  total_implemented: 150
   total_gap: 0
   total_manual: 25
   total_pending: 0
-  total_tested: 96
+  total_tested: 97
   by_engine:
-    spectral: 85
+    spectral: 86
     gherkin: 25
     python: 26
     yamllint: 13
@@ -378,6 +378,7 @@ tested_rules:
   S-223: [regression/r4.3-broken-spec-descriptions]
   S-225: [regression/r4.3-broken-spec-routing]
   S-227: [regression/r4.3-broken-spec-routing]
+  S-229: [regression/r4.3-broken-spec-bundler-collision]
   S-037: [regression/r4.3-broken-spec-schema-constraints]
   S-303: [regression/r4.3-broken-spec-schema-constraints]
   S-306: [regression/r4.3-broken-spec-routing]

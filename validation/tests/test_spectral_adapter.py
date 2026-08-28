@@ -14,6 +14,8 @@ from validation.engines.spectral_adapter import (
     ENGINE_NAME,
     SpectralResult,
     _deduplicate_findings,
+    _is_resolver_artifact,
+    _normalize_message,
     _normalize_path,
     _resolve_spec_files,
     derive_api_name,
@@ -162,6 +164,63 @@ class TestNormalizePath:
         source = "/home/runner/work/RepoExtra/code/api.yaml"
         result = _normalize_path(source, "/home/runner/work/Repo")
         assert result == source
+
+
+# ---------------------------------------------------------------------------
+# TestNormalizeMessage
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeMessage:
+    def test_absolute_path_embedded_in_message_stripped(self):
+        message = (
+            "'#/components/schemas/Config' does not exist @ "
+            "'/home/runner/work/Repo/Repo/code/common/CAMARA_event_common.yaml'"
+        )
+        result = _normalize_message(message, "/home/runner/work/Repo/Repo")
+        assert result == (
+            "'#/components/schemas/Config' does not exist @ "
+            "'code/common/CAMARA_event_common.yaml'"
+        )
+
+    def test_no_repo_root_unchanged(self):
+        message = "'#/components/schemas/Config' does not exist @ '/abs/path.yaml'"
+        assert _normalize_message(message, None) == message
+
+    def test_empty_message(self):
+        assert _normalize_message("", "/home/runner/work/Repo/Repo") == ""
+
+    def test_message_without_repo_root_unchanged(self):
+        message = "qualityOnDemand is not kebab-case"
+        assert _normalize_message(message, "/home/runner/work/Repo/Repo") == message
+
+
+# ---------------------------------------------------------------------------
+# TestIsResolverArtifact
+# ---------------------------------------------------------------------------
+
+
+class TestIsResolverArtifact:
+    def test_two_segment_components_path_is_artifact(self):
+        assert _is_resolver_artifact("components.schemas") is True
+
+    def test_two_segment_other_container_is_artifact(self):
+        assert _is_resolver_artifact("components.parameters") is True
+
+    def test_three_segment_path_is_not_artifact(self):
+        assert _is_resolver_artifact("components.schemas.Foo") is False
+
+    def test_five_segment_properties_path_is_not_artifact(self):
+        assert _is_resolver_artifact("components.schemas.Foo.properties.bar") is False
+
+    def test_non_components_two_segment_path_is_not_artifact(self):
+        assert _is_resolver_artifact("paths./test") is False
+
+    def test_none_is_not_artifact(self):
+        assert _is_resolver_artifact(None) is False
+
+    def test_empty_string_is_not_artifact(self):
+        assert _is_resolver_artifact("") is False
 
 
 # ---------------------------------------------------------------------------
@@ -362,6 +421,23 @@ class TestNormalizeFinding:
         assert finding["level"] == "hint"
         assert finding["path"] == "code/common/CAMARA_event_common.yaml"
 
+    def test_message_normalises_embedded_absolute_path(self):
+        """An absolute runner path embedded inside the message text (not
+        just `source`) is stripped when repo_root is provided."""
+        raw = {
+            **SAMPLE_SPECTRAL_FINDING,
+            "code": "invalid-ref",
+            "message": (
+                "'#/components/schemas/Config' does not exist @ "
+                "'/home/runner/work/R/R/code/common/CAMARA_event_common.yaml'"
+            ),
+        }
+        finding = normalize_finding(raw, repo_root="/home/runner/work/R/R")
+        assert finding["message"] == (
+            "'#/components/schemas/Config' does not exist @ "
+            "'code/common/CAMARA_event_common.yaml'"
+        )
+
 
 # ---------------------------------------------------------------------------
 # TestParseSpectralOutput
@@ -462,6 +538,32 @@ class TestParseSpectralOutput:
         assert len(findings) == 1
         assert findings[0]["level"] == "error"
         assert findings[0]["path"] == "code/modules/Services/Services.yaml"
+
+    def test_resolver_artifact_finding_dropped(self):
+        """A finding whose schema_path is a bare 2-segment
+        `components.<container>` (the broken-$ref hoisting artifact,
+        validation-rules/039) is dropped regardless of engine_rule."""
+        artifact_finding = {
+            **SAMPLE_SPECTRAL_FINDING,
+            "code": "camara-properties-descriptions",
+            "path": ["components", "schemas"],
+            "message": '"schemas" property must be truthy',
+        }
+        raw = json.dumps([SAMPLE_SPECTRAL_FINDING, artifact_finding])
+        findings = parse_spectral_output(raw)
+        assert len(findings) == 1
+        assert findings[0]["engine_rule"] == "camara-path-casing-convention"
+
+    def test_non_artifact_components_finding_kept(self):
+        """A genuine 3+-segment components finding survives the guard."""
+        real_finding = {
+            **SAMPLE_SPECTRAL_FINDING,
+            "code": "camara-properties-descriptions",
+            "path": ["components", "schemas", "Foo", "properties", "bar"],
+        }
+        raw = json.dumps([real_finding])
+        findings = parse_spectral_output(raw)
+        assert len(findings) == 1
 
 
 # ---------------------------------------------------------------------------
