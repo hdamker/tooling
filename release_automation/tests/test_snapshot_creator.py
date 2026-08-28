@@ -436,6 +436,71 @@ class TestCreateSnapshot:
     @patch("release_automation.scripts.snapshot_creator.shutil.rmtree")
     @patch("release_automation.scripts.snapshot_creator.GitOperations")
     @patch("builtins.open", create=True)
+    def test_release_review_branch_differs_only_by_changelog(
+        self,
+        mock_open,
+        mock_git_ops_class,
+        mock_rmtree,
+        mock_mkdtemp,
+        mock_changelog_cls,
+        snapshot_creator,
+        mock_github_client,
+        sample_release_plan,
+    ):
+        """README is part of the snapshot commit; only CHANGELOG is added
+        on top of it on the release-review branch."""
+        mock_mkdtemp.return_value = "/tmp/test-snapshot"
+
+        mock_git_ops = MagicMock()
+        mock_git_ops_class.return_value = mock_git_ops
+        mock_git_ops.create_pr.return_value = PullRequestInfo(
+            number=42, url="https://github.com/owner/repo/pull/42"
+        )
+        mock_github_client.get_releases.return_value = []
+        mock_github_client.generate_release_notes.return_value = None
+
+        mock_changelog_instance = Mock()
+        mock_changelog_instance.generate_draft.return_value = "# r4.1\n\nContent\n"
+        mock_changelog_instance.write_changelog.return_value = (
+            "CHANGELOG/CHANGELOG-r4.md"
+        )
+        mock_changelog_cls.return_value = mock_changelog_instance
+
+        config = SnapshotConfig(release_tag="r4.1")
+        result = snapshot_creator.create_snapshot(sample_release_plan, config)
+
+        assert result.success is True
+
+        commit_messages = [
+            call.args[0] for call in mock_git_ops.commit_all.call_args_list
+        ]
+        assert commit_messages == [
+            f"Release automation: create snapshot {result.snapshot_id}",
+            "Add CHANGELOG draft for r4.1",
+        ]
+        assert not any("README" in msg for msg in commit_messages)
+
+        # The snapshot commit (README included) happens before the
+        # release-review branch is cut from it; CHANGELOG is added after.
+        method_names = [c[0] for c in mock_git_ops.method_calls]
+        snapshot_commit_index = method_names.index("commit_all")
+        create_review_branch_index = method_names.index(
+            "create_branch", snapshot_commit_index
+        )
+        changelog_commit_index = method_names.index(
+            "commit_all", create_review_branch_index
+        )
+        assert (
+            snapshot_commit_index
+            < create_review_branch_index
+            < changelog_commit_index
+        )
+
+    @patch("release_automation.scripts.snapshot_creator.ChangelogGenerator")
+    @patch("release_automation.scripts.snapshot_creator.tempfile.mkdtemp")
+    @patch("release_automation.scripts.snapshot_creator.shutil.rmtree")
+    @patch("release_automation.scripts.snapshot_creator.GitOperations")
+    @patch("builtins.open", create=True)
     def test_changelog_keeps_release_tag_in_dependency_line(
         self,
         mock_open,

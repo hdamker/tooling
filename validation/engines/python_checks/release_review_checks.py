@@ -1,7 +1,7 @@
 """Release review PR checks.
 
 Validates that release review PRs (targeting release-snapshot branches)
-only modify allowed files (CHANGELOG.md, CHANGELOG/, README.md).
+only modify allowed files (CHANGELOG.md, CHANGELOG/).
 """
 
 from __future__ import annotations
@@ -18,7 +18,9 @@ from ._types import make_finding
 logger = logging.getLogger(__name__)
 
 # Files and directories allowed to change on release review PRs.
-_ALLOWED_PATHS = frozenset({"CHANGELOG.md", "README.md"})
+# README.md is a mechanical change committed with the snapshot — not
+# reviewable content, so it is not on this list.
+_ALLOWED_PATHS = frozenset({"CHANGELOG.md"})
 _ALLOWED_PREFIXES = ("CHANGELOG/",)
 
 
@@ -94,7 +96,7 @@ def check_release_review_file_restriction(
     Only runs when ``context.is_release_review_pr`` is ``True``.
     Returns empty list otherwise.
 
-    Allowed files: CHANGELOG.md, CHANGELOG/*, README.md.
+    Allowed files: CHANGELOG.md, CHANGELOG/*.
     All other files on the snapshot branch are immutable.
     """
     if not context.is_release_review_pr:
@@ -113,8 +115,8 @@ def check_release_review_file_restriction(
                     level="error",
                     message=(
                         f"File '{file_path}' must not be modified on a "
-                        f"release review PR — only CHANGELOG.md, CHANGELOG/, "
-                        f"and README.md are allowed"
+                        f"release review PR — only CHANGELOG.md and CHANGELOG/ "
+                        f"are allowed"
                     ),
                     path=file_path,
                     line=1,

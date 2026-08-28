@@ -152,7 +152,7 @@
 - id: P-012
   engine: python
   engine_rule: check-release-review-file-restriction
-  short_title: "Release Review PR: only docs may change"
+  short_title: "Release Review PR: only CHANGELOG may change"
   applicability:
     is_release_review_pr: true
   conditional_level:

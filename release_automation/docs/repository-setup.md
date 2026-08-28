@@ -44,7 +44,7 @@ Three rulesets protect branches managed by the release automation:
 
 The `camara-release-automation` GitHub App is the bypass actor for all rulesets, allowing the workflow to create and manage these branches while humans are governed by protection rules.
 
-No ruleset is needed for `release-review/**` branches — codeowners push review fixes directly to these branches, and the workflow handles creation and cleanup.
+No ruleset is needed for `release-review/**` branches — codeowners push CHANGELOG review fixes directly to these branches, and the workflow handles creation and cleanup. Validation rule P-012 restricts what may change there to CHANGELOG.md / CHANGELOG/ — README.md is a mechanical change committed with the snapshot, not editable here.
 
 ### Snapshot Branch Protection
 

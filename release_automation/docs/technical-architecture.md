@@ -437,11 +437,17 @@ In PLANNED state, only target fields are populated. In SNAPSHOT_ACTIVE/DRAFT_REA
 
 ### 2.10 Release Documentation Generators
 
-Two Python modules generate release documentation on the release-review branch, creating the commits that differentiate it from the snapshot branch.
+Two Python modules generate release documentation. The README updater runs as part of snapshot
+creation, alongside the other mechanical transforms; the CHANGELOG generator runs on the
+release-review branch, creating the single commit that differentiates it from the snapshot
+branch.
 
 #### 2.10.1 README Updater (`readme_updater.py`)
 
-Updates the "Release Information" section in README.md, replacing content between delimiters (`<!-- CAMARA:RELEASE-INFO:START -->` / `<!-- CAMARA:RELEASE-INFO:END -->`).
+Updates the "Release Information" section in README.md, replacing content between delimiters (`<!-- CAMARA:RELEASE-INFO:START -->` / `<!-- CAMARA:RELEASE-INFO:END -->`). Runs during
+`/create-snapshot`, before the snapshot commit — the block is a mechanical change, not
+reviewable content, so it is committed with the snapshot rather than left editable on the
+release-review branch.
 
 **Release state determination** (during `/create-snapshot`):
 
@@ -694,7 +700,7 @@ Synchronizes Release Issue with current derived state. Creates issues when none 
 
 ### 4.5 create-snapshot
 
-Orchestrates the full snapshot creation flow: validate release plan, calculate API versions, create snapshot branch with transformations, generate release-metadata.yaml, create release-review branch with README + CHANGELOG commits, create Release PR.
+Orchestrates the full snapshot creation flow: validate release plan, calculate API versions, create snapshot branch with transformations + README Release Information, generate release-metadata.yaml, create release-review branch with the CHANGELOG commit, create Release PR.
 
 ---
 
@@ -730,17 +736,17 @@ Orchestrates the full snapshot creation flow: validate release plan, calculate A
 │                    ▼                                                    │
 │  8. Create snapshot branch: release-snapshot/r4.1-abc1234              │
 │     - Apply mechanical transformations                                  │
+│     - Update README Release Information section                        │
 │     - Generate release-metadata.yaml                                    │
 │     - Commit + push snapshot branch                                     │
 │                    │                                                    │
 │                    ▼                                                    │
 │  9. Create release-review branch from snapshot HEAD                     │
-│     9a. Update README Release Information section                       │
-│     9b. Generate CHANGELOG draft → CHANGELOG/CHANGELOG-r4.md           │
+│     9a. Generate CHANGELOG draft → CHANGELOG/CHANGELOG-r4.md           │
 │     - Push release-review branch                                        │
 │                    │                                                    │
 │                    ▼                                                    │
-│  10. Create Release PR: release-review → snapshot (2 commits diff)      │
+│  10. Create Release PR: release-review → snapshot (1 commit diff)       │
 │      Title: "Release Review: RepoName r4.1 (RC, Sync26)"               │
 │                    │                                                    │
 │                    ▼                                                    │
