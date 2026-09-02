@@ -375,6 +375,163 @@ class TestCalculateVersion:
         assert result == "2.0.0-alpha.1"
 
 
+class TestSeedVersion:
+    """Tests for the seeded_from cross-repo continuity input."""
+
+    def test_seed_used_when_self_history_empty(self, calculator, mock_github_client):
+        """No self-history: seed value sets the next extension (QoSProfiles case)."""
+        mock_github_client.get_releases.return_value = []
+
+        result = calculator.calculate_version(
+            api_name="qos-profiles",
+            target_version="1.2.0",
+            target_status="rc",
+            seed_version="1.2.0-rc.3",
+        )
+
+        assert result == "1.2.0-rc.4"
+
+    def test_self_history_dominates_when_ahead_of_seed(
+        self, calculator, mock_github_client
+    ):
+        """Self-history already ahead of the seed: seed is inert."""
+        mock_github_client.get_releases.return_value = [
+            Release(tag_name="r1.2", name="", draft=False, prerelease=True, html_url="")
+        ]
+        mock_github_client.get_release_metadata.return_value = {
+            "apis": [{
+                "api_name": "qos-profiles",
+                "api_version": "1.2.0-rc.5",
+            }]
+        }
+
+        result = calculator.calculate_version(
+            api_name="qos-profiles",
+            target_version="1.2.0",
+            target_status="rc",
+            seed_version="1.2.0-rc.3",
+        )
+
+        assert result == "1.2.0-rc.6"
+
+    def test_seed_ignored_for_mismatched_status(self, calculator, mock_github_client):
+        """A seed value is only consulted for the matching target_status."""
+        mock_github_client.get_releases.return_value = []
+
+        result = calculator.calculate_version(
+            api_name="qos-profiles",
+            target_version="1.2.0",
+            target_status="alpha",
+            seed_version="1.2.0-rc.3",
+        )
+
+        assert result == "1.2.0-alpha.1"
+
+    def test_no_seed_unchanged_behavior(self, calculator, mock_github_client):
+        """Omitting seed_version behaves exactly as before (backward compatibility)."""
+        mock_github_client.get_releases.return_value = []
+
+        result = calculator.calculate_version(
+            api_name="qos-profiles",
+            target_version="1.2.0",
+            target_status="rc",
+        )
+
+        assert result == "1.2.0-rc.1"
+
+
+class TestCalculateVersionsForPlanSeededFrom:
+    """Tests for calculate_versions_for_plan reading release_plan['seeded_from']."""
+
+    def test_seeded_from_applied_per_api_and_status(
+        self, calculator, mock_github_client
+    ):
+        """seeded_from.apis[].last_rc_api_version feeds the matching API's calculation."""
+        mock_github_client.get_releases.return_value = []
+
+        release_plan = {
+            "seeded_from": {
+                "repository": "QualityOnDemand",
+                "release_tag": "r4.1",
+                "apis": [
+                    {
+                        "api_name": "qos-profiles",
+                        "seeded_api_version": "1.2.0-rc.3",
+                        "last_rc_api_version": "1.2.0-rc.3",
+                    }
+                ],
+            },
+            "apis": [
+                {
+                    "api_name": "qos-profiles",
+                    "target_api_version": "1.2.0",
+                    "target_api_status": "rc",
+                },
+                {
+                    "api_name": "other-api",
+                    "target_api_version": "1.0.0",
+                    "target_api_status": "rc",
+                },
+            ],
+        }
+
+        result = calculator.calculate_versions_for_plan(release_plan)
+
+        assert result == {
+            "qos-profiles": "1.2.0-rc.4",
+            "other-api": "1.0.0-rc.1",
+        }
+
+    def test_seeded_from_wrong_status_key_ignored(
+        self, calculator, mock_github_client
+    ):
+        """A seed declared only under last_alpha_api_version doesn't feed an rc calculation."""
+        mock_github_client.get_releases.return_value = []
+
+        release_plan = {
+            "seeded_from": {
+                "repository": "QualityOnDemand",
+                "release_tag": "r4.1",
+                "apis": [
+                    {
+                        "api_name": "qos-profiles",
+                        "seeded_api_version": "0.4.0-alpha.2",
+                        "last_alpha_api_version": "0.4.0-alpha.2",
+                    }
+                ],
+            },
+            "apis": [
+                {
+                    "api_name": "qos-profiles",
+                    "target_api_version": "1.2.0",
+                    "target_api_status": "rc",
+                },
+            ],
+        }
+
+        result = calculator.calculate_versions_for_plan(release_plan)
+
+        assert result == {"qos-profiles": "1.2.0-rc.1"}
+
+    def test_no_seeded_from_unchanged_behavior(self, calculator, mock_github_client):
+        """Plans without seeded_from behave exactly as before (backward compatibility)."""
+        mock_github_client.get_releases.return_value = []
+
+        release_plan = {
+            "apis": [
+                {
+                    "api_name": "location-verification",
+                    "target_api_version": "3.2.0",
+                    "target_api_status": "rc",
+                },
+            ],
+        }
+
+        result = calculator.calculate_versions_for_plan(release_plan)
+
+        assert result == {"location-verification": "3.2.0-rc.1"}
+
+
 class TestFindExistingExtensions:
     """Tests for find_existing_extensions method."""
 

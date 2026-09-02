@@ -213,6 +213,8 @@ Calculates API version extensions based on release history. For pre-release APIs
 
 Note: `target_status` values are API-level statuses (`draft`, `alpha`, `rc`, `public`) as defined in `release-plan.yaml`. These are distinct from repository-level `release_type` values (`pre-release-alpha`, `pre-release-rc`, `public-release`, `maintenance-release`).
 
+**Repo-split continuity (`seeded_from`):** when `release-plan.yaml` declares a top-level `seeded_from` block (see `release-plan-schema.yaml`), `calculate_versions_for_plan` folds each API's declared `last_rc_api_version` / `last_alpha_api_version` into Step 3 above as one virtual entry alongside this repository's own release history, for the matching `target_status` only. This lets a freshly split-off repository with no release history of its own continue a predecessor repository's rc/alpha extension numbering (e.g., predecessor's `1.2.0-rc.3` → `1.2.0-rc.4` here) instead of restarting at `.1`. Once this repository accumulates its own releases, self-history naturally overtakes the seed value.
+
 ### 2.3 Metadata Generator (`metadata_generator.py`)
 
 Generates `release-metadata.yaml` for snapshot branches, following the schema defined in `release-metadata-schema.yaml`.

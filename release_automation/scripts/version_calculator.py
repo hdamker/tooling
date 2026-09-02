@@ -113,7 +113,8 @@ class VersionCalculator:
         self,
         api_name: str,
         target_version: str,
-        target_status: str
+        target_status: str,
+        seed_version: Optional[str] = None
     ) -> str:
         """
         Calculate the full version string with extension.
@@ -125,6 +126,9 @@ class VersionCalculator:
             api_name: Name of the API (e.g., "location-verification")
             target_version: Base version (e.g., "3.2.0")
             target_status: Release status ("alpha", "rc", or "public")
+            seed_version: Optional predecessor-repository pre-release version
+                (from release-plan.yaml's seeded_from) to fold in alongside
+                this repository's own history, for repo-split continuity
 
         Returns:
             Full version string (e.g., "3.2.0-rc.2")
@@ -135,7 +139,7 @@ class VersionCalculator:
 
         # Find existing extensions for this version/status combination
         existing = self.find_existing_extensions(
-            api_name, target_version, target_status
+            api_name, target_version, target_status, seed_version=seed_version
         )
 
         # Calculate next extension number
@@ -152,7 +156,8 @@ class VersionCalculator:
         self,
         api_name: str,
         target_version: str,
-        target_status: str
+        target_status: str,
+        seed_version: Optional[str] = None
     ) -> List[int]:
         """
         Find all existing extension numbers for a version/status combination.
@@ -164,6 +169,8 @@ class VersionCalculator:
             api_name: Name of the API
             target_version: Base version (e.g., "3.2.0")
             target_status: Release status ("alpha", "rc")
+            seed_version: Optional predecessor-repository pre-release version
+                to fold in as one virtual entry, for repo-split continuity
 
         Returns:
             List of extension numbers found (e.g., [1, 2, 3])
@@ -192,6 +199,15 @@ class VersionCalculator:
                 if ext is not None:
                     extensions.append(ext)
 
+        # Fold in the seeded_from predecessor-repository fact, if any, using
+        # the same URL-namespace matching as self-history entries above.
+        if seed_version:
+            ext = self._parse_extension(
+                seed_version, target_version, target_status
+            )
+            if ext is not None:
+                extensions.append(ext)
+
         return extensions
 
     def calculate_versions_for_plan(
@@ -201,6 +217,11 @@ class VersionCalculator:
         """
         Calculate versions for all APIs in a release plan.
 
+        Reads release_plan['seeded_from']['apis'] when present (a repo-split
+        continuity fact - see release-plan-schema.yaml) and folds each API's
+        declared last_rc_api_version / last_alpha_api_version into the
+        matching status's extension calculation.
+
         Args:
             release_plan: Parsed release-plan.yaml content
 
@@ -208,6 +229,7 @@ class VersionCalculator:
             Dict mapping api_name to calculated version
         """
         versions = {}
+        seed_versions = self._extract_seed_versions(release_plan)
 
         apis = release_plan.get("apis", [])
         for api in apis:
@@ -216,11 +238,47 @@ class VersionCalculator:
             target_status = api.get("target_api_status", "public")
 
             if api_name and target_version:
+                seed_version = seed_versions.get(api_name, {}).get(target_status)
                 versions[api_name] = self.calculate_version(
-                    api_name, target_version, target_status
+                    api_name, target_version, target_status,
+                    seed_version=seed_version
                 )
 
         return versions
+
+    @staticmethod
+    def _extract_seed_versions(release_plan: dict) -> dict:
+        """
+        Build a {api_name: {status: version}} map from release_plan['seeded_from'].
+
+        Only last_rc_api_version / last_alpha_api_version are read;
+        seeded_api_version is documentation-only provenance and is ignored.
+        """
+        seeded_from = release_plan.get("seeded_from")
+        if not isinstance(seeded_from, dict):
+            return {}
+
+        seed_versions: dict = {}
+        for api in seeded_from.get("apis", []):
+            if not isinstance(api, dict):
+                continue
+            api_name = api.get("api_name")
+            if not api_name:
+                continue
+
+            by_status = {}
+            for status, field in (
+                ("rc", "last_rc_api_version"),
+                ("alpha", "last_alpha_api_version"),
+            ):
+                value = api.get(field)
+                if isinstance(value, str) and value:
+                    by_status[status] = value
+
+            if by_status:
+                seed_versions[api_name] = by_status
+
+        return seed_versions
 
     def _parse_extension(
         self,
