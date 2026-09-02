@@ -192,6 +192,67 @@ class TestTemplateLoader:
         assert "| TestAPI | `v1.2.0-rc.2` | rc | `v1.2.0-rc.1` |" in result
         assert "| NewAPI | `v0.1.0-alpha.1` | alpha | `N/A` |" in result
 
+    def test_render_release_review_pr_seeded_from_note_when_no_baseline(self):
+        """Seeded API with no resolvable baseline (N/A) gets a check-the-predecessor note."""
+        context = {
+            "release_tag": "r1.1",
+            "snapshot_id": "r1.1-abc1234",
+            "short_type": "rc",
+            "apis": [
+                {
+                    "api_name": "qos-profiles",
+                    "api_version": "1.2.0-rc.4",
+                    "status_label": "rc",
+                    "seeded_from_repository": "QualityOnDemand",
+                    "seeded_from_release_tag": "r4.1",
+                },
+            ],
+        }
+
+        result = render_template("release_review_pr", context)
+
+        assert "| qos-profiles | `1.2.0-rc.4` | rc | `N/A` |" in result
+        assert "qos-profiles" in result.split("Comparison target |")[1]
+        assert "QualityOnDemand" in result
+        assert "r4.1" in result
+
+    def test_render_release_review_pr_no_seeded_from_note_when_baseline_resolved(self):
+        """A resolved comparison_baseline suppresses the note even if the API was seeded."""
+        context = {
+            "release_tag": "r1.2",
+            "snapshot_id": "r1.2-def5678",
+            "short_type": "rc",
+            "apis": [
+                {
+                    "api_name": "qos-profiles",
+                    "api_version": "1.2.0-rc.5",
+                    "status_label": "rc",
+                    "comparison_baseline": "1.2.0-rc.4",
+                    "seeded_from_repository": "QualityOnDemand",
+                    "seeded_from_release_tag": "r4.1",
+                },
+            ],
+        }
+
+        result = render_template("release_review_pr", context)
+
+        assert "QualityOnDemand" not in result
+
+    def test_render_release_review_pr_no_seeded_from_note_when_not_seeded(self):
+        """No seeded_from data on the API means no note, regardless of N/A."""
+        context = {
+            "release_tag": "r4.2",
+            "snapshot_id": "r4.2-111222",
+            "short_type": "rc",
+            "apis": [
+                {"api_name": "fresh-api", "api_version": "0.1.0-alpha.1", "status_label": "alpha"},
+            ],
+        }
+
+        result = render_template("release_review_pr", context)
+
+        assert "seeded from" not in result.lower()
+
     def test_loader_render_sync_pr(self):
         """Test TemplateLoader.render for sync PR."""
         loader = TemplateLoader("pr_bodies")

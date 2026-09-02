@@ -1499,6 +1499,96 @@ class TestReleaseDocumentation:
         assert result == {}
         mock_github_client.get_release_metadata.assert_not_called()
 
+    def test_create_release_pr_adds_seeded_from_note_when_no_baseline(
+        self, snapshot_creator, mock_github_client
+    ):
+        """A seeded API with no resolvable comparison baseline gets the predecessor hint."""
+        mock_git_ops = Mock()
+        mock_git_ops.create_pr.return_value = PullRequestInfo(number=1, url="url")
+        mock_github_client.get_file_content.return_value = None
+
+        release_plan = {
+            "repository": {"target_release_type": "pre-release-rc"},
+            "apis": [{"api_name": "qos-profiles", "target_api_status": "rc"}],
+            "seeded_from": {
+                "repository": "QualityOnDemand",
+                "release_tag": "r4.1",
+                "apis": [
+                    {"api_name": "qos-profiles", "seeded_api_version": "1.2.0-rc.3"},
+                ],
+            },
+        }
+
+        snapshot_creator._create_release_pr(
+            mock_git_ops,
+            "r1.1",
+            "r1.1-abc1234",
+            {"qos-profiles": "1.2.0-rc.4"},
+            release_plan,
+            api_comparison_baselines={},
+        )
+
+        body = mock_git_ops.create_pr.call_args.kwargs["body"]
+        assert "QualityOnDemand" in body
+        assert "r4.1" in body
+
+    def test_create_release_pr_no_seeded_from_note_when_baseline_resolved(
+        self, snapshot_creator, mock_github_client
+    ):
+        """Once a comparison baseline resolves from self-history, the hint disappears."""
+        mock_git_ops = Mock()
+        mock_git_ops.create_pr.return_value = PullRequestInfo(number=1, url="url")
+        mock_github_client.get_file_content.return_value = None
+
+        release_plan = {
+            "repository": {"target_release_type": "pre-release-rc"},
+            "apis": [{"api_name": "qos-profiles", "target_api_status": "rc"}],
+            "seeded_from": {
+                "repository": "QualityOnDemand",
+                "release_tag": "r4.1",
+                "apis": [
+                    {"api_name": "qos-profiles", "seeded_api_version": "1.2.0-rc.3"},
+                ],
+            },
+        }
+
+        snapshot_creator._create_release_pr(
+            mock_git_ops,
+            "r1.2",
+            "r1.2-def5678",
+            {"qos-profiles": "1.2.0-rc.5"},
+            release_plan,
+            api_comparison_baselines={"qos-profiles": "1.2.0-rc.4"},
+        )
+
+        body = mock_git_ops.create_pr.call_args.kwargs["body"]
+        assert "QualityOnDemand" not in body
+
+    def test_create_release_pr_no_seeded_from_note_without_seeded_from(
+        self, snapshot_creator, mock_github_client
+    ):
+        """No seeded_from in the plan means no hint, regardless of N/A."""
+        mock_git_ops = Mock()
+        mock_git_ops.create_pr.return_value = PullRequestInfo(number=1, url="url")
+        mock_github_client.get_file_content.return_value = None
+
+        release_plan = {
+            "repository": {"target_release_type": "pre-release-rc"},
+            "apis": [{"api_name": "fresh-api", "target_api_status": "rc"}],
+        }
+
+        snapshot_creator._create_release_pr(
+            mock_git_ops,
+            "r1.1",
+            "r1.1-abc1234",
+            {"fresh-api": "0.1.0-rc.1"},
+            release_plan,
+            api_comparison_baselines={},
+        )
+
+        body = mock_git_ops.create_pr.call_args.kwargs["body"]
+        assert "seeded from" not in body.lower()
+
     def test_update_readme_returns_false_when_no_readme(
         self, snapshot_creator, tmp_path, sample_release_plan
     ):
