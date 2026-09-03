@@ -1,29 +1,30 @@
-# Commonalities Regression Testing (canary)
+# Commonalities Regression Testing (canary) — manual trigger
 #
-# Scheduled and manually dispatched sync/cherry-pick/sweep against
-# camaraproject/CommonalitiesTest. Does not touch ReleaseTest, which
-# validation-regression.yml sweeps separately and also calls into the same
-# reusable workflow used here.
+# Manually dispatched sync/cherry-pick/sweep against
+# camaraproject/CommonalitiesTest. The scheduled trigger lives in
+# camaraproject/Commonalities' own caller of the same reusable workflow;
+# this one stays for ad hoc dispatch from tooling. Does not touch
+# ReleaseTest, which validation-regression.yml sweeps separately and also
+# calls into the same reusable workflow used here.
 
 name: Commonalities Regression
 
 on:
-  schedule:
-    - cron: "17 4 * * *"
   workflow_dispatch:
     inputs:
       force:
         description: >-
-          Run the sweep even if neither the common nor the templates diff
-          fired (e.g. to re-confirm a fixture after a manual recapture).
+          Force the sweep to run even if neither the common nor the
+          templates diff fired (e.g. to re-confirm a fixture after a
+          manual recapture).
         type: boolean
         required: false
-        default: false
+        default: true
 
 jobs:
   sync-and-sweep:
     name: CommonalitiesTest
     uses: ./.github/workflows/commonalities-regression-sync.yml
     with:
-      force: ${{ inputs.force || false }}
+      force: ${{ inputs.force }}
     secrets: inherit
