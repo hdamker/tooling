@@ -541,8 +541,8 @@ class TestParseSpectralOutput:
 
     def test_resolver_artifact_finding_dropped(self):
         """A finding whose schema_path is a bare 2-segment
-        `components.<container>` (the broken-$ref hoisting artifact,
-        validation-rules/039) is dropped regardless of engine_rule."""
+        `components.<container>` (the broken-$ref hoisting artifact) is
+        dropped regardless of engine_rule."""
         artifact_finding = {
             **SAMPLE_SPECTRAL_FINDING,
             "code": "camara-properties-descriptions",

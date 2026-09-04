@@ -321,7 +321,7 @@ class TestMetadataGenerator:
 
 
 class TestReleaseTypeValidation:
-    """Tests for release type validation (DEC-009: long-form values only)."""
+    """Tests for release type validation (long-form values only)."""
 
     def test_pre_release_alpha_accepted(self, generator):
         """pre-release-alpha is a valid release type."""

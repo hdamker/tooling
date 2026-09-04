@@ -273,7 +273,7 @@ class TestCompletenessRuleMaturityGrading:
 # ---------------------------------------------------------------------------
 # Regression: P-006/P-007/P-008 (test-file rules) ramp on target_api_status,
 # not target_release_type, anchored on the public/stable obligation with
-# overrides only demoting. See validation-rules/017.
+# overrides only demoting.
 # ---------------------------------------------------------------------------
 
 

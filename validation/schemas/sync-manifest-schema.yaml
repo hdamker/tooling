@@ -5,7 +5,7 @@ description: >-
   code/common/.sync-manifest.yaml.  Records the source repository,
   release tag, and git blob SHA-1 hashes for each synced file.
   Read by VF P-021 (check-common-cache-sync) and RA derive-state
-  (out_of_sync signal).  See DEC-030.
+  (out_of_sync signal).
 type: object
 required:
   - sources

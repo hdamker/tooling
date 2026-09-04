@@ -269,7 +269,7 @@ def test_parameter_in_components_missing_description_still_fires_s011():
 
 
 def test_broken_ref_to_existing_common_file_does_not_fire_s011():
-    """Cascade artifact from validation-rules/039: a `$ref` under
+    """Broken-`$ref` cascade artifact: a `$ref` under
     `components.<type>.<Name>.properties.<prop>` pointing to a missing
     JSON pointer in a common file that itself exists makes Spectral hoist
     a synthetic `components.schemas` node and fire S-011 against it. That

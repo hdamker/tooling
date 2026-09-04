@@ -1,5 +1,5 @@
 # CAMARA Project - Spectral linting ruleset for Commonalities r4.x (Spring26+)
-# r4.1 baseline (Commonalities 0.7.0-rc.1), evolves with pre-releases per DEC-025.
+# r4.1 baseline (Commonalities 0.7.0-rc.1), evolves with pre-releases.
 # Stabilizes at Commonalities 0.7.0 public release.
 #
 # Based on: https://github.com/camaraproject/Commonalities/blob/main/artifacts/linting_rules/.spectral.yml

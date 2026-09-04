@@ -708,7 +708,7 @@ class TestRunPostFilter:
         assert result.findings[0]["rule_id"] == "S-018"
 
     def test_invalid_ref_enriches_to_s229(self, tmp_path: Path):
-        """Spectral's built-in `invalid-ref` maps to S-229 (validation-rules/039):
+        """Spectral's built-in `invalid-ref` maps to S-229:
         it previously reached the reader via the unmapped pass-through branch
         with no rule_id, no short_title, and native `error` level."""
         _write_rules(tmp_path, [{
