@@ -296,7 +296,7 @@ def run_engines(
     # declaration advanced in this PR.  The code/common/ cache and API
     # spec content on disk are still tied to the previous tag — running
     # Spectral with the new ruleset or GPLint against those files
-    # produces misleading findings (DEC-029 exclusivity principle).
+    # produces misleading findings (the exclusivity principle).
     # Skip those engines entirely; Python engine still runs but its
     # post-filter keeps only rules gated on release_plan_changed=true.
     skip_context_dependent = bool(

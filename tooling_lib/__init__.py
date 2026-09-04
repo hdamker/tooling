@@ -5,5 +5,5 @@ Hosts code reused across ``validation/`` (VF) and
 ``from tooling_lib.<module> import ...``.
 
 Modules:
-    cache_sync  -- Common-file cache sync status checking (DEC-030/031).
+    cache_sync  -- Common-file cache sync status checking.
 """

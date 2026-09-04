@@ -74,8 +74,8 @@ def _write_common_file(tmp_path: Path, filename: str, content: str) -> str:
 def _write_release_plan(tmp_path: Path) -> None:
     """Stub release-plan.yaml at repo root.
 
-    P-021 short-circuits when release-plan.yaml is absent (DEC-021
-    bundling: code/common/ and release-plan.yaml are sibling state).
+    P-021 short-circuits when release-plan.yaml is absent (under
+    bundling, code/common/ and release-plan.yaml are sibling state).
     Tests exercising the sync logic need a release-plan.yaml present;
     the file's content is irrelevant — only its existence is checked.
     """
@@ -229,7 +229,7 @@ class TestReleasePlanPresenceGate:
     """P-021 short-circuits when release-plan.yaml is absent.
 
     Covers the release-review/snapshot-branch context: bundling
-    (DEC-021) removes both release-plan.yaml and code/common/, but
+    removes both release-plan.yaml and code/common/, but
     commonalities_release remains populated via the
     release-metadata.yaml fallback. The check has nothing meaningful
     to verify in that state.

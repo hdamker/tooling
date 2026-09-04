@@ -571,7 +571,7 @@ class TestPublicationTemplates:
         # Warning visible
         assert "Post-release warnings" in result
         assert "sync PR" in result
-        # Issue stays open (IMP-077)
+        # Issue stays open
         assert "remains open" in result
         assert "closed automatically" not in result
 

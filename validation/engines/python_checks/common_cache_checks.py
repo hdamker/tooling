@@ -3,8 +3,6 @@
 Wrapper around :func:`tooling_lib.cache_sync.check_sync_status` that
 converts the structured :class:`~tooling_lib.cache_sync.SyncStatus`
 into VF findings.
-
-DEC-027 (RA-integrated sync), DEC-030 (manifest-based validation).
 """
 
 from __future__ import annotations
@@ -28,7 +26,7 @@ def check_common_cache_sync(
     Repo-level check — runs once, not per-API.
 
     Skipped when ``release-plan.yaml`` is absent at the repo root
-    (release-review/snapshot branches post-bundling per DEC-021):
+    (release-review/snapshot branches post-bundling):
     ``code/common/`` is intentionally absent in the same context, so
     there is nothing to verify. ``commonalities_release`` may still be
     populated from the release-metadata.yaml fallback in those cases.

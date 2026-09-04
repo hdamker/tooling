@@ -272,7 +272,7 @@ def run_post_filter(
             # declaration has advanced in this PR, the code/common/ cache
             # and on-disk content are stale relative to the declared tag.
             # Running version-context-dependent rules against that stale
-            # content produces misleading findings (DEC-029 exclusivity
+            # content produces misleading findings (the exclusivity
             # principle).  Only rules explicitly marked safe survive; the
             # flag is separate from release_plan_changed applicability so
             # always-valid release-plan consistency checks can still run on

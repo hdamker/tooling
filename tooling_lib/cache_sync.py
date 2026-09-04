@@ -9,8 +9,6 @@ This module is intentionally VF- and RA-independent: it uses only the
 Python standard library plus ``pyyaml``.  Both the validation framework
 (P-021 check) and release automation (derive-state ``out_of_sync``
 signal) import from here.
-
-See DEC-030 (manifest-based validation) and DEC-031 (tooling_lib).
 """
 
 from __future__ import annotations
