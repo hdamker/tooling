@@ -2,6 +2,7 @@
 
 ## Table of Contents
 
+- **[v0.10.0](#v0100)**
 - **[v0.9.0](#v090)**
 - **[v0.8.1](#v081)**
 - **[v0.8.0](#v080)**
@@ -15,6 +16,43 @@
 - **[v0.2.2](#v022)**
 - **[v0.2.1](#v021)**
 - **[v0.2.0](#v020)**
+
+# v0.10.0
+
+## Release Notes
+
+**v0.10.0 is a minor release for the CAMARA tooling repository.**
+
+This release adds a dedicated rule for broken `$ref` targets (new rule S-229, replacing a misleading S-011 cascade artifact) and an optional `seeded_from` field in `release-plan.yaml` so a repository split can continue an API's rc/alpha pre-release numbering from its predecessor. It also changes where the README release-info block is committed during release review — with the snapshot rather than the review branch, so other release-review README edits are no longer lost — and narrows `P-012`'s file restriction to CHANGELOG changes only. A new CommonalitiesTest regression pipeline is included, along with ten `/validation` dependency bumps.
+
+### Added
+
+* Drop the S-011 broken-ref cascade artifact and map Spectral's `invalid-ref` to a dedicated finding — new rule S-229 by @hdamker in https://github.com/camaraproject/tooling/pull/433
+* Continue rc/alpha pre-release numbering across a repository split via an optional `seeded_from` field in `release-plan.yaml` by @hdamker in https://github.com/camaraproject/tooling/pull/442
+* Sync CommonalitiesTest regression branches from Commonalities `main` by @hdamker in https://github.com/camaraproject/tooling/pull/435
+
+### Changed
+
+* Commit the README release-info block with the snapshot, not the release-review branch, and narrow `P-012` to CHANGELOG-only changes on that branch by @hdamker in https://github.com/camaraproject/tooling/pull/431
+* Add a findings-collector checklist item to the Release Review PR template by @hdamker in https://github.com/camaraproject/tooling/pull/429
+* Shorten regression job names for readability by @hdamker in https://github.com/camaraproject/tooling/pull/436
+* Scope the ReleaseTest canary's concurrency to its own job by @hdamker in https://github.com/camaraproject/tooling/pull/437
+* Strip unresolvable internal references from comments and docstrings; no functional change by @hdamker in https://github.com/camaraproject/tooling/pull/446
+
+### Dependencies
+
+* Bump @stoplight/spectral-cli from 6.16.2 to 6.16.3 by @dependabot in https://github.com/camaraproject/tooling/pull/421
+* Bump js-yaml from 5.2.2 to 5.2.3 by @dependabot in https://github.com/camaraproject/tooling/pull/422
+* Bump @redocly/cli from 2.43.2 to 2.46.0 by @dependabot in https://github.com/camaraproject/tooling/pull/423
+* Bump @redocly/cli from 2.46.0 to 2.46.1 by @dependabot in https://github.com/camaraproject/tooling/pull/425
+* Bump js-yaml from 5.2.3 to 5.3.0 by @dependabot in https://github.com/camaraproject/tooling/pull/426
+* Bump @redocly/cli from 2.46.1 to 2.47.0 by @dependabot in https://github.com/camaraproject/tooling/pull/428
+* Bump js-yaml from 5.3.0 to 5.4.1 by @dependabot in https://github.com/camaraproject/tooling/pull/438
+* Bump @redocly/cli from 2.47.0 to 2.49.0 by @dependabot in https://github.com/camaraproject/tooling/pull/439
+* Bump gplint from 2.5.2 to 2.6.0 by @dependabot in https://github.com/camaraproject/tooling/pull/440
+* Bump fast-uri from 3.1.5 to 3.1.7 by @dependabot in https://github.com/camaraproject/tooling/pull/443
+
+**Full Changelog**: https://github.com/camaraproject/tooling/compare/v0.9.0...v0.10.0
 
 # v0.9.0
 
