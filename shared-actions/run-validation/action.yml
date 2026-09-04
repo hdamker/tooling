@@ -140,9 +140,13 @@ runs:
       shell: bash
       run: pip install --quiet -r "${{ inputs.tooling_path }}/requirements.txt"
 
+    # `--prefer-offline` uses the npm cache restored by the caller's
+    # setup-node step instead of revalidating against the registry;
+    # `--no-audit --no-fund` drop two round trips that produce no signal
+    # here.  `--ignore-scripts` stays -- no dependency runs install hooks.
     - name: Install Node dependencies
       shell: bash
-      run: npm ci --ignore-scripts
+      run: npm ci --ignore-scripts --no-audit --no-fund --prefer-offline
       working-directory: ${{ inputs.tooling_path }}/validation
 
     - name: Resolve Commonalities version

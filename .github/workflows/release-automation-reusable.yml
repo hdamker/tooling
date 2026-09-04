@@ -1009,10 +1009,16 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      # `cache: npm` for the same reason as in the validation reusable
+      # workflow: pre-snapshot validation runs the same composite action
+      # and the same `npm ci`.  Note the `_tooling` checkout prefix here,
+      # not the validation workflow's `.tooling`.
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: _tooling/validation/package-lock.json
 
       # ── Central validation settings (main) ─────────────────────────
       #

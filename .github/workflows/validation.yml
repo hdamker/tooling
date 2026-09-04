@@ -209,10 +209,23 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       # ── Step 5: Setup Node ─────────────────────────────────────────
+      #
+      # `cache: npm` restores the npm tarball store so the composite
+      # action's `npm ci` does not cold-fetch every validation dependency
+      # from the registry on each run.  The cache is scoped to the
+      # *calling* repository -- GitHub runs a called reusable workflow's
+      # job in the caller's execution context -- so each consumer repo
+      # warms and keeps its own entry, and a lockfile bump or a cache
+      # eviction still costs one cold install there.
+      #
+      # The tooling checkout (step 3) precedes this step, so the lockfile
+      # is present when setup-node computes the cache key.
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: .tooling/validation/package-lock.json
 
       # ── Step 6: Detect release-plan changes (PR only) ──────────────
       - name: Detect release-plan changes
