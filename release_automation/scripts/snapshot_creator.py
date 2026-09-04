@@ -676,6 +676,15 @@ class SnapshotCreator:
         title = f"Release Review: {repo_name} {release_tag}{type_suffix}"
 
         # Build PR body from template with enriched context
+        seeded_from = release_plan.get("seeded_from") or {}
+        seeded_from_repository = seeded_from.get("repository")
+        seeded_from_release_tag = seeded_from.get("release_tag")
+        seeded_api_names = {
+            api.get("api_name")
+            for api in seeded_from.get("apis", [])
+            if isinstance(api, dict) and api.get("api_name")
+        }
+
         apis = []
         api_comparison_baselines = api_comparison_baselines or {}
         for api_plan in release_plan.get("apis", []):
@@ -690,13 +699,21 @@ class SnapshotCreator:
                 status_label = "initial public" if major == 0 else "stable public"
             else:
                 status_label = status
-            apis.append({
+            api_entry = {
                 "api_name": name,
                 "api_version": api_versions.get(name, "—"),
                 "target_api_status": status,
                 "status_label": status_label,
                 "comparison_baseline": api_comparison_baselines.get(name),
-            })
+            }
+            # No comparison_baseline was found in this repository's own history.
+            # If this API was seeded from a predecessor repository (repo split),
+            # point the codeowner at it instead of leaving a silent N/A — RA does
+            # not compare cross-repo CHANGELOG history automatically.
+            if name in seeded_api_names and seeded_from_repository and seeded_from_release_tag:
+                api_entry["seeded_from_repository"] = seeded_from_repository
+                api_entry["seeded_from_release_tag"] = seeded_from_release_tag
+            apis.append(api_entry)
 
         # Dependencies from release plan
         dependencies = release_plan.get("dependencies", {})

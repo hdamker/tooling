@@ -11,6 +11,10 @@ Edit and review this PR before merging it into the release snapshot. After Codeo
 {{#apis}}
 | {{api_name}} | `{{api_version}}` | {{status_label}} | `{{#comparison_baseline}}{{comparison_baseline}}{{/comparison_baseline}}{{^comparison_baseline}}N/A{{/comparison_baseline}}` |
 {{/apis}}
+{{#apis}}{{^comparison_baseline}}{{#seeded_from_repository}}
+> [!NOTE]
+> No comparison baseline found for `{{api_name}}` in this repository. It was seeded from `{{seeded_from_repository}}` ({{seeded_from_release_tag}}) — check that repository's release history for a prior release to compare against before writing the CHANGELOG; cross-repo history is not compared automatically.
+{{/seeded_from_repository}}{{/comparison_baseline}}{{/apis}}
 
 {{#commonalities_release}}**Dependencies:** Commonalities {{commonalities_release}}{{#identity_consent_management_release}}, ICM {{identity_consent_management_release}}{{/identity_consent_management_release}}{{/commonalities_release}}
 
