@@ -37,34 +37,40 @@ def _template_entries(canonical: dict) -> dict[str, dict]:
     }
 
 
+_ARTIFACT_RELPATH = Path("artifacts/common/info-description-templates.yaml")
+
+# Relative locations of a `Commonalities` checkout to probe when no explicit
+# path is given, tried in order under each ancestor of this test file. Covers a
+# plain sibling clone as well as nested layouts used by multi-repo checkouts.
+_COMMONALITIES_LAYOUTS = (
+    Path("Commonalities"),
+    Path("upstream/traversals/Commonalities"),
+    Path("upstream/Commonalities"),
+)
+
+
 def _resolve_canonical_path() -> Path | None:
-    """Locate ``artifacts/common/info-description-templates.yaml`` in the workspace.
+    """Locate ``artifacts/common/info-description-templates.yaml`` locally.
 
-    Honours ``CAMARA_WORKSPACE_ROOT`` when set; falls back to walking up from
-    this test file looking for ``upstream/traversals/Commonalities/``.
+    ``CAMARA_COMMONALITIES_ROOT`` wins when set and must point at a
+    ``Commonalities`` checkout. Otherwise walk up from this test file probing
+    the layouts in :data:`_COMMONALITIES_LAYOUTS` under each ancestor. Returns
+    ``None`` when no checkout is reachable, which skips the test — the normal
+    case in CI, where this file has no counterpart on disk.
     """
-    env_root = os.environ.get("CAMARA_WORKSPACE_ROOT")
-    candidates: list[Path] = []
+    env_root = os.environ.get("CAMARA_COMMONALITIES_ROOT")
     if env_root:
-        candidates.append(
-            Path(env_root)
-            / "upstream/traversals/Commonalities/artifacts/common/info-description-templates.yaml"
-        )
+        explicit = Path(env_root) / _ARTIFACT_RELPATH
+        if explicit.is_file():
+            return explicit
 
-    # Walk up from this test file looking for a `upstream/traversals/Commonalities`
-    # sibling — handles running from a worktree under `worktrees/tooling/...`.
     cursor = Path(__file__).resolve()
     for _ in range(8):
         cursor = cursor.parent
-        guess = (
-            cursor
-            / "upstream/traversals/Commonalities/artifacts/common/info-description-templates.yaml"
-        )
-        candidates.append(guess)
-
-    for path in candidates:
-        if path.is_file():
-            return path
+        for layout in _COMMONALITIES_LAYOUTS:
+            guess = cursor / layout / _ARTIFACT_RELPATH
+            if guess.is_file():
+                return guess
     return None
 
 
@@ -74,8 +80,8 @@ _CANONICAL_PATH = _resolve_canonical_path()
 @pytest.mark.skipif(
     _CANONICAL_PATH is None,
     reason=(
-        "Commonalities upstream mirror not present "
-        "(set CAMARA_WORKSPACE_ROOT or check out the workspace)"
+        "Commonalities checkout not reachable "
+        "(set CAMARA_COMMONALITIES_ROOT to one)"
     ),
 )
 class TestInfoDescriptionTemplatesCanonical:
