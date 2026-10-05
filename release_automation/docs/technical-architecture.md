@@ -898,7 +898,7 @@ Permission checks use the GitHub API (`GET /repos/{owner}/{repo}/collaborators/{
 - At least one **Release Management reviewer** approval required
 - Enforced via repository rulesets on `release-snapshot/*` branches
 
-Three repository rulesets enforce these protections. GitHub Actions is configured as a bypass actor to allow workflow operations while blocking direct human access. See [repository-setup.md](repository-setup.md#repository-rulesets) for exact ruleset definitions, API payloads, and the verification checklist.
+Repository rulesets enforce these protections. GitHub Actions is configured as a bypass actor to allow workflow operations while blocking direct human access. See [repository-setup.md](repository-setup.md#repository-rulesets) for the ruleset definitions, links to the declared payloads, and the verification checklist.
 
 ### 7.3 Secrets
 

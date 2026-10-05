@@ -1,6 +1,6 @@
 # Repository Setup for Release Automation
 
-**Last Updated**: 2026-04-19
+**Last Updated**: 2026-10-05
 
 ## Overview
 
@@ -8,9 +8,9 @@ API repositories that adopt the CAMARA release automation need specific reposito
 
 This document defines the required configuration for each API repository. It serves as the **specification** that the automated onboarding tooling implements — repository administrators do not need to apply or verify this configuration manually.
 
-**Automated application**: The `campaign-release-automation-onboarding` campaign in [`camaraproject/project-administration`](https://github.com/camaraproject/project-administration) applies the full configuration to API repositories. It installs both the release-automation caller workflow and the CAMARA Validation caller workflow side-by-side, sets up the CHANGELOG directory structure, and uses a stable reconciliation branch so repeated runs update the same PR rather than creating new ones. A separate admin script (`apply-release-rulesets.sh`) applies the repository rulesets. Both support dry-run / plan modes and phased rollout — test repositories first, then volunteering repos, then all.
+**Automated application**: The `campaign-release-automation-onboarding` campaign in [`camaraproject/project-administration`](https://github.com/camaraproject/project-administration) applies the full configuration to API repositories. It installs both the release-automation caller workflow and the CAMARA Validation caller workflow side-by-side, sets up the CHANGELOG directory structure, and uses a stable reconciliation branch so repeated runs update the same PR rather than creating new ones. The repository rulesets are declared in project-administration and applied with its [repository-config](https://github.com/camaraproject/project-administration/blob/main/workflows/repository-config/README.md) tool. Both support dry-run / plan modes and phased rollout — test repositories first, then volunteering repos, then all.
 
-**New repositories**: After rollout, the configuration will also be applied to `Template_API_Repository` ([camaraproject/tooling#82](https://github.com/camaraproject/tooling/issues/82)), so that newly created API repositories inherit it automatically.
+**New repositories**: After rollout, the configuration will also be applied to `Template_API_Repository` ([camaraproject/tooling#82](https://github.com/camaraproject/tooling/issues/82)), so that newly created API repositories inherit it automatically. Rulesets are not copied from the template: the repository creation workflow applies the declared rulesets of the `api-repository` class.
 
 ### What the workflow manages internally
 
@@ -24,7 +24,7 @@ This document defines the required configuration for each API repository. It ser
 
 | Item | Purpose | Section |
 |------|---------|---------|
-| Repository ruleset | Branch protection for snapshot branches | [Ruleset](#repository-ruleset) |
+| Repository rulesets | Protection for snapshot and pointer branches and release tags | [Rulesets](#repository-rulesets) |
 | CODEOWNERS file | Codeowner assignment for `/publish-release` authorization | [CODEOWNERS](#codeowners-requirements) |
 | Release-automation caller workflow | Entry point that connects the repo to the release automation | [Caller Workflows](#caller-workflows) |
 | CAMARA Validation caller workflow | Entry point that connects the repo to the validation framework | [Caller Workflows](#caller-workflows) |
@@ -36,13 +36,16 @@ This document defines the required configuration for each API repository. It ser
 
 ## Repository Rulesets
 
-Three rulesets protect branches managed by the release automation:
+Four rulesets protect branches and tags managed by the release automation:
 
 1. **Snapshot branch protection** — protects `release-snapshot/**` branches with branch protection rules and PR review requirements
 2. **Release pointer branch protection** — protects `release/**` pointer branches (fully immutable)
 3. **Pre-release pointer branch protection** — protects `pre-release/**` pointer branches (immutable but deletable by codeowners)
+4. **Release tag protection** — protects `r*` release tags (only the automation creates them)
 
-The `camara-release-automation` GitHub App is the bypass actor for all rulesets, allowing the workflow to create and manage these branches while humans are governed by protection rules.
+The `camara-release-automation` GitHub App is the bypass actor for all rulesets, allowing the workflow to create and manage these branches and tags while humans are governed by protection rules.
+
+**Declared configuration**: the exact ruleset payloads are maintained in [`config/rulesets/`](https://github.com/camaraproject/project-administration/tree/main/config/rulesets) in project-administration, attached to the `api-repository` class in [`config/repository-classes.yaml`](https://github.com/camaraproject/project-administration/blob/main/config/repository-classes.yaml). The tables below describe them; the files are authoritative. Actor IDs are listed in the [repository-config README](https://github.com/camaraproject/project-administration/blob/main/workflows/repository-config/README.md#bypass-actors).
 
 No ruleset is needed for `release-review/**` branches — codeowners push CHANGELOG review fixes directly to these branches, and the workflow handles creation and cleanup. Validation rule P-012 restricts what may change there to CHANGELOG.md / CHANGELOG/ — README.md is a mechanical change committed with the snapshot, not editable here.
 
@@ -69,70 +72,9 @@ No ruleset is needed for `release-review/**` branches — codeowners push CHANGE
 
 The dual review gate ensures both API codeowners and Release Management reviewers must approve before a Release PR can be merged:
 - The `*` CODEOWNERS pattern assigns API codeowners as reviewers
-- The ruleset's `required_reviewers` field auto-requests the `release-management_reviewers` team
+- The ruleset's `required_reviewers` field auto-requests the `release-management_reviewers` team (a beta feature in the GitHub Rulesets API)
 
-<details>
-<summary>GitHub API payload for programmatic application</summary>
-
-```json
-{
-  "name": "release-snapshot-protection",
-  "target": "branch",
-  "enforcement": "active",
-  "conditions": {
-    "ref_name": {
-      "include": ["refs/heads/release-snapshot/**"],
-      "exclude": []
-    }
-  },
-  "rules": [
-    { "type": "deletion" },
-    { "type": "non_fast_forward" },
-    { "type": "creation" },
-    {
-      "type": "pull_request",
-      "parameters": {
-        "required_approving_review_count": 2,
-        "dismiss_stale_reviews_on_push": true,
-        "required_reviewers": [
-          {
-            "minimum_approvals": 1,
-            "file_patterns": ["*"],
-            "reviewer": {
-              "id": 13109132,
-              "type": "Team"
-            }
-          }
-        ],
-        "require_code_owner_review": true,
-        "require_last_push_approval": false,
-        "required_review_thread_resolution": false,
-        "allowed_merge_methods": ["merge", "squash", "rebase"]
-      }
-    }
-  ],
-  "bypass_actors": [
-    {
-      "actor_id": null,
-      "actor_type": "OrganizationAdmin",
-      "bypass_mode": "always"
-    },
-    {
-      "actor_id": 2865881,
-      "actor_type": "Integration",
-      "bypass_mode": "always"
-    }
-  ]
-}
-```
-
-Notes:
-- `actor_id: 2865881` is the `camara-release-automation` GitHub App ID
-- `reviewer.id: 13109132` is the `release-management_reviewers` team ID
-- The `required_reviewers` field is a beta feature in the GitHub Rulesets API
-- The canonical ruleset is maintained in `Template_API_Repository` — the JSON above matches it
-
-</details>
+Declared payload: [`release-snapshot-protection.json`](https://github.com/camaraproject/project-administration/blob/main/config/rulesets/release-snapshot-protection.json)
 
 ### Release Pointer Branch Protection
 
@@ -162,96 +104,26 @@ Rules: restrict creations, restrict deletions, restrict updates, block force pus
 
 Rules: restrict creations, restrict updates, block force pushes. **No deletion rule** — codeowners can delete older pre-release pointers to manage the branch list as pre-releases accumulate during a release cycle.
 
-<details>
-<summary>GitHub API payloads</summary>
+The `update` rule prevents any commits to pointer branches — they must stay at the tag commit.
 
-```json
-{
-  "name": "release-pointer-protection",
-  "target": "branch",
-  "enforcement": "active",
-  "conditions": {
-    "ref_name": {
-      "include": ["refs/heads/release/**"],
-      "exclude": []
-    }
-  },
-  "rules": [
-    { "type": "creation" },
-    { "type": "deletion" },
-    { "type": "update" },
-    { "type": "non_fast_forward" }
-  ],
-  "bypass_actors": [
-    {
-      "actor_id": null,
-      "actor_type": "OrganizationAdmin",
-      "bypass_mode": "always"
-    },
-    {
-      "actor_id": 2865881,
-      "actor_type": "Integration",
-      "bypass_mode": "always"
-    }
-  ]
-}
-```
+Declared payloads: [`release-pointer-protection.json`](https://github.com/camaraproject/project-administration/blob/main/config/rulesets/release-pointer-protection.json), [`pre-release-pointer-protection.json`](https://github.com/camaraproject/project-administration/blob/main/config/rulesets/pre-release-pointer-protection.json)
 
-```json
-{
-  "name": "pre-release-pointer-protection",
-  "target": "branch",
-  "enforcement": "active",
-  "conditions": {
-    "ref_name": {
-      "include": ["refs/heads/pre-release/**"],
-      "exclude": []
-    }
-  },
-  "rules": [
-    { "type": "creation" },
-    { "type": "update" },
-    { "type": "non_fast_forward" }
-  ],
-  "bypass_actors": [
-    {
-      "actor_id": null,
-      "actor_type": "OrganizationAdmin",
-      "bypass_mode": "always"
-    },
-    {
-      "actor_id": 2865881,
-      "actor_type": "Integration",
-      "bypass_mode": "always"
-    }
-  ]
-}
-```
+### Release Tag Protection
 
-Notes:
-- `actor_id: 2865881` is the `camara-release-automation` GitHub App ID
-- The `update` rule prevents any commits to pointer branches — they must stay at the tag commit
+| Property | Value |
+|----------|-------|
+| **Name** | `release-tag-protection` |
+| **Enforcement** | Active |
+| **Target** | Include tags matching: `r*` |
+| **Bypass actors** | `camara-release-automation` GitHub App (always), Organization admins (always) |
 
-</details>
+Rules: restrict creations, restrict deletions, restrict updates, block force pushes. Release tags are created by the automation at publication; a manual tag or release publish is refused.
 
-### Applying rulesets programmatically
+Declared payload: [`release-tag-protection.json`](https://github.com/camaraproject/project-administration/blob/main/config/rulesets/release-tag-protection.json)
 
-The GitHub Rulesets API is **not idempotent** — calling `POST` twice creates duplicate rulesets. The admin script in `project-administration` uses a check-then-create/update pattern:
+### Applying rulesets
 
-```bash
-# List existing rulesets
-existing=$(gh api repos/{owner}/{repo}/rulesets --jq '.[].name')
-
-# Check if it exists, then create or update
-if echo "$existing" | grep -q "release-snapshot-protection"; then
-  id=$(gh api repos/{owner}/{repo}/rulesets --jq '.[] | select(.name == "release-snapshot-protection") | .id')
-  gh api -X PUT repos/{owner}/{repo}/rulesets/$id --input payload.json
-else
-  gh api -X POST repos/{owner}/{repo}/rulesets --input payload.json
-fi
-```
-
-See `project-administration/scripts/apply-release-rulesets.sh` for the full script.
+The [repository-config](https://github.com/camaraproject/project-administration/blob/main/workflows/repository-config/README.md) tool in project-administration compares the declared rulesets with each repository (`plan`, scheduled weekly) and brings named repositories to the declared state (`apply`). Rulesets are matched by name, so repeated runs do not create duplicates.
 
 ---
 
@@ -472,6 +344,8 @@ Use this checklist to verify that a repository is correctly configured for relea
 
 ### Rulesets
 
+`plan --repos <repo>` of the repository-config tool reports any difference from the declared rulesets; the items below are what it checks.
+
 - [ ] Ruleset `release-snapshot-protection` exists and is **active**
   - Target: `release-snapshot/**`
   - Branch protection: restrict creations, deletions, block force pushes
@@ -485,6 +359,10 @@ Use this checklist to verify that a repository is correctly configured for relea
 - [ ] Ruleset `pre-release-pointer-protection` exists and is **active**
   - Target: `pre-release/**`
   - Rules: restrict creations, updates, block force pushes (no deletion rule)
+  - Bypass: `camara-release-automation` GitHub App, Organization admins
+- [ ] Ruleset `release-tag-protection` exists and is **active**
+  - Target: tags `r*`
+  - Rules: restrict creations, deletions, updates, block force pushes
   - Bypass: `camara-release-automation` GitHub App, Organization admins
 
 ### CODEOWNERS
