@@ -28,8 +28,16 @@ updates:
       - "dependencies"
       - "javascript"
     open-pull-requests-limit: 5
-    # Security updates (incl. transitive dependencies) land as one lockfile PR
     groups:
+      # Minor and patch version updates land as one PR; majors stay separate
+      validation-npm:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+        patterns:
+          - "*"
+      # Security updates (incl. transitive dependencies) land as one lockfile PR
       validation-security:
         applies-to: security-updates
         patterns:
