@@ -446,3 +446,29 @@ class TestRenderMarkdown:
         assert "1/1 branches PASS" in text
         assert "PASS" in text
         assert "diff detail" not in text
+
+    def test_links_to_run_and_fixture(self) -> None:
+        report = DiffReport(
+            branch="regression/clean",
+            match_mode="exact",
+            matched=27,
+            repo="camaraproject/ReleaseTest",
+            run_id="123456",
+        )
+        text = render_markdown({"regression/clean": report})
+        assert (
+            "https://github.com/camaraproject/ReleaseTest/actions/runs/123456"
+            in text
+        )
+        assert (
+            "https://github.com/camaraproject/ReleaseTest/blob/"
+            "regression/clean/.regression/regression-expected.yaml"
+            in text
+        )
+
+    def test_missing_repo_or_run_id_falls_back_to_dash(self) -> None:
+        report = DiffReport(
+            branch="regression/clean", match_mode="exact", matched=27,
+        )
+        text = render_markdown({"regression/clean": report})
+        assert "| - | - |" in text
