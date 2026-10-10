@@ -224,9 +224,9 @@ Expected output for a clean run:
 ```
 ## Regression Runner — N/N branches PASS
 
-| Branch | Result | Matched | Missing | Unexpected | Summary |
-|---|---|---:|---:|---:|---|
-| `regression/r4.3-main-baseline` | PASS | 27 | 0 | 0 | - |
+| Branch | Result | Matched | Missing | Unexpected | Summary | Run | Fixture |
+|---|---|---:|---:|---:|---|---|---|
+| `regression/r4.3-main-baseline` | PASS | 27 | 0 | 0 | - | [run](https://github.com/camaraproject/ReleaseTest/actions/runs/1234567890) | [fixture](https://github.com/camaraproject/ReleaseTest/blob/regression/r4.3-main-baseline/.regression/regression-expected.yaml) |
 PASS: 1/1 branches
 ```
 

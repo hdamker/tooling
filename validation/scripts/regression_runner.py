@@ -85,6 +85,8 @@ class DiffReport:
     missing: list[dict[str, Any]] = field(default_factory=list)
     unexpected: list[dict[str, Any]] = field(default_factory=list)
     summary_mismatch: str | None = None
+    repo: str | None = None
+    run_id: str | None = None
 
     @property
     def passed(self) -> bool:
@@ -356,6 +358,14 @@ def capture_to_yaml(
 # ---------------------------------------------------------------------------
 
 
+def _run_url(repo: str, run_id: str) -> str:
+    return f"https://github.com/{repo}/actions/runs/{run_id}"
+
+
+def _fixture_url(repo: str, branch: str) -> str:
+    return f"https://github.com/{repo}/blob/{branch}/.regression/regression-expected.yaml"
+
+
 def render_markdown(reports: dict[str, DiffReport]) -> str:
     """Render a per-branch PASS/FAIL summary as markdown."""
     total = len(reports)
@@ -363,14 +373,27 @@ def render_markdown(reports: dict[str, DiffReport]) -> str:
     lines: list[str] = []
     lines.append(f"## Regression Runner — {passed}/{total} branches PASS")
     lines.append("")
-    lines.append("| Branch | Result | Matched | Missing | Unexpected | Summary |")
-    lines.append("|---|---|---:|---:|---:|---|")
+    lines.append(
+        "| Branch | Result | Matched | Missing | Unexpected | Summary | Run | Fixture |"
+    )
+    lines.append("|---|---|---:|---:|---:|---|---|---|")
     for branch, report in sorted(reports.items()):
         status = "PASS" if report.passed else "FAIL"
         summary_note = report.summary_mismatch or "-"
+        run_link = (
+            f"[run]({_run_url(report.repo, report.run_id)})"
+            if report.repo and report.run_id
+            else "-"
+        )
+        fixture_link = (
+            f"[fixture]({_fixture_url(report.repo, branch)})"
+            if report.repo
+            else "-"
+        )
         lines.append(
             f"| `{branch}` | {status} | {report.matched} | "
-            f"{len(report.missing)} | {len(report.unexpected)} | {summary_note} |"
+            f"{len(report.missing)} | {len(report.unexpected)} | {summary_note} | "
+            f"{run_link} | {fixture_link} |"
         )
     for branch, report in sorted(reports.items()):
         if report.passed:
@@ -669,6 +692,8 @@ def run_branch(
 
     report = diff_findings(expected, actual, actual_summary=summary)
     report.branch = branch
+    report.repo = repo
+    report.run_id = run_id
     return report
 
 
@@ -710,7 +735,7 @@ def capture_branch(
         )
         tooling_ref = None
 
-    run_url = f"https://github.com/{repo}/actions/runs/{run_id}"
+    run_url = _run_url(repo, run_id)
 
     text = capture_to_yaml(
         actual,
