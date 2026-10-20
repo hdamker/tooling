@@ -7,10 +7,10 @@
     "npm": ">=11.13.0"
   },
   "dependencies": {
-    "@redocly/cli": "^2.62.1",
+    "@redocly/cli": "^2.64.1",
     "@stoplight/spectral-cli": "^6.17.0",
     "@stoplight/spectral-owasp-ruleset": "^2.0.0",
     "gplint": "^2.6.0",
-    "js-yaml": "^5.4.3"
+    "js-yaml": "^5.5.0"
   }
 }
