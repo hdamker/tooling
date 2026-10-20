@@ -316,7 +316,7 @@ class TestNS27InfoDescriptionMandatory:
         self, tmp_path: Path
     ) -> None:
         """r4.4 canonical requires the BEGIN spacer; a spec without it (the
-        r4.3-era shape, unchanged from validation-rules/025) now fires a
+        r4.3-era shape) now fires a
         dedicated finding rather than being silently tolerated."""
         spaced_canonical = _CANONICAL_YAML.replace(
             "<!-- CAMARA:MANDATORY:authorization-and-authentication:BEGIN -->\n"
