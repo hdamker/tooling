@@ -2,6 +2,7 @@
 
 ## Table of Contents
 
+- **[v0.11.0](#v0110)**
 - **[v0.10.0](#v0100)**
 - **[v0.9.0](#v090)**
 - **[v0.8.1](#v081)**
@@ -16,6 +17,51 @@
 - **[v0.2.2](#v022)**
 - **[v0.2.1](#v021)**
 - **[v0.2.0](#v020)**
+
+# v0.11.0
+
+## Release Notes
+
+**v0.11.0 is a minor release for the CAMARA tooling repository.**
+
+This release extends the `info.description` template check (P-027) to warn when a mandatory block has no blank line directly after its BEGIN marker, which Swagger Editor needs to render the following heading, and labels finding locations that point at an inline schema rather than a named component. It adds a one-command local validation run for API repositories and links the run and fixture per branch in the regression summary. Validation jobs now restore the npm cache, and the Commonalities regression pipeline for CommonalitiesTest receives several fixes. Eleven `/validation` dependency changes are included.
+
+### Added
+
+* Add a one-command local validation run (`validation/scripts/validate_local.py`) by @hdamker in https://github.com/camaraproject/tooling/pull/471
+* Link the Actions run and the fixture per branch in the regression summary by @hdamker in https://github.com/camaraproject/tooling/pull/470
+
+### Changed
+
+* Flag a missing blank line after the info-description BEGIN marker under P-027 when the canonical template has it by @hdamker in https://github.com/camaraproject/tooling/pull/457
+* Label finding locations that point at an inline schema as `(inline definition)` by @hdamker in https://github.com/camaraproject/tooling/pull/453
+* Group Dependabot security updates for `/validation` by @hdamker in https://github.com/camaraproject/tooling/pull/464
+* Link the declared rulesets in project-administration from `repository-setup.md` by @hdamker in https://github.com/camaraproject/tooling/pull/465
+* Group Dependabot minor and patch version updates for `/validation` by @hdamker in https://github.com/camaraproject/tooling/pull/468
+
+### Fixed
+
+* Move the Commonalities regression schedule to the Commonalities caller and default `force` to true by @hdamker in https://github.com/camaraproject/tooling/pull/444
+* Cache npm dependencies in the validation workflow by @hdamker in https://github.com/camaraproject/tooling/pull/448
+* Read the nested `dependencies` key of `release-plan.yaml` and converge regression branches instead of cherry-picking by @hdamker in https://github.com/camaraproject/tooling/pull/449
+* Drop the inert npm cache from the pre-snapshot validation step by @hdamker in https://github.com/camaraproject/tooling/pull/458
+* Check out the tooling repository explicitly in the Commonalities regression sync workflow by @hdamker in https://github.com/camaraproject/tooling/pull/459
+
+### Dependencies
+
+* Bump @redocly/cli from 2.49.0 to 2.51.2 by @dependabot in https://github.com/camaraproject/tooling/pull/450
+* Remove redundant dependency overrides by @hdamker in https://github.com/camaraproject/tooling/pull/451
+* Bump @redocly/cli from 2.51.2 to 2.52.1 by @dependabot in https://github.com/camaraproject/tooling/pull/454
+* Bump @redocly/cli from 2.52.1 to 2.53.3 by @dependabot in https://github.com/camaraproject/tooling/pull/460
+* Bump js-yaml from 5.4.1 to 5.4.2 by @dependabot in https://github.com/camaraproject/tooling/pull/461
+* Bump @redocly/cli from 2.53.3 to 2.54.3 by @dependabot in https://github.com/camaraproject/tooling/pull/462
+* Bump brace-expansion and fast-uri to patched versions (security) by @hdamker in https://github.com/camaraproject/tooling/pull/463
+* Bump @redocly/cli from 2.54.3 to 2.57.0 by @dependabot in https://github.com/camaraproject/tooling/pull/466
+* Bump @stoplight/spectral-cli from 6.16.3 to 6.17.0 by @dependabot in https://github.com/camaraproject/tooling/pull/467
+* Bump @redocly/cli from 2.57.0 to 2.62.1 and js-yaml from 5.4.2 to 5.4.3 by @dependabot in https://github.com/camaraproject/tooling/pull/472
+* Bump @redocly/cli from 2.62.1 to 2.64.1 and js-yaml from 5.4.3 to 5.5.0 by @dependabot in https://github.com/camaraproject/tooling/pull/473
+
+**Full Changelog**: https://github.com/camaraproject/tooling/compare/v0.10.0...v0.11.0
 
 # v0.10.0
 
