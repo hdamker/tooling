@@ -56,8 +56,6 @@ jobs:
       user: ${{ steps.detect.outputs.user }}
       should_continue: ${{ steps.detect.outputs.should_continue }}
       confirm_tag: ${{ steps.detect.outputs.confirm_tag }}
-      trigger_pr_number: ${{ steps.detect.outputs.trigger_pr_number }}
-      trigger_pr_url: ${{ steps.detect.outputs.trigger_pr_url }}
       trigger: ${{ steps.detect.outputs.trigger }}
       release_tag: ${{ steps.state.outputs.release_tag }}
       state: ${{ steps.state.outputs.state }}
@@ -173,8 +171,6 @@ jobs:
         id: detect
         if: steps.fork-guard.outputs.issues_enabled == 'true'
         working-directory: _tooling
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
         run: python -m release_automation.scripts.trigger
 
       - name: Derive Release State
@@ -267,8 +263,6 @@ jobs:
           CTX_IDENTITY_CONSENT_MANAGEMENT_RELEASE: ${{ steps.state.outputs.identity_consent_management_release }}
           CTX_COMMON_CACHE_STATUS: ${{ steps.cache-sync.outputs.common_cache_status }}
           CTX_COMMON_CACHE_DETAILS: ${{ steps.cache-sync.outputs.common_cache_details }}
-          CTX_TRIGGER_PR_NUMBER: ${{ steps.detect.outputs.trigger_pr_number }}
-          CTX_TRIGGER_PR_URL: ${{ steps.detect.outputs.trigger_pr_url }}
           GITHUB_TOKEN: ${{ github.token }}
 
       # ── Response: one bot comment, template chosen by the policy ──
@@ -1893,33 +1887,9 @@ jobs:
             {
               "state": "planned",
               "trigger_type": "${{ needs.plan.outputs.trigger_type }}",
-              "trigger_pr_number": "${{ needs.plan.outputs.trigger_pr_number }}",
-              "trigger_pr_url": "${{ needs.plan.outputs.trigger_pr_url }}",
               "release_plan_url": "${{ github.server_url }}/${{ github.repository }}/blob/main/release-plan.yaml",
               "closed_issue_number": "${{ github.event.issue.number }}",
               "closed_issue_url": "${{ github.event.issue.html_url }}"
-            }
-
-      - name: Post Config Drift Warning
-        if: |
-          needs.plan.outputs.trigger_type == 'release_plan_change' &&
-          needs.plan.outputs.release_issue_number != '' &&
-          (needs.plan.outputs.state == 'snapshot-active' ||
-           needs.plan.outputs.state == 'draft-ready')
-        uses: ./_tooling/shared-actions/post-bot-comment
-        with:
-          issue_number: ${{ needs.plan.outputs.release_issue_number }}
-          release_tag: ${{ needs.plan.outputs.release_tag }}
-          run_id: ${{ github.run_id }}
-          template: config_drift_warning
-          base_context: ${{ needs.plan.outputs.base_context }}
-          github_token: ${{ steps.app-token.outputs.token || github.token }}
-          context: |
-            {
-              "trigger_type": "release_plan_change",
-              "trigger_pr_number": "${{ needs.plan.outputs.trigger_pr_number }}",
-              "trigger_pr_url": "${{ needs.plan.outputs.trigger_pr_url }}",
-              "release_plan_url": "${{ github.server_url }}/${{ github.repository }}/blob/main/release-plan.yaml"
             }
 
       - name: Post Common Sync PR Created

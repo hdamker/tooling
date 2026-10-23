@@ -17,7 +17,6 @@ KNOWN_TEMPLATES = [
     "command_rejected",
     "common_sync_failed",
     "common_sync_pr_created",
-    "config_drift_warning",
     "config_error",
     "draft_created",
     "draft_revoked",
@@ -63,7 +62,6 @@ class TestTemplateContextContract:
             command="/create-snapshot",
             command_args="",
             user="testuser",
-            trigger_pr_number="42",
             # State fields
             release_tag="r4.1",
             state="snapshot-active",
@@ -181,46 +179,4 @@ class TestTemplateContextContract:
             assert isinstance(result, str)
             assert len(result) > 0
 
-    def test_config_drift_warning_renders_for_snapshot_active(self, responder):
-        """config_drift_warning renders for snapshot-active state."""
-        context = build_context(
-            release_tag="r4.1",
-            state="snapshot-active",
-            trigger_type="release_plan_change",
-            trigger_pr_number="55",
-            trigger_pr_url="https://github.com/org/repo/pull/55",
-            release_pr_url="https://github.com/org/repo/pull/123",
-            release_plan_url="https://github.com/org/repo/blob/main/release-plan.yaml",
-            apis=[
-                {
-                    "api_name": "QualityOnDemand",
-                    "api_version": "1.0.0-rc.1",
-                },
-            ],
-        )
-        result = responder.render("config_drift_warning", context)
-        assert "Configuration drift" in result
-        assert "#55" in result
-        assert "/discard-snapshot" in result
-        assert "Snapshot Configuration" in result
 
-    def test_config_drift_warning_renders_for_draft_ready(self, responder):
-        """config_drift_warning renders for draft-ready state."""
-        context = build_context(
-            release_tag="r4.1",
-            state="draft-ready",
-            trigger_type="release_plan_change",
-            trigger_pr_number="55",
-            trigger_pr_url="https://github.com/org/repo/pull/55",
-            release_plan_url="https://github.com/org/repo/blob/main/release-plan.yaml",
-            apis=[
-                {
-                    "api_name": "QualityOnDemand",
-                    "api_version": "1.0.0-rc.1",
-                },
-            ],
-        )
-        result = responder.render("config_drift_warning", context)
-        assert "Configuration drift" in result
-        assert "/delete-draft" in result
-        assert "/publish-release" in result

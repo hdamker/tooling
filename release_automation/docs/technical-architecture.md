@@ -53,7 +53,6 @@ tooling/
 │   ├── templates/
 │   │   ├── bot_messages/
 │   │   │   ├── command_rejected.md
-│   │   │   ├── config_drift_warning.md
 │   │   │   ├── config_error.md
 │   │   │   ├── draft_created.md
 │   │   │   ├── draft_revoked.md
@@ -271,7 +270,6 @@ Renders bot messages from Mustache templates using pystache with strict mode (`m
 | `interim_processing.md` | Immediate feedback for slash commands being processed |
 | `command_rejected.md` | Command not allowed in current state or insufficient permissions |
 | `config_error.md` | Invalid `release-plan.yaml` (missing, malformed, or incomplete) |
-| `config_drift_warning.md` | `release-plan.yaml` changed on main while snapshot is active |
 | `snapshot_created.md` | Snapshot and Release PR created successfully |
 | `snapshot_failed.md` | Snapshot creation failed |
 | `snapshot_discarded.md` | Snapshot discarded by user |
@@ -363,7 +361,6 @@ All context variables are defined in a single `BotContext` dataclass (`bot_conte
 | `command` | str | `""` | check-trigger |
 | `command_args` | str | `""` | check-trigger |
 | `user` | str | `""` | check-trigger |
-| `trigger_pr_number` | str | `""` | check-trigger |
 | **State fields** | | | |
 | `release_tag` | str | `""` | derive-state |
 | `state` | str | `""` | derive-state |
@@ -806,7 +803,7 @@ stateDiagram-v2
 - Auto-reopen only applies when snapshot or draft is active (prevents orphaned artifacts)
 - NOT_PLANNED is derived from `target_release_type: none`, not from issue closure
 
-**Config drift warning:** When `release-plan.yaml` changes on main while a snapshot is active, the automation posts a `config_drift_warning` message on the Release Issue. The snapshot remains valid — the warning is informational, alerting maintainers that the plan has diverged from the active snapshot.
+**Plan changes during a snapshot:** An active snapshot is not affected by a later `release-plan.yaml` edit on main — it carries its own `release-metadata.yaml`. Validation blocks `release-plan.yaml` edits while a snapshot is active, and only `/create-snapshot` is gated on the common-file cache check.
 
 ### 5.3 Context Data Flow
 
@@ -829,7 +826,7 @@ release-metadata.yaml (snapshot branch, if exists)
               │
               ▼
     ┌──────────────────────┐
-    │  assemble-context    │◄── check-trigger outputs (command, user, trigger_pr_number)
+    │  assemble-context    │◄── check-trigger outputs (command, user, trigger_type)
     │  └─ build_context()  │◄── derive-state outputs (all above)
     │                      │◄── command action outputs (release_pr_url, draft_release_url, ...)
     │                      │◄── workflow env (workflow_run_url)
@@ -933,7 +930,7 @@ fi
 | No issue | Valid plan (type ≠ none) | Pass | Create issue (PLANNED) |
 | PLANNED | Plan updated | Pass | Update issue |
 | PLANNED | type → none | Pass | Set NOT_PLANNED, suggest close |
-| SNAPSHOT_ACTIVE | Any change | **Block (exit 1)** | Config drift warning posted |
+| SNAPSHOT_ACTIVE | Any change | **Block (exit 1)** | — |
 | DRAFT_READY | Any change | **Block (exit 1)** | — |
 | PUBLISHED | Any change | Pass (new release cycle) | Create new issue if type ≠ none |
 
