@@ -17,6 +17,7 @@
 #     (/sync-issue has no result template; post-result renders this one)
 #   command_rejected.md   -> "**❌ Command rejected: `/{{command}}` — State: `{{state}}`**"
 #   issue_reopened.md     -> "**🔄 Issue reopened — State: `{{state}}`**"
+#   issue_created.md      -> "**📋 Release issue created — State: `planned`**"
 
 create-snapshot: "**✅ Snapshot created"
 discard-snapshot: "**🗑️ Snapshot discarded"
@@ -25,3 +26,5 @@ sync-issue: "**⏳ Processing: `/sync-issue`"
 rejected-discard-snapshot: "**❌ Command rejected: `/discard-snapshot`"
 # Release Issue closed in `snapshot-active` (issue_close auto-reopen)
 issue-close: "**🔄 Issue reopened"
+# Release Issue closed in `planned` (a new Release Issue is created)
+issue-close-planned: "**📋 Release issue created"

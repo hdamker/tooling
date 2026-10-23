@@ -23,7 +23,7 @@ Two canaries verify the framework on every push to `main` that touches their dec
 | Workflow | Scope |
 |---|---|
 | [`validation-regression.yml`](../../.github/workflows/validation-regression.yml) | Diffs validation findings against committed expected fixtures on each `regression/*` branch of [`camaraproject/ReleaseTest`](https://github.com/camaraproject/ReleaseTest) |
-| [`release-automation-regression.yml`](../../.github/workflows/release-automation-regression.yml) | sync-issue (dispatch and slash), a rejected command, and a `/create-snapshot` + `/discard-snapshot` round-trip with issue-close auto-reopen on ReleaseTest, matched against expected bot replies |
+| [`release-automation-regression.yml`](../../.github/workflows/release-automation-regression.yml) | sync-issue (dispatch and slash), a rejected command, and a `/create-snapshot` + `/discard-snapshot` round-trip with issue-close auto-reopen, and a closing issue close that recreates the Release Issue on ReleaseTest, matched against expected bot replies |
 
 Both use a short-lived `camara-validation` GitHub App installation token for cross-repo access to ReleaseTest.
 

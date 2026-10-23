@@ -31,6 +31,7 @@ from release_automation.scripts.regression_runner import (
     get_release_issue_state,
     load_expected_comment_titles,
     phase_close_auto_reopen,
+    phase_close_recreate,
     phase_dispatch_sync_issue,
     phase_fire_create_snapshot,
     phase_fire_rejected_discard,
@@ -893,6 +894,7 @@ class TestLoadExpectedCommentTitles:
             "sync-issue",
             "rejected-discard-snapshot",
             "issue-close",
+            "issue-close-planned",
         ):
             assert key in titles
             assert titles[key].startswith("**")
@@ -909,6 +911,7 @@ class TestLoadExpectedCommentTitles:
                 {"command": "discard-snapshot", "state": "planned"},
             ),
             ("issue-close", "issue_reopened", {"state": "snapshot-active"}),
+            ("issue-close-planned", "issue_created", {}),
         ],
     )
     def test_prefix_matches_template_first_line(self, key, template, values):
@@ -1386,6 +1389,7 @@ _EXPECTED_ALL = {
     "sync-issue": "**⏳ Processing: `/sync-issue`",
     "rejected-discard-snapshot": "**❌ Command rejected: `/discard-snapshot`",
     "issue-close": "**🔄 Issue reopened",
+    "issue-close-planned": "**📋 Release issue created",
 }
 
 
@@ -1713,6 +1717,7 @@ class TestRunPhases:
         monkeypatch.setattr(f"{self._MOD}.phase_close_auto_reopen", lambda *a, **k: ok("close"))
         monkeypatch.setattr(f"{self._MOD}.phase_fire_discard_snapshot", lambda *a, **k: (ok("discard"), "4"))
         monkeypatch.setattr(f"{self._MOD}.phase_verify_post_discard", lambda *a, **k: ok("verify-discard"))
+        monkeypatch.setattr(f"{self._MOD}.phase_close_recreate", lambda *a, **k: ok("recreate"))
 
     def test_full_order(self, monkeypatch):
         self._patch_phases(monkeypatch)
@@ -1720,12 +1725,13 @@ class TestRunPhases:
         assert [r.name for r in reports] == [
             "pre-check", "dispatch", "sync", "rejected", "planned",
             "create", "verify-create", "close", "discard", "verify-discard",
+            "recreate",
         ]
 
     def test_publish_free_failure_does_not_stop_round_trip(self, monkeypatch):
         self._patch_phases(monkeypatch, failing={"dispatch", "sync", "rejected"})
         reports = run_phases("o/r", 90, poll_timeout=10, dry_run=False)
-        assert reports[-1].name == "verify-discard"
+        assert reports[-1].name == "recreate"
 
     def test_planned_check_gates_create(self, monkeypatch):
         self._patch_phases(monkeypatch, failing={"planned"})
@@ -1735,7 +1741,14 @@ class TestRunPhases:
     def test_close_failure_still_discards(self, monkeypatch):
         self._patch_phases(monkeypatch, failing={"close"})
         reports = run_phases("o/r", 90, poll_timeout=10, dry_run=False)
-        assert [r.name for r in reports][-3:] == ["close", "discard", "verify-discard"]
+        assert [r.name for r in reports][-4:] == [
+            "close", "discard", "verify-discard", "recreate",
+        ]
+
+    def test_recreate_needs_verified_discard(self, monkeypatch):
+        self._patch_phases(monkeypatch, failing={"verify-discard"})
+        reports = run_phases("o/r", 90, poll_timeout=10, dry_run=False)
+        assert reports[-1].name == "verify-discard"
 
     def test_dry_run_stops_after_create(self, monkeypatch):
         self._patch_phases(monkeypatch)
@@ -1743,3 +1756,85 @@ class TestRunPhases:
         assert [r.name for r in reports] == [
             "pre-check", "dispatch", "sync", "rejected", "create",
         ]
+
+
+class TestPhaseCloseRecreate:
+    _REPLY = (
+        "<!-- release-bot:r1.2 -->\n"
+        "**📋 Release issue created — State: `planned`**\n"
+        "Created after #90 was closed."
+    )
+    _MARKER = "<!-- release-automation:workflow-owned -->"
+
+    def _responses(self, *, open_issues, reply: str, reopened: list[str]):
+        def reopen(joined):
+            reopened.append(joined)
+            return ""
+        return [
+            ("{title: .title}", {"title": "Release for r1.2"}),
+            ("issue close", ""),
+            ("issue reopen", reopen),
+            ("run list", [_run(20, "2026-04-23T05:00:05Z", "Release for r1.2")]),
+            ("status,conclusion", {"status": "completed", "conclusion": "success"}),
+            ("issues/90 --jq .state", "closed\n"),
+            ("labels=release-issue", [
+                {"number": n, "body": self._MARKER} for n in open_issues
+            ]),
+            ("issues/91 --jq {labels", {
+                "labels": [{"name": "release-state:planned"}], "state": "open",
+            }),
+            ("issues/91/comments", [
+                _comment("2026-04-23T05:00:30Z", "camara-release-automation[bot]", reply),
+            ]),
+        ]
+
+    def test_pass_when_new_issue_created(self, frozen_now):
+        reopened: list[str] = []
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            side_effect=_gh_router(
+                self._responses(open_issues=[91], reply=self._REPLY, reopened=reopened)
+            ),
+        ):
+            report = phase_close_recreate(
+                "o/r", 90, poll_timeout=10, dry_run=False, expected_titles=_EXPECTED_ALL,
+            )
+        assert report.passed is True, report.detail
+        assert "#91" in report.detail
+        assert reopened == []
+
+    def test_fail_and_canary_reopens_when_no_new_issue(self, frozen_now):
+        reopened: list[str] = []
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            side_effect=_gh_router(
+                self._responses(open_issues=[], reply=self._REPLY, reopened=reopened)
+            ),
+        ):
+            report = phase_close_recreate(
+                "o/r", 90, poll_timeout=10, dry_run=False, expected_titles=_EXPECTED_ALL,
+            )
+        assert report.passed is False
+        assert "no new Release Issue" in report.detail
+        assert reopened == ["issue reopen 90 --repo o/r"]
+
+    def test_fail_on_wrong_reply(self, frozen_now):
+        reopened: list[str] = []
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            side_effect=_gh_router(
+                self._responses(open_issues=[91], reply="**❌ Internal error**", reopened=reopened)
+            ),
+        ):
+            report = phase_close_recreate(
+                "o/r", 90, poll_timeout=10, dry_run=False, expected_titles=_EXPECTED_ALL,
+            )
+        assert report.passed is False
+        assert "does not match expected" in report.detail
+
+    def test_dry_run(self):
+        report = phase_close_recreate(
+            "o/r", 90, poll_timeout=10, dry_run=True, expected_titles=_EXPECTED_ALL,
+        )
+        assert report.passed is True
+        assert "DRY-RUN" in report.detail

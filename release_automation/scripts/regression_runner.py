@@ -10,6 +10,8 @@ test repository (default: camaraproject/ReleaseTest) via publish-free paths:
     round trip:       /create-snapshot, Release Issue close in
                       snapshot-active (expected auto-reopen),
                       /discard-snapshot
+    planned again:    Release Issue close (expected: a new Release
+                      Issue for the same plan, used by the next run)
 
 Catches the bug class that
 the validation regression canary cannot reach — runtime bugs in the RA
@@ -1298,6 +1300,124 @@ def phase_close_auto_reopen(
     return report
 
 
+def _restore_release_issue(report: PhaseReport, repo: str, issue_number: int) -> None:
+    """Reopen the closed Release Issue if no open one exists, so the next run finds one."""
+    try:
+        find_release_issue(repo)
+        return
+    except InfrastructureError:
+        pass
+    _ensure_issue_open(report, repo, issue_number)
+
+
+def phase_close_recreate(
+    repo: str,
+    issue_number: int,
+    *,
+    poll_timeout: int,
+    dry_run: bool,
+    expected_titles: dict[str, str] | None = None,
+) -> PhaseReport:
+    """Close the Release Issue in `planned`; expect a fresh one for the same plan.
+
+    Passes iff the close-triggered run concludes success, the closed issue
+    stays closed, exactly one new Release Issue is open in `planned`, and its
+    bot reply starts with the expected title. Leaves each canary run a fresh
+    Release Issue. If no open Release Issue exists afterwards, the canary
+    reopens the closed one.
+    """
+    report = PhaseReport(name="close issue in planned (recreate)")
+    if dry_run:
+        report.passed = True
+        report.detail = f"DRY-RUN: would close {repo}#{issue_number}"
+        return report
+
+    titles = expected_titles or load_expected_comment_titles()
+    expected = titles.get("issue-close-planned", "")
+    marker = datetime.now(timezone.utc).replace(microsecond=0)
+    try:
+        issue_title = get_issue_title(repo, issue_number)
+        close_issue(repo, issue_number)
+        logger.info("closed %s#%s; polling for caller run", repo, issue_number)
+        run = find_recent_caller_run(
+            repo,
+            workflow_file=_RA_CALLER_WORKFLOW,
+            since=marker,
+            event="issues",
+            expected_display_title=issue_title,
+            oldest=True,
+        )
+    except InfrastructureError as exc:
+        report.detail = f"could not close {repo}#{issue_number}: {exc}"
+        _restore_release_issue(report, repo, issue_number)
+        return report
+
+    run_id = str(run["databaseId"])
+    report.run_url = run.get("url")
+    try:
+        conclusion = poll_run(repo, run_id, interval=15, timeout=poll_timeout)
+    except InfrastructureError as exc:
+        report.detail = f"run {run_id} polling error: {exc}"
+        _restore_release_issue(report, repo, issue_number)
+        return report
+
+    report.run_conclusion = conclusion
+    if conclusion != "success":
+        report.detail = f"caller run concluded {conclusion!r} — RA workflow failed"
+        _restore_release_issue(report, repo, issue_number)
+        return report
+
+    try:
+        old_state = get_issue_open_state(repo, issue_number)
+    except InfrastructureError as exc:
+        report.detail = f"could not verify recreate: {exc}"
+        return report
+    if old_state != "closed":
+        report.detail = f"{repo}#{issue_number} is {old_state!r} after the run, expected closed"
+        return report
+
+    try:
+        new_number = find_release_issue(repo)
+    except InfrastructureError as exc:
+        report.detail = f"no new Release Issue after closing #{issue_number}: {exc}"
+        _restore_release_issue(report, repo, issue_number)
+        return report
+
+    try:
+        state = get_release_issue_state(repo, new_number)
+        last_comment = fetch_last_bot_comment(repo, new_number, marker)
+    except InfrastructureError as exc:
+        report.detail = f"could not verify recreate: {exc}"
+        return report
+
+    if new_number == issue_number:
+        report.detail = f"Release Issue is still #{issue_number}, expected a new one"
+        return report
+    if state != STATE_PLANNED:
+        report.detail = f"state={state!r} on #{new_number}, expected planned"
+        return report
+    if last_comment is None:
+        report.detail = f"no bot reply received on #{new_number}"
+        return report
+
+    actual_title = _first_visible_line(last_comment.get("body") or "")
+    if _match_comment_title(last_comment.get("body") or "", expected):
+        report.passed = True
+        report.detail = (
+            f"#{issue_number} closed, new Release Issue #{new_number}; "
+            f"bot reply matches expected — `{actual_title}`"
+        )
+    else:
+        report.detail = (
+            f"bot reply on #{new_number} does not match expected: got "
+            f"`{actual_title}`, expected prefix `{expected}`"
+        )
+        report.extras.append(
+            f"comment: {last_comment.get('html_url', '<no url>')}"
+        )
+    return report
+
+
 # ---------------------------------------------------------------------------
 # Reporting
 # ---------------------------------------------------------------------------
@@ -1470,6 +1590,16 @@ def run_phases(
 
     verify_discard = phase_verify_post_discard(repo, issue_number, snapshot_id)
     reports.append(verify_discard)
+    if not verify_discard.passed:
+        return reports
+
+    # Last phase: leaves the next run a fresh Release Issue.
+    reports.append(
+        phase_close_recreate(
+            repo, issue_number,
+            poll_timeout=poll_timeout, dry_run=dry_run,
+        )
+    )
     return reports
 
 

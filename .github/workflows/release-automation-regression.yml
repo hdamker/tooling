@@ -4,9 +4,10 @@
 # workflow on camaraproject/ReleaseTest via publish-free paths — sync-issue
 # (workflow_dispatch and /sync-issue), a rejected /discard-snapshot in
 # `planned`, then a /create-snapshot + /discard-snapshot round-trip with an
-# issue close (auto-reopen) in `snapshot-active` — catching runtime bugs in
-# the RA workflow and shared actions that the Validation Regression canary
-# cannot reach.
+# issue close (auto-reopen) in `snapshot-active`, and a final issue close in
+# `planned` that leaves a fresh Release Issue for the next run — catching
+# runtime bugs in the RA workflow and shared actions that the Validation
+# Regression canary cannot reach.
 #
 # Publish-free only — never merges the Release Review PR, never creates a
 # draft build, never calls /publish-release. No real tags or releases
