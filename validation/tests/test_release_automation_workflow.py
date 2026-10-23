@@ -20,7 +20,7 @@ WORKFLOW = (
 
 def _create_snapshot_steps() -> list[dict]:
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    return workflow["jobs"]["create-snapshot"]["steps"]
+    return workflow["jobs"]["snapshot"]["steps"]
 
 
 def _step_by_name(steps: list[dict], name: str) -> dict:
@@ -69,7 +69,8 @@ def test_tooling_checkouts_resolve_through_job_context():
         and step.get("with", {}).get("path") == "_tooling"
     ]
 
-    assert len(checkouts) == 6
+    # One per phase job: plan, snapshot, act, finalize
+    assert len(checkouts) == 4
     for step in checkouts:
         assert step["with"]["repository"] == "${{ job.workflow_repository }}"
         assert step["with"]["ref"] == "${{ job.workflow_sha }}"
@@ -129,8 +130,8 @@ def test_plan_runs_policy_then_one_response():
         "Detect Trigger Type",
         "Derive Release State",
         "Check common cache sync",
-        "Apply Command Policy",
         "Assemble Context",
+        "Apply Command Policy",
         "Post Response",
     ]
     assert [n for n in names if n in order] == order
@@ -138,6 +139,8 @@ def test_plan_runs_policy_then_one_response():
     policy = _step_by_name(plan["steps"], "Apply Command Policy")
     assert policy["run"].strip() == "python -m release_automation.scripts.command_policy"
     assert policy["env"]["TRIGGER_JSON"] == "${{ steps.detect.outputs.trigger }}"
+    assert policy["env"]["STATE_JSON"] == "${{ toJSON(steps.state.outputs) }}"
+    assert policy["env"]["BASE_CONTEXT"] == "${{ steps.assemble.outputs.base_context }}"
     cache = _step_by_name(plan["steps"], "Check common cache sync")
     assert cache["run"].strip() == "python -m release_automation.scripts.common_sync"
     # The existing-PR lookup is part of common_sync (exact sync-common/<release> head).
@@ -155,46 +158,80 @@ def test_plan_runs_policy_then_one_response():
     assert [s["name"] for s in scripts] == ["Post Acknowledgment"]
 
 
-def test_folded_jobs_are_gone_and_compat_outputs_cover_every_reader():
-    text = WORKFLOW.read_text(encoding="utf-8")
-    workflow = yaml.safe_load(text)
-    jobs = workflow["jobs"]
-
-    for gone in ("check-trigger", "derive-state", "handle-config-error",
-                 "post-interim", "post-rejection", "publish-confirmation"):
-        assert gone not in jobs
-        assert f"needs.{gone}." not in text
-
-    read = set(re.findall(r"needs\.plan\.outputs\.([a-z_]+)", text))
-    assert read <= set(jobs["plan"]["outputs"])
-    for name, job in jobs.items():
-        if name != "plan":
-            needs = job.get("needs", [])
-            assert "plan" in ([needs] if isinstance(needs, str) else needs), name
-
-
-def test_finalize_replaces_the_tail_jobs():
+def test_four_phase_jobs_and_three_job_conditions():
     text = WORKFLOW.read_text(encoding="utf-8")
     jobs = yaml.safe_load(text)["jobs"]
 
-    for gone in ("update-issue", "post-result", "create-sync-pr"):
-        assert gone not in jobs
+    assert list(jobs) == ["plan", "snapshot", "act", "finalize"]
+    for gone in ("check-trigger", "derive-state", "handle-config-error", "post-interim", "post-rejection",
+                 "publish-confirmation", "update-issue", "post-result", "create-sync-pr",
+                 "create-snapshot", "discard-snapshot", "delete-draft", "publish-release",
+                 "handle-pr-merge", "handle-issue-event"):
         assert f"needs.{gone}." not in text
+    assert [name for name, job in jobs.items() if "if" in job] == ["snapshot", "act", "finalize"]
+    assert jobs["snapshot"]["if"] == "needs.plan.outputs.action == 'create-snapshot'"
+    assert jobs["act"]["if"] == "needs.plan.outputs.action != '' && needs.plan.outputs.action != 'create-snapshot'"
+    assert jobs["act"]["name"] == "act (${{ needs.plan.outputs.action }})"
+
+
+def test_plan_has_one_json_plan_and_no_compatibility_outputs():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    jobs = yaml.safe_load(text)["jobs"]
+
+    assert set(jobs["plan"]["outputs"]) == {"plan", "action", "finalize", "result_comment_id"}
+    read = set(re.findall(r"needs\.plan\.outputs\.([a-z_]+)", text))
+    assert read == {"plan", "action", "finalize"}
+    for name in ("snapshot", "act", "finalize"):
+        needs = jobs[name]["needs"]
+        assert "plan" in ([needs] if isinstance(needs, str) else needs), name
+
+
+def test_snapshot_and_act_emit_one_outcome():
+    jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+
+    assert jobs["snapshot"]["outputs"] == {"outcome": "${{ steps.outcome.outputs.outcome }}"}
+    outcome = _step_by_name(jobs["snapshot"]["steps"], "Outcome")
+    assert outcome["if"] == "always()"
+    assert outcome["run"].strip() == "python -m release_automation.scripts.act snapshot"
+    assert jobs["act"]["outputs"] == {"outcome": "${{ steps.act.outputs.outcome }}"}
+    step = _step_by_name(jobs["act"]["steps"], "Act")
+    assert step["run"].strip() == "python -m release_automation.scripts.act"
+    assert step["env"]["PLAN_JSON"] == "${{ needs.plan.outputs.plan }}"
+    # No inline scripts in the action phase
+    for name in ("snapshot", "act"):
+        assert not [s for s in jobs[name]["steps"] if str(s.get("uses", "")).startswith("actions/github-script")]
+
+
+def test_finalize_replaces_the_tail_jobs():
+    jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
 
     finalize = jobs["finalize"]
     assert finalize["if"] == "always() && needs.plan.outputs.finalize == 'true'"
-    assert set(finalize["needs"]) == set(jobs) - {"finalize"}
+    assert finalize["needs"] == ["plan", "snapshot", "act"]
     step = _step_by_name(finalize["steps"], "Finalize")
     assert step["run"].strip() == "python -m release_automation.scripts.finalize"
     assert step["env"]["NEEDS_JSON"] == "${{ toJSON(needs) }}"
 
 
-def test_finalize_reads_only_defined_outputs():
-    """finalize.py reads plan and command-job outputs from toJSON(needs), not expressions."""
+def test_finalize_reads_only_defined_plan_outputs():
+    """finalize.py reads the plan job's outputs and the action jobs' outcome from toJSON(needs)."""
     jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
     source = (WORKFLOW.parents[2] / "release_automation" / "scripts" / "finalize.py").read_text(encoding="utf-8")
 
-    plan_reads = set(re.findall(r'\.plan\("([a-z_]+)"\)', source))
-    assert plan_reads and plan_reads <= set(jobs["plan"]["outputs"])
-    for job, name in re.findall(r'\.out\("([a-z-]+)", "([a-z_]+)"\)', source):
+    for name in re.findall(r'_outputs\("plan"\)\.get\("([a-z_]+)"', source):
+        assert name in jobs["plan"]["outputs"], name
+    for job, name in re.findall(r'_json\("([a-z]+)", "([a-z_]+)"\)', source):
         assert name in jobs[job]["outputs"], (job, name)
+
+
+def test_finalize_and_act_read_only_plan_document_keys():
+    from release_automation.scripts.command_policy import CommonCache, Plan, plan_document
+    from release_automation.scripts.trigger import Trigger
+
+    document = plan_document(Plan("slash_command", "sync-issue", "r1.2", "planned", ""), Trigger(), {}, CommonCache(), {})
+    scripts = WORKFLOW.parents[2] / "release_automation" / "scripts"
+    finalize_reads = set(re.findall(r'\.plan\("([a-z_]+)"\)', (scripts / "finalize.py").read_text(encoding="utf-8")))
+    act_reads = set(re.findall(r'plan\["([a-z_]+)"\]', (scripts / "act.py").read_text(encoding="utf-8")))
+
+    assert finalize_reads and act_reads
+    assert finalize_reads | act_reads <= set(document)

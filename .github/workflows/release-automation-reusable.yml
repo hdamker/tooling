@@ -2,10 +2,14 @@
 #
 # This reusable workflow orchestrates the CAMARA release automation process.
 # It handles:
-# - Slash commands: /create-snapshot, /discard-snapshot, /delete-draft, /sync-issue
+# - Slash commands: /create-snapshot, /discard-snapshot, /delete-draft,
+#   /publish-release, /sync-issue
 # - Issue events: close (with auto-reopen if needed), reopen
 # - PR merge events: on release-snapshot branches (draft creation)
-# - Manual dispatch: for testing and recovery
+# - Manual dispatch and push: Release Issue sync
+#
+# Four jobs: plan decides (one JSON plan), snapshot or act executes the
+# plan's action (one JSON outcome), finalize reports and syncs.
 #
 # Called by: release-automation-caller.yml in API repositories
 
@@ -38,7 +42,7 @@ permissions:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 1: Plan — classify the trigger, derive state, apply the command
+  # Plan — classify the trigger, derive state, apply the command
   # policy, post the one response (ack update, rejection, config error or
   # publish confirmation).
   # ─────────────────────────────────────────────────────────────────────────────
@@ -46,45 +50,11 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       plan: ${{ steps.policy.outputs.plan }}
+      action: ${{ steps.policy.outputs.action }}
       finalize: ${{ steps.policy.outputs.finalize }}
-      # Compatibility outputs under the names of the former check-trigger,
-      # derive-state and post-interim jobs, so the jobs after plan read them
-      # unchanged; removed when those jobs move into act/finalize.
-      trigger_type: ${{ steps.detect.outputs.trigger_type }}
-      command: ${{ steps.detect.outputs.command }}
-      command_args: ${{ steps.detect.outputs.command_args }}
-      issue_number: ${{ steps.detect.outputs.issue_number }}
-      user: ${{ steps.detect.outputs.user }}
-      should_continue: ${{ steps.detect.outputs.should_continue }}
-      confirm_tag: ${{ steps.detect.outputs.confirm_tag }}
-      trigger: ${{ steps.detect.outputs.trigger }}
-      release_tag: ${{ steps.state.outputs.release_tag }}
-      state: ${{ steps.state.outputs.state }}
-      snapshot_id: ${{ steps.state.outputs.snapshot_id }}
-      snapshot_branch: ${{ steps.state.outputs.snapshot_branch }}
-      release_review_branch: ${{ steps.state.outputs.release_review_branch }}
-      release_pr_number: ${{ steps.state.outputs.release_pr_number }}
-      release_issue_number: ${{ steps.state.outputs.release_issue_number }}
-      src_commit_sha: ${{ steps.state.outputs.src_commit_sha }}
-      release_type: ${{ steps.state.outputs.release_type }}
-      apis_json: ${{ steps.state.outputs.apis_json }}
-      commonalities_release: ${{ steps.state.outputs.commonalities_release }}
-      identity_consent_management_release: ${{ steps.state.outputs.identity_consent_management_release }}
-      source: ${{ steps.state.outputs.source }}
-      config_error: ${{ steps.state.outputs.config_error }}
-      config_error_type: ${{ steps.state.outputs.config_error_type }}
-      release_plan_url: ${{ steps.state.outputs.release_plan_url }}
-      src_commit_sha_short: ${{ steps.state.outputs.src_commit_sha_short }}
-      meta_release: ${{ steps.state.outputs.meta_release }}
-      common_cache_status: ${{ steps.cache-sync.outputs.common_cache_status }}
-      common_cache_details: ${{ steps.cache-sync.outputs.common_cache_details }}
-      common_sync_pr_url: ${{ steps.cache-sync.outputs.common_sync_pr_url }}
-      allowed: ${{ steps.policy.outputs.allowed }}
-      error_message: ${{ steps.policy.outputs.error_message }}
-      base_context: ${{ steps.assemble.outputs.base_context }}
-      comment_id: ${{ steps.respond.outputs.comment_id || steps.ack.outputs.comment_id }}
-      # True where the former post-interim job succeeded
-      interim_posted: ${{ steps.policy.outputs.response == 'interim_processing' && steps.respond.outcome == 'success' }}
+      # The acknowledgment updated with interim_processing; finalize replaces
+      # it with the result comment.
+      result_comment_id: ${{ steps.policy.outputs.response == 'interim_processing' && steps.respond.outcome == 'success' && steps.respond.outputs.comment_id || '' }}
     steps:
       - name: Fork Guard - Check Issues Enabled
         id: fork-guard
@@ -204,25 +174,6 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python -m release_automation.scripts.common_sync
 
-      # ── Command policy: Plan or Rejection, and the response to post ──
-      - name: Apply Command Policy
-        id: policy
-        if: steps.detect.outputs.should_continue == 'true'
-        working-directory: _tooling
-        env:
-          TRIGGER_JSON: ${{ steps.detect.outputs.trigger }}
-          STATE: ${{ steps.state.outputs.state }}
-          RELEASE_TAG: ${{ steps.state.outputs.release_tag }}
-          RELEASE_TYPE: ${{ steps.state.outputs.release_type }}
-          SRC_COMMIT_SHA: ${{ steps.state.outputs.src_commit_sha }}
-          CONFIG_ERROR: ${{ steps.state.outputs.config_error }}
-          CONFIG_ERROR_TYPE: ${{ steps.state.outputs.config_error_type }}
-          COMMON_CACHE_STATUS: ${{ steps.cache-sync.outputs.common_cache_status }}
-          COMMON_CACHE_DETAILS: ${{ steps.cache-sync.outputs.common_cache_details }}
-          COMMON_SYNC_PR_URL: ${{ steps.cache-sync.outputs.common_sync_pr_url }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: python -m release_automation.scripts.command_policy
-
       # ── Assemble Context (skipped on config error) ──
       - name: Assemble Context
         id: assemble
@@ -251,6 +202,21 @@ jobs:
           CTX_COMMON_CACHE_STATUS: ${{ steps.cache-sync.outputs.common_cache_status }}
           CTX_COMMON_CACHE_DETAILS: ${{ steps.cache-sync.outputs.common_cache_details }}
           GITHUB_TOKEN: ${{ github.token }}
+
+      # ── Command policy: Plan or Rejection, the action, the response ──
+      - name: Apply Command Policy
+        id: policy
+        if: steps.detect.outputs.should_continue == 'true'
+        working-directory: _tooling
+        env:
+          TRIGGER_JSON: ${{ steps.detect.outputs.trigger }}
+          STATE_JSON: ${{ toJSON(steps.state.outputs) }}
+          BASE_CONTEXT: ${{ steps.assemble.outputs.base_context }}
+          COMMON_CACHE_STATUS: ${{ steps.cache-sync.outputs.common_cache_status }}
+          COMMON_CACHE_DETAILS: ${{ steps.cache-sync.outputs.common_cache_details }}
+          COMMON_SYNC_PR_URL: ${{ steps.cache-sync.outputs.common_sync_pr_url }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -m release_automation.scripts.command_policy
 
       # ── Response: one bot comment, template chosen by the policy ──
       # interim_processing and command_rejected update the ack with GITHUB_TOKEN
@@ -316,23 +282,15 @@ jobs:
           exit 1
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 5b: Execute create-snapshot command
+  # Snapshot — /create-snapshot: pre-snapshot validation, snapshot branch,
+  # release-review branch and Release PR. Own job for the validation toolchain.
   # ─────────────────────────────────────────────────────────────────────────────
-  create-snapshot:
+  snapshot:
     needs: [plan]
-    if: |
-      needs.plan.outputs.command == 'create-snapshot' &&
-      needs.plan.outputs.allowed == 'true'
+    if: needs.plan.outputs.action == 'create-snapshot'
     runs-on: ubuntu-latest
     outputs:
-      success: ${{ steps.create.outputs.success || steps.validation-gate.outputs.success }}
-      snapshot_id: ${{ steps.create.outputs.snapshot_id }}
-      snapshot_branch: ${{ steps.create.outputs.snapshot_branch }}
-      release_review_branch: ${{ steps.create.outputs.release_review_branch }}
-      release_pr_number: ${{ steps.create.outputs.release_pr_number }}
-      release_pr_url: ${{ steps.create.outputs.release_pr_url }}
-      error_message: ${{ steps.create.outputs.error_message || steps.validation-gate.outputs.error_message }}
-      apis_json: ${{ steps.create.outputs.apis_json }}
+      outcome: ${{ steps.outcome.outputs.outcome }}
     steps:
       - name: Generate App Token
         id: app-token
@@ -508,43 +466,35 @@ jobs:
         id: create
         uses: ./_tooling/shared-actions/create-snapshot
         with:
-          release_tag: ${{ needs.plan.outputs.release_tag }}
+          release_tag: ${{ fromJSON(needs.plan.outputs.plan).release_tag }}
           base_branch: main
           github_token: ${{ steps.app-token.outputs.token || github.token }}
           tooling_path: ${{ github.workspace }}/_tooling
           bot_name: ${{ steps.bot-identity.outputs.bot_name }}
           bot_email: ${{ steps.bot-identity.outputs.bot_email }}
 
-      - name: Log Result
+      - name: Outcome
+        id: outcome
         if: always()
-        run: |
-          echo "Pre-snapshot validation: ${{ steps.validation.outputs.result || 'skipped' }}"
-          if [ "${{ steps.validation-gate.outcome }}" == "failure" ]; then
-            echo "  Validation blocked snapshot creation"
-            echo "  Summary: ${{ steps.validation.outputs.summary }}"
-          fi
-          echo "Create snapshot result:"
-          echo "  Success: ${{ steps.create.outputs.success }}"
-          echo "  Snapshot ID: ${{ steps.create.outputs.snapshot_id }}"
-          echo "  Snapshot branch: ${{ steps.create.outputs.snapshot_branch }}"
-          echo "  Release PR: #${{ steps.create.outputs.release_pr_number }}"
-          if [ -n "${{ steps.create.outputs.error_message }}" ]; then
-            echo "  Error: ${{ steps.create.outputs.error_message }}"
-          fi
+        working-directory: _tooling
+        env:
+          CREATE_JSON: ${{ toJSON(steps.create.outputs) }}
+          GATE_JSON: ${{ toJSON(steps.validation-gate.outputs) }}
+          VALIDATION_RESULT: ${{ steps.validation.outputs.result }}
+        run: python -m release_automation.scripts.act snapshot
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 5c: Execute discard-snapshot command
+  # Act — the plan's other actions (discard-snapshot, delete-draft,
+  # publish-release, create-draft, publish-on-merge, reopen-issue), dispatched
+  # by release_automation/scripts/act.py.
   # ─────────────────────────────────────────────────────────────────────────────
-  discard-snapshot:
+  act:
+    name: act (${{ needs.plan.outputs.action }})
     needs: [plan]
-    if: |
-      needs.plan.outputs.command == 'discard-snapshot' &&
-      needs.plan.outputs.allowed == 'true'
+    if: needs.plan.outputs.action != '' && needs.plan.outputs.action != 'create-snapshot'
     runs-on: ubuntu-latest
     outputs:
-      success: ${{ steps.discard.outputs.success }}
-      error_message: ${{ steps.discard.outputs.error_message }}
-      renamed_review_branch: ${{ steps.cleanup.outputs.renamed_review_branch }}
+      outcome: ${{ steps.act.outputs.outcome }}
     steps:
       - name: Generate App Token
         id: app-token
@@ -554,243 +504,6 @@ jobs:
           client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
-      - name: Discard Snapshot
-        id: discard
-        uses: actions/github-script@v9
-        with:
-          github-token: ${{ steps.app-token.outputs.token || github.token }}
-          script: |
-            const snapshotBranch = '${{ needs.plan.outputs.snapshot_branch }}';
-            const prNumber = '${{ needs.plan.outputs.release_pr_number }}';
-            const releaseTag = '${{ needs.plan.outputs.release_tag }}';
-
-            console.log(`Discarding snapshot for ${releaseTag}`);
-            console.log(`  Snapshot branch: ${snapshotBranch}`);
-            console.log(`  Release PR: #${prNumber}`);
-
-            try {
-              // Step 1: Close Release PR (without merging)
-              if (prNumber) {
-                console.log(`Closing Release PR #${prNumber}...`);
-                await github.rest.pulls.update({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: parseInt(prNumber),
-                  state: 'closed'
-                });
-                console.log('Release PR closed');
-              }
-
-              // Step 2: Delete snapshot branch
-              if (snapshotBranch) {
-                console.log(`Deleting snapshot branch: ${snapshotBranch}...`);
-                await github.rest.git.deleteRef({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  ref: `heads/${snapshotBranch}`
-                });
-                console.log('Snapshot branch deleted');
-              }
-
-              core.setOutput('success', 'true');
-              core.setOutput('error_message', '');
-            } catch (error) {
-              console.log(`::error::Discard failed: ${error.message}`);
-              core.setOutput('success', 'false');
-              core.setOutput('error_message', error.message);
-            }
-
-      # Step 3: Rename review branch to free name for next create-snapshot
-      - name: Cleanup review branch
-        id: cleanup
-        if: steps.discard.outputs.success == 'true'
-        uses: actions/github-script@v9
-        with:
-          github-token: ${{ steps.app-token.outputs.token || github.token }}
-          script: |
-            const reviewBranch = '${{ needs.plan.outputs.release_review_branch }}';
-            if (!reviewBranch) return;
-
-            const newName = `${reviewBranch}-preserved`;
-            try {
-              const ref = await github.rest.git.getRef({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                ref: `heads/${reviewBranch}`
-              });
-
-              // Delete old -preserved branch if it exists (repeated cycles)
-              try {
-                await github.rest.git.deleteRef({
-                  owner: context.repo.owner, repo: context.repo.repo,
-                  ref: `heads/${newName}`
-                });
-                console.log(`Deleted previous ${newName}`);
-              } catch (_) { /* doesn't exist */ }
-
-              await github.rest.git.createRef({
-                owner: context.repo.owner, repo: context.repo.repo,
-                ref: `refs/heads/${newName}`, sha: ref.data.object.sha
-              });
-              await github.rest.git.deleteRef({
-                owner: context.repo.owner, repo: context.repo.repo,
-                ref: `heads/${reviewBranch}`
-              });
-              console.log(`Renamed: ${reviewBranch} → ${newName}`);
-              core.setOutput('renamed_review_branch', newName);
-            } catch (e) {
-              console.log(`Could not rename review branch: ${e.message}`);
-            }
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 5d: Execute delete-draft command
-  # ─────────────────────────────────────────────────────────────────────────────
-  delete-draft:
-    needs: [plan]
-    if: |
-      needs.plan.outputs.command == 'delete-draft' &&
-      needs.plan.outputs.allowed == 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      success: ${{ steps.delete.outputs.success }}
-      error_message: ${{ steps.delete.outputs.error_message }}
-      renamed_review_branch: ${{ steps.cleanup.outputs.renamed_review_branch }}
-    steps:
-      - name: Generate App Token
-        id: app-token
-        if: vars.RELEASE_APP_CLIENT_ID != ''
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
-      - name: Delete Draft Release
-        id: delete
-        uses: actions/github-script@v9
-        with:
-          github-token: ${{ steps.app-token.outputs.token || github.token }}
-          script: |
-            const releaseTag = '${{ needs.plan.outputs.release_tag }}';
-            const snapshotBranch = '${{ needs.plan.outputs.snapshot_branch }}';
-
-            console.log(`Deleting draft release for ${releaseTag}`);
-            console.log(`  Snapshot branch: ${snapshotBranch}`);
-
-            try {
-              // Step 1: Find and delete the draft release
-              const releases = await github.rest.repos.listReleases({
-                owner: context.repo.owner,
-                repo: context.repo.repo
-              });
-
-              const draftRelease = releases.data.find(
-                r => r.tag_name === releaseTag && r.draft === true
-              );
-
-              if (draftRelease) {
-                console.log(`Deleting draft release: ${draftRelease.name} (ID: ${draftRelease.id})`);
-                await github.rest.repos.deleteRelease({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  release_id: draftRelease.id
-                });
-                console.log('Draft release deleted');
-              } else {
-                console.log(`Warning: No draft release found for tag ${releaseTag}`);
-              }
-
-              // Step 2: Delete the release tag (created by draft release)
-              try {
-                await github.rest.git.deleteRef({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  ref: `tags/${releaseTag}`
-                });
-                console.log(`Deleted tag: ${releaseTag}`);
-              } catch (e) {
-                // Tag may not exist (draft may not have created it)
-                console.log(`Tag ${releaseTag} not found or already deleted`);
-              }
-
-              // Step 3: Delete snapshot branch
-              if (snapshotBranch) {
-                console.log(`Deleting snapshot branch: ${snapshotBranch}...`);
-                await github.rest.git.deleteRef({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  ref: `heads/${snapshotBranch}`
-                });
-                console.log('Snapshot branch deleted');
-              }
-
-              core.setOutput('success', 'true');
-              core.setOutput('error_message', '');
-            } catch (error) {
-              console.log(`::error::Delete draft failed: ${error.message}`);
-              core.setOutput('success', 'false');
-              core.setOutput('error_message', error.message);
-            }
-
-      # Step 4: Rename review branch to free name for next create-snapshot
-      - name: Cleanup review branch
-        id: cleanup
-        if: steps.delete.outputs.success == 'true'
-        uses: actions/github-script@v9
-        with:
-          github-token: ${{ steps.app-token.outputs.token || github.token }}
-          script: |
-            const reviewBranch = '${{ needs.plan.outputs.release_review_branch }}';
-            if (!reviewBranch) return;
-
-            const newName = `${reviewBranch}-preserved`;
-            try {
-              const ref = await github.rest.git.getRef({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                ref: `heads/${reviewBranch}`
-              });
-
-              // Delete old -preserved branch if it exists (repeated cycles)
-              try {
-                await github.rest.git.deleteRef({
-                  owner: context.repo.owner, repo: context.repo.repo,
-                  ref: `heads/${newName}`
-                });
-                console.log(`Deleted previous ${newName}`);
-              } catch (_) { /* doesn't exist */ }
-
-              await github.rest.git.createRef({
-                owner: context.repo.owner, repo: context.repo.repo,
-                ref: `refs/heads/${newName}`, sha: ref.data.object.sha
-              });
-              await github.rest.git.deleteRef({
-                owner: context.repo.owner, repo: context.repo.repo,
-                ref: `heads/${reviewBranch}`
-              });
-              console.log(`Renamed: ${reviewBranch} → ${newName}`);
-              core.setOutput('renamed_review_branch', newName);
-            } catch (e) {
-              console.log(`Could not rename review branch: ${e.message}`);
-            }
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 5f: Handle publish-release (with --confirm flag)
-  # ─────────────────────────────────────────────────────────────────────────────
-  publish-release:
-    name: "Publish Release"
-    needs: [plan]
-    if: |
-      needs.plan.outputs.command == 'publish-release' &&
-      needs.plan.outputs.confirm_tag != '' &&
-      needs.plan.outputs.allowed == 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      success: ${{ steps.publish.outputs.success }}
-      release_url: ${{ steps.publish.outputs.release_url }}
-      reference_tag: ${{ steps.publish.outputs.reference_tag }}
-      pointer_branch: ${{ steps.publish.outputs.pointer_branch }}
-      error_message: ${{ steps.publish.outputs.error_message }}
-    steps:
       - name: Checkout tooling
         uses: actions/checkout@v7
         with:
@@ -812,476 +525,22 @@ jobs:
       - name: Install dependencies
         run: pip install --quiet -r _tooling/requirements.txt
 
-      - name: Generate App Token
-        id: app-token
-        if: vars.RELEASE_APP_CLIENT_ID != ''
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
-      - name: Execute Publish Flow
-        id: publish
+      - name: Act
+        id: act
+        working-directory: _tooling
         env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
-          OWNER: ${{ github.repository_owner }}
-          REPO: ${{ github.event.repository.name }}
-          RELEASE_TAG: ${{ needs.plan.outputs.release_tag }}
-          SNAPSHOT_BRANCH: ${{ needs.plan.outputs.snapshot_branch }}
-          RELEASE_REVIEW_BRANCH: ${{ needs.plan.outputs.release_review_branch }}
-          SRC_COMMIT_SHA: ${{ needs.plan.outputs.src_commit_sha }}
-          RELEASE_ISSUE_NUMBER: ${{ needs.plan.outputs.release_issue_number }}
-        run: |
-          cd _tooling
-          python3 -u - <<'PYTHON_SCRIPT'
-          import os
-          import sys
-          import json
-
-          sys.path.insert(0, '.')
-          from release_automation.scripts.github_client import GitHubClient
-          from release_automation.scripts.release_publisher import ReleasePublisher
-
-          def set_output(name, value):
-              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                  # Handle multi-line values
-                  if '\n' in str(value):
-                      import uuid
-                      delimiter = uuid.uuid4().hex
-                      f.write(f'{name}<<{delimiter}\n{value}\n{delimiter}\n')
-                  else:
-                      f.write(f'{name}={value}\n')
-
-          # Initialize clients
-          token = os.environ['GITHUB_TOKEN']
-          owner = os.environ['OWNER']
-          repo = os.environ['REPO']
-          release_tag = os.environ['RELEASE_TAG']
-          snapshot_branch = os.environ['SNAPSHOT_BRANCH']
-          release_review_branch = os.environ['RELEASE_REVIEW_BRANCH']
-          src_commit_sha = os.environ['SRC_COMMIT_SHA']
-
-          gh = GitHubClient(f'{owner}/{repo}', token)
-          publisher = ReleasePublisher(gh)
-          # Note: the sync PR and the issue close are done in the finalize job
-
-          warnings = []
-          release_url = ''
-          reference_tag = ''
-          pointer_branch = ''
-
-          # Step 1: Publish the release (CRITICAL)
-          print('Step 1: Publishing release...')
-          publish_result = publisher.publish_release(release_tag, snapshot_branch)
-          if not publish_result.success:
-              set_output('success', 'false')
-              set_output('error_message', publish_result.error_message or 'Unknown error')
-              set_output('release_url', '')
-              set_output('reference_tag', '')
-              set_output('pointer_branch', '')
-              print(f'::error::Publication failed: {publish_result.error_message}')
-              sys.exit(0)  # Exit cleanly; finalize posts publish_failed
-
-          release_url = publish_result.release_url or ''
-          is_prerelease = publish_result.is_prerelease
-          print(f'Release published: {release_url}')
-
-          # Step 2: Create reference tag (non-critical)
-          print('Step 2: Creating reference tag...')
-          ref_tag = publisher.create_reference_tag(release_tag, src_commit_sha)
-          if ref_tag:
-              reference_tag = ref_tag
-              print(f'Reference tag created: {reference_tag}')
-          else:
-              warnings.append('Failed to create reference tag')
-              print('::warning::Failed to create reference tag')
-
-          # Step 3: Create pointer branch (non-critical)
-          print('Step 3: Creating pointer branch...')
-          ptr_branch = publisher.create_pointer_branch(release_tag, is_prerelease)
-          if ptr_branch:
-              pointer_branch = ptr_branch
-              print(f'Pointer branch created: {pointer_branch}')
-          else:
-              warnings.append('Failed to create pointer branch')
-              print('::warning::Failed to create pointer branch')
-
-          # Step 4: Cleanup branches (non-critical)
-          print('Step 4: Cleaning up branches...')
-          cleanup_result = publisher.cleanup_branches(snapshot_branch, release_review_branch)
-          for op, status in cleanup_result.items():
-              if status == 'error':
-                  warnings.append(f'Branch cleanup issue: {op}')
-              print(f'  {op}: {status}')
-
-          # Set outputs
-          set_output('success', 'true')
-          set_output('release_url', release_url)
-          set_output('reference_tag', reference_tag)
-          set_output('pointer_branch', pointer_branch)
-          if warnings:
-              set_output('error_message', '; '.join(warnings))
-          else:
-              set_output('error_message', '')
-
-          print('Publish flow completed successfully')
-          PYTHON_SCRIPT
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 5g: Handle PR merge (draft release creation)
-  # ─────────────────────────────────────────────────────────────────────────────
-  handle-pr-merge:
-    needs: [plan]
-    # Runs on a config error too (the plan job then fails on purpose), as it
-    # did when a separate job reported the config error.
-    if: |
-      !cancelled() &&
-      needs.plan.outputs.trigger_type == 'pr_merge' &&
-      (needs.plan.result == 'success' || needs.plan.outputs.config_error != '')
-    runs-on: ubuntu-latest
-    outputs:
-      success: ${{ steps.create-draft.outputs.success }}
-      draft_release_url: ${{ steps.create-draft.outputs.draft_release_url }}
-      error_message: ${{ steps.create-draft.outputs.error_message }}
-    steps:
-      - name: Generate App Token
-        id: app-token
-        if: vars.RELEASE_APP_CLIENT_ID != ''
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
-      - name: Extract CHANGELOG release notes
-        id: changelog
-        uses: actions/github-script@v9
-        with:
-          github-token: ${{ steps.app-token.outputs.token || github.token }}
-          script: |
-            const snapshotBranch = '${{ needs.plan.outputs.snapshot_branch }}';
-            const releaseTag = '${{ needs.plan.outputs.release_tag }}';
-
-            // Derive meta-release from tag: r4.1 → r4, r3.2 → r3
-            const metaRelease = releaseTag.match(/^(r\d+)/)?.[1] || '';
-
-            // Try CHANGELOG/CHANGELOG-rX.md first (new convention), fall back to CHANGELOG.md
-            const candidates = [];
-            if (metaRelease) {
-              candidates.push(`CHANGELOG/CHANGELOG-${metaRelease}.md`);
-            }
-            candidates.push('CHANGELOG.md');
-
-            let changelogContent = '';
-            let changelogPath = '';
-            let changelogSha = '';
-            for (const path of candidates) {
-              try {
-                const response = await github.rest.repos.getContent({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  path: path,
-                  ref: snapshotBranch
-                });
-                changelogContent = Buffer.from(response.data.content, 'base64').toString('utf-8');
-                changelogPath = path;
-                changelogSha = response.data.sha;
-                console.log(`Fetched ${path} (${changelogContent.length} chars)`);
-                break;
-              } catch (error) {
-                console.log(`${path} not found, trying next...`);
-              }
-            }
-
-            if (!changelogContent) {
-              console.log('::warning::No CHANGELOG file found on snapshot branch');
-              core.setOutput('release_notes', '');
-              core.setOutput('candidate_block_stripped', '');
-              return;
-            }
-
-            // --- Strip AUTOGENERATED:CANDIDATE_CHANGES block if present ---
-            const START_MARKER = '<!-- BEGIN:AUTOGENERATED:CANDIDATE_CHANGES -->';
-            const END_MARKER = '<!-- END:AUTOGENERATED:CANDIDATE_CHANGES -->';
-
-            const startPos = changelogContent.indexOf(START_MARKER);
-            const endPos = changelogContent.indexOf(END_MARKER);
-            let candidateBlockStripped = false;
-
-            if (startPos !== -1 && endPos !== -1 && endPos > startPos) {
-              // Both markers present — strip the entire block (inclusive)
-              changelogContent = (
-                changelogContent.substring(0, startPos) +
-                changelogContent.substring(endPos + END_MARKER.length)
-              ).replace(/\n{3,}/g, '\n\n');
-              candidateBlockStripped = true;
-              console.log('Stripped full candidate changes block');
-            } else if (startPos !== -1 || endPos !== -1) {
-              // Orphan marker — codeowner partially deleted the block.
-              // Strip just the orphan marker line (HTML comment, always safe to remove).
-              const orphanMarker = startPos !== -1 ? START_MARKER : END_MARKER;
-              changelogContent = changelogContent
-                .split('\n')
-                .filter(line => line.trim() !== orphanMarker)
-                .join('\n');
-              candidateBlockStripped = true;
-              console.log(`Stripped orphan marker: ${orphanMarker}`);
-            }
-            // If neither marker found: codeowner already removed the block — no action needed
-
-            if (candidateBlockStripped) {
-              await github.rest.repos.createOrUpdateFileContents({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                path: changelogPath,
-                message: 'chore: auto-remove candidate changes block from CHANGELOG',
-                content: Buffer.from(changelogContent).toString('base64'),
-                sha: changelogSha,
-                branch: snapshotBranch
-              });
-              console.log(`Committed cleaned CHANGELOG to ${snapshotBranch}`);
-            }
-
-            core.setOutput('candidate_block_stripped', candidateBlockStripped ? 'true' : '');
-
-            // Extract section from "## Release Notes" to next "# rX.Y" heading or EOF
-            const lines = changelogContent.split('\n');
-            let startIdx = -1;
-            let endIdx = lines.length;
-
-            // Find "## Release Notes" line
-            for (let i = 0; i < lines.length; i++) {
-              if (lines[i].match(/^## Release Notes/i)) {
-                startIdx = i;
-                break;
-              }
-            }
-
-            if (startIdx === -1) {
-              console.log(`::warning::No "## Release Notes" section found in ${changelogPath}`);
-              core.setOutput('release_notes', '');
-              return;
-            }
-
-            // Find end: next "# rX.Y" heading (top-level release heading)
-            for (let i = startIdx + 1; i < lines.length; i++) {
-              if (lines[i].match(/^# r\d+/)) {
-                endIdx = i;
-                break;
-              }
-            }
-
-            // Trim trailing blank lines
-            while (endIdx > startIdx && lines[endIdx - 1].trim() === '') {
-              endIdx--;
-            }
-
-            const releaseNotes = lines.slice(startIdx, endIdx).join('\n');
-            console.log(`Extracted release notes: ${releaseNotes.length} chars (lines ${startIdx + 1}-${endIdx})`);
-
-            // Write to output using delimiter for multiline
-            const outputFile = process.env.GITHUB_OUTPUT;
-            const fs = require('fs');
-            const delimiter = 'RELEASE_NOTES_EOF';
-            fs.appendFileSync(outputFile, `release_notes<<${delimiter}\n${releaseNotes}\n${delimiter}\n`);
-
-      - name: Create Draft Release
-        id: create-draft
-        uses: actions/github-script@v9
-        env:
-          RELEASE_NOTES: ${{ steps.changelog.outputs.release_notes }}
-        with:
-          github-token: ${{ steps.app-token.outputs.token || github.token }}
-          script: |
-            const releaseTag = '${{ needs.plan.outputs.release_tag }}';
-            const snapshotBranch = '${{ needs.plan.outputs.snapshot_branch }}';
-            const releaseType = '${{ needs.plan.outputs.release_type }}';
-            const releaseNotes = process.env.RELEASE_NOTES || '';
-
-            console.log(`Creating draft release for ${releaseTag}`);
-            console.log(`  Snapshot branch: ${snapshotBranch}`);
-            console.log(`  Release type: ${releaseType}`);
-
-            try {
-              // Determine if this is a pre-release
-              const isPrerelease = releaseType.startsWith('pre-release');
-
-              // Build release body from CHANGELOG content or fallback
-              let body = '';
-              if (releaseNotes) {
-                body = releaseNotes;
-              } else {
-                body = `## Release ${releaseTag}\n\n`;
-                body += `**Release type:** ${releaseType}\n\n`;
-                body += `---\n\n`;
-                body += `_CHANGELOG.md content was not available — please add release notes manually._\n`;
-              }
-
-              // Create draft release
-              const release = await github.rest.repos.createRelease({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag_name: releaseTag,
-                target_commitish: snapshotBranch,
-                name: releaseTag,
-                body: body,
-                draft: true,
-                prerelease: isPrerelease
-              });
-
-              console.log(`Draft release created: ${release.data.html_url}`);
-              core.setOutput('success', 'true');
-              core.setOutput('draft_release_url', release.data.html_url);
-              core.setOutput('error_message', '');
-            } catch (error) {
-              console.log(`::error::Draft release creation failed: ${error.message}`);
-              core.setOutput('success', 'false');
-              core.setOutput('draft_release_url', '');
-              core.setOutput('error_message', error.message);
-            }
-
-      # release_date is set during /publish-release (finalize_metadata), not at draft creation
-
-      - name: Checkout tooling for bot comment
-        if: steps.create-draft.outputs.success == 'true' && needs.plan.outputs.release_issue_number != ''
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: _tooling
-          sparse-checkout: |
-            release_automation
-            shared-actions
-            tooling_lib
-            validation
-            linting/config
-
-      - name: Post draft_created comment
-        if: steps.create-draft.outputs.success == 'true' && needs.plan.outputs.release_issue_number != ''
-        uses: ./_tooling/shared-actions/post-bot-comment
-        with:
-          issue_number: ${{ needs.plan.outputs.release_issue_number }}
-          release_tag: ${{ needs.plan.outputs.release_tag }}
-          run_id: ${{ github.run_id }}
-          template: draft_created
-          base_context: ${{ needs.plan.outputs.base_context }}
-          github_token: ${{ steps.app-token.outputs.token || github.token }}
-          context: |
-            {
-              "draft_release_url": "${{ steps.create-draft.outputs.draft_release_url }}",
-              "release_pr_number": "${{ github.event.pull_request.number }}",
-              "release_pr_url": "${{ github.event.pull_request.html_url }}",
-              "candidate_block_stripped": "${{ steps.changelog.outputs.candidate_block_stripped }}"
-            }
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 5f: Handle issue close/reopen events
-  # ─────────────────────────────────────────────────────────────────────────────
-  handle-issue-event:
-    needs: [plan]
-    if: |
-      always() &&
-      needs.plan.result == 'success' &&
-      needs.plan.outputs.config_error == '' &&
-      (needs.plan.outputs.trigger_type == 'issue_close' ||
-      needs.plan.outputs.trigger_type == 'issue_reopen')
-    runs-on: ubuntu-latest
-    outputs:
-      action_taken: ${{ steps.handle.outputs.action_taken }}
-    steps:
-      - name: Generate App Token
-        id: app-token
-        if: vars.RELEASE_APP_CLIENT_ID != ''
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
-      - name: Checkout tooling
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: _tooling
-          sparse-checkout: |
-            release_automation
-            shared-actions
-            tooling_lib
-            validation
-            linting/config
-
-      - name: Handle Issue Event
-        id: handle
-        uses: actions/github-script@v9
-        with:
-          github-token: ${{ steps.app-token.outputs.token || github.token }}
-          script: |
-            const triggerType = '${{ needs.plan.outputs.trigger_type }}';
-            const currentState = '${{ needs.plan.outputs.state }}';
-            const issueNumber = parseInt('${{ needs.plan.outputs.issue_number }}');
-
-            console.log(`Handling ${triggerType} event`);
-            console.log(`Current state: ${currentState}`);
-
-            // States that block issue closure
-            const blockClosureStates = ['snapshot-active', 'draft-ready'];
-
-            if (triggerType === 'issue_close') {
-              // Check if we need to auto-reopen
-              if (blockClosureStates.includes(currentState)) {
-                console.log(`Auto-reopening issue - cannot close in state '${currentState}'`);
-
-                // Reopen the issue
-                await github.rest.issues.update({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: issueNumber,
-                  state: 'open'
-                });
-
-                core.setOutput('action_taken', 'reopened');
-                console.log('Issue reopened successfully');
-              } else {
-                console.log(`Issue closure allowed in state '${currentState}'`);
-                core.setOutput('action_taken', 'allowed_close');
-              }
-            } else if (triggerType === 'issue_reopen') {
-              // Just log for now - no special handling needed
-              console.log('Issue was reopened');
-              core.setOutput('action_taken', 'noted_reopen');
-            }
-
-      - name: Post Auto-Reopen Comment
-        if: steps.handle.outputs.action_taken == 'reopened'
-        uses: ./_tooling/shared-actions/post-bot-comment
-        with:
-          issue_number: ${{ needs.plan.outputs.issue_number }}
-          release_tag: ${{ needs.plan.outputs.release_tag }}
-          run_id: ${{ github.run_id }}
-          template: issue_reopened
-          base_context: ${{ needs.plan.outputs.base_context }}
-          github_token: ${{ steps.app-token.outputs.token || github.token }}
-          context: |
-            {
-              "reason": "Cannot close Release Issue while release is in progress"
-            }
+          PLAN_JSON: ${{ needs.plan.outputs.plan }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+        run: python -m release_automation.scripts.act
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Finalize — post-release sync PR, common sync, Release Issue sync
-  # and notifications, result comment, published Release Issue. Runs after the
-  # command jobs even when one failed; release_automation/scripts/finalize.py
-  # decides which parts apply from the needs context.
+  # and notifications, result comment, published Release Issue. Runs after
+  # snapshot/act even when they failed; release_automation/scripts/finalize.py
+  # decides which parts apply from the plan and the outcome.
   # ─────────────────────────────────────────────────────────────────────────────
   finalize:
-    needs:
-      [
-        plan,
-        create-snapshot,
-        discard-snapshot,
-        delete-draft,
-        publish-release,
-        handle-pr-merge,
-        handle-issue-event,
-      ]
+    needs: [plan, snapshot, act]
     if: always() && needs.plan.outputs.finalize == 'true'
     runs-on: ubuntu-latest
     steps:

@@ -243,13 +243,19 @@ class ReleasePublisher:
                 release_tag, snapshot_branch, release_tag, body,
                 draft=False,
                 prerelease=is_prerelease,
-                make_latest=None if is_prerelease else "true",
             )
         except GitHubClientError as e:
             return PublishResult(
                 success=False,
                 error_message=f"Failed to publish release: {e}"
             )
+
+        # make_latest in its own call, as in publish_release()
+        if not is_prerelease:
+            try:
+                self.gh.update_release(created.get("id"), make_latest="true")
+            except GitHubClientError:
+                logger.warning(f"Failed to mark {release_tag} as Latest release")
         return PublishResult(
             success=True,
             release_url=created.get("html_url"),

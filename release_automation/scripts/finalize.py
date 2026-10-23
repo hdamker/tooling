@@ -7,12 +7,14 @@ after plan for push, workflow_dispatch and /sync-issue. In order:
 1. post-release sync PR, after a publication (sync_pr)
 2. common sync when the cache is stale, then the Release Issue sync and its
    notifications (common_sync, issue_sync)
-3. the result comment on a slash command, updating its acknowledgment
+3. the result comment on a slash command, updating its acknowledgment; after
+   a publication on the Release PR merge (publish_mode on_merge), a new
+   comment on the Release Issue
 4. after a publication: the published Release Issue — STATE/ACTIONS, label,
    closed only when the sync PR was created (issue_sync)
 
-What ran before comes from toJSON(needs): the plan job's outputs and each
-action job's result and outputs.
+What ran before comes from toJSON(needs): the plan job's JSON plan, and the
+result and JSON outcome of the snapshot or act job that executed its action.
 
 Usage (workflow step):
     python3 -m release_automation.scripts.finalize
@@ -32,15 +34,16 @@ from .sync_pr import SyncPrOutcome
 
 COMMONALITIES_REPO = "camaraproject/Commonalities"
 
-# A job whose success counts only together with its "success" output
-COMMAND_JOBS = ("create-snapshot", "discard-snapshot", "delete-draft", "handle-pr-merge")
+# Actions after which the Release Issue is synced (when they succeeded)
+STATE_CHANGING_ACTIONS = ("create-snapshot", "discard-snapshot", "delete-draft", "create-draft")
+PUBLISH_ACTIONS = ("publish-release", "publish-on-merge")
 
-# Template of the result comment per command; the second is the failure template
+# Template of the result comment per command: success, failure
 RESULT_TEMPLATES = {
-    "create-snapshot": ("create-snapshot", "snapshot_created", "snapshot_failed"),
-    "discard-snapshot": ("discard-snapshot", "snapshot_discarded", "snapshot_failed"),
-    "delete-draft": ("delete-draft", "draft_revoked", "snapshot_failed"),
-    "publish-release": ("publish-release", "release_published", "publish_failed"),
+    "create-snapshot": ("snapshot_created", "snapshot_failed"),
+    "discard-snapshot": ("snapshot_discarded", "snapshot_failed"),
+    "delete-draft": ("draft_revoked", "snapshot_failed"),
+    "publish-release": ("release_published", "publish_failed"),
 }
 
 
@@ -53,25 +56,57 @@ class Run:
     repository: str = ""
     run_id: str = ""
 
-    def out(self, job: str, name: str) -> str:
-        return str((self.needs.get(job) or {}).get("outputs", {}).get(name, "") or "")
+    def _outputs(self, job: str) -> Dict[str, Any]:
+        return (self.needs.get(job) or {}).get("outputs") or {}
 
-    def result(self, job: str) -> str:
-        return (self.needs.get(job) or {}).get("result", "")
+    def _json(self, job: str, name: str) -> Dict[str, Any]:
+        return json.loads(self._outputs(job).get(name) or "{}")
 
     def plan(self, name: str) -> str:
-        return self.out("plan", name)
+        value = self._json("plan", "plan").get(name, "")
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return str(value or "")
 
-    def succeeded(self, job: str) -> bool:
-        """Job concluded success and reported success (a command job)."""
-        return self.result(job) == "success" and self.out(job, "success") == "true"
+    @property
+    def base_context(self) -> Dict[str, Any]:
+        value = self._json("plan", "plan").get("base_context")
+        return value if isinstance(value, dict) else {}
+
+    @property
+    def result_comment_id(self) -> str:
+        """The acknowledgment the plan job updated with interim_processing, "" if none."""
+        return self._outputs("plan").get("result_comment_id", "") or ""
+
+    @property
+    def action(self) -> str:
+        return self.plan("action")
+
+    @property
+    def _action_job(self) -> str:
+        return "snapshot" if self.action == "create-snapshot" else "act"
+
+    def out(self, name: str) -> str:
+        """A value of the action's outcome ("" without an action or outcome)."""
+        if not self.action:
+            return ""
+        return str(self._json(self._action_job, "outcome").get(name, "") or "")
+
+    @property
+    def result(self) -> str:
+        """Conclusion of the job that executed the action."""
+        return (self.needs.get(self._action_job) or {}).get("result", "") if self.action else ""
+
+    def succeeded(self, action: str) -> bool:
+        """The action ran, its job concluded success and it reported success."""
+        return self.action == action and self.result == "success" and self.out("success") == "true"
 
     def tree_url(self, ref: str) -> str:
         return f"{self.server_url}/{self.repository}/tree/{ref}"
 
     @property
     def published(self) -> bool:
-        return self.out("publish-release", "success") == "true"
+        return self.action in PUBLISH_ACTIONS and self.out("success") == "true"
 
 
 # ── when each part runs ──────────────────────────────────────────────────────
@@ -79,22 +114,21 @@ class Run:
 
 def issue_sync_due(run: Run) -> bool:
     """Release Issue sync (and common sync): a successful command, an issue event, or a sync."""
-    if run.plan("config_error") or not run.plan("state"):
+    if not run.plan("state"):
         return False
+    issue_event = run.plan("trigger_type") in ("issue_close", "issue_reopen") and (
+        not run.action or run.succeeded("reopen-issue")
+    )
     return (
-        any(run.succeeded(job) for job in COMMAND_JOBS)
-        or run.result("handle-issue-event") == "success"
+        any(run.succeeded(action) for action in STATE_CHANGING_ACTIONS)
+        or issue_event
         or run.plan("command") == "sync-issue"
     )
 
 
 def result_due(run: Run) -> bool:
     """Result comment: an allowed slash command whose acknowledgment was updated by plan."""
-    return (
-        run.plan("trigger_type") == "slash_command"
-        and run.plan("allowed") == "true"
-        and run.plan("interim_posted") == "true"
-    )
+    return run.plan("trigger_type") == "slash_command" and run.result_comment_id != ""
 
 
 # ── Release Issue sync ───────────────────────────────────────────────────────
@@ -112,17 +146,17 @@ def sync_overrides(run: Run) -> Dict[str, Any]:
     if run.succeeded("create-snapshot"):
         overrides.update(
             state_override="snapshot-active",
-            snapshot_branch_override=run.out("create-snapshot", "snapshot_branch"),
-            release_pr_number_override=run.out("create-snapshot", "release_pr_number"),
+            snapshot_branch_override=run.out("snapshot_branch"),
+            release_pr_number_override=run.out("release_pr_number"),
             force_update=True,
         )
-    elif run.succeeded("handle-pr-merge"):
+    elif run.succeeded("create-draft"):
         pr_number = (run.event.get("pull_request") or {}).get("number", "")
         overrides.update(
             state_override="draft-ready",
             snapshot_branch_override=run.plan("snapshot_branch"),
             release_pr_number_override=str(pr_number),
-            draft_release_url_override=run.out("handle-pr-merge", "draft_release_url"),
+            draft_release_url_override=run.out("draft_release_url"),
             force_update=True,
         )
     elif run.succeeded("discard-snapshot") or run.succeeded("delete-draft"):
@@ -171,8 +205,8 @@ def result_template(run: Run) -> str:
     if command not in RESULT_TEMPLATES:
         # No handler matched: a workflow bug
         return "internal_error"
-    job, success, failure = RESULT_TEMPLATES[command]
-    return success if run.out(job, "success") == "true" else failure
+    success, failure = RESULT_TEMPLATES[command]
+    return success if run.action == command and run.out("success") == "true" else failure
 
 
 def result_context(run: Run, sync: Optional[SyncPrOutcome]) -> Dict[str, str]:
@@ -183,45 +217,41 @@ def result_context(run: Run, sync: Optional[SyncPrOutcome]) -> Dict[str, str]:
         reason = "No reason provided"
     context = {"reason": reason}
 
-    for job in ("discard-snapshot", "delete-draft"):
-        renamed = run.out(job, "renamed_review_branch")
-        if run.out(job, "success") == "true" and renamed:
-            context.update(release_review_branch=renamed, release_review_branch_url=run.tree_url(renamed))
+    ok = run.out("success") == "true"
+    renamed = run.out("renamed_review_branch")
+    if run.action in ("discard-snapshot", "delete-draft") and ok and renamed:
+        context.update(release_review_branch=renamed, release_review_branch_url=run.tree_url(renamed))
 
-    if run.out("create-snapshot", "success") == "true":
-        snapshot_branch = run.out("create-snapshot", "snapshot_branch")
-        review_branch = run.out("create-snapshot", "release_review_branch")
+    if run.action == "create-snapshot" and ok:
+        snapshot_branch = run.out("snapshot_branch")
+        review_branch = run.out("release_review_branch")
         context.update(
-            snapshot_id=run.out("create-snapshot", "snapshot_id"),
+            snapshot_id=run.out("snapshot_id"),
             snapshot_branch=snapshot_branch,
             snapshot_branch_url=run.tree_url(snapshot_branch),
             release_review_branch=review_branch,
             release_review_branch_url=run.tree_url(review_branch),
-            release_pr_number=run.out("create-snapshot", "release_pr_number"),
-            release_pr_url=run.out("create-snapshot", "release_pr_url"),
-            apis_json=run.out("create-snapshot", "apis_json"),
+            release_pr_number=run.out("release_pr_number"),
+            release_pr_url=run.out("release_pr_url"),
+            apis_json=run.out("apis_json"),
         )
 
     if run.published:
-        reference_tag = run.out("publish-release", "reference_tag")
+        reference_tag = run.out("reference_tag")
         context.update(
-            release_url=run.out("publish-release", "release_url"),
+            release_url=run.out("release_url"),
             reference_tag=reference_tag,
             reference_tag_url=run.tree_url(reference_tag) if reference_tag else "",
             sync_pr_url=sync.pr_url if sync else "",
             sync_pr_number=sync.pr_number if sync else "",
             src_commit_sha_short=run.plan("src_commit_sha")[:7],
         )
-        warnings = post_publish_warnings(
-            run.out("publish-release", "error_message"), sync.status if sync else ""
-        )
+        warnings = post_publish_warnings(run.out("error_message"), sync.status if sync else "")
         if warnings:
             context["publish_warnings"] = warnings
 
-    for job in ("create-snapshot", "discard-snapshot", "delete-draft", "publish-release"):
-        if run.out(job, "success") == "false":
-            context["error_message"] = run.out(job, "error_message")
-            break
+    if run.out("success") == "false":
+        context["error_message"] = run.out("error_message")
     return context
 
 
@@ -266,12 +296,7 @@ class Report:
 def post_comment(clients: Clients, run: Run, template: str, issue: str, delta: Dict[str, Any], comment_id: str = "") -> None:
     from .bot_responder import post_comment as post
 
-    try:
-        base_context = json.loads(run.plan("base_context") or "{}")
-    except json.JSONDecodeError:
-        print("::warning::Invalid base_context JSON, ignoring")
-        base_context = {}
-    post(clients.gh, template, issue, base_context, delta, run.plan("release_tag"), comment_id=comment_id)
+    post(clients.gh, template, issue, run.base_context, delta, run.plan("release_tag"), comment_id=comment_id)
 
 
 def run_sync_pr(run: Run, clients: Clients) -> SyncPrOutcome:
@@ -342,20 +367,40 @@ def run_issue_sync(run: Run, clients: Clients, report: Report, summary_path: str
 
 
 def run_result(run: Run, clients: Clients, report: Report) -> None:
-    from .issue_manager import IssueManager
-    from .issue_sync import IssueSyncManager
-
     report.result_template = result_template(run)
     try:
         post_comment(
             clients, run, report.result_template, run.plan("issue_number"),
-            result_context(run, report.sync_pr), comment_id=run.plan("comment_id"),
+            result_context(run, report.sync_pr), comment_id=run.result_comment_id,
         )
     except Exception as e:
         # As before: without the result comment the issue is not finalised.
         print(f"::error::Could not post the result comment: {e}")
         report.errors.append("result comment failed")
         return
+    finalize_published(run, clients, report)
+
+
+def run_merge_publication(run: Run, clients: Clients, report: Report) -> None:
+    """publish_mode on_merge: the result goes to the Release Issue as a new comment."""
+    report.result_template = "release_published" if run.published else "publish_failed"
+    issue = run.plan("release_issue_number")
+    if not issue:
+        print("::warning::No Release Issue to report the publication on")
+        return
+    try:
+        post_comment(clients, run, report.result_template, issue, result_context(run, report.sync_pr))
+    except Exception as e:
+        print(f"::error::Could not post the result comment: {e}")
+        report.errors.append("result comment failed")
+        return
+    finalize_published(run, clients, report)
+
+
+def finalize_published(run: Run, clients: Clients, report: Report) -> None:
+    """After a publication: STATE/ACTIONS, label, and the close when the sync PR was created."""
+    from .issue_manager import IssueManager
+    from .issue_sync import IssueSyncManager
 
     if run.published and run.plan("release_issue_number"):
         sync = report.sync_pr or SyncPrOutcome(status="")
@@ -363,11 +408,11 @@ def run_result(run: Run, clients: Clients, report: Report) -> None:
         report.issue_finalized = IssueSyncManager(clients.gh, issue_manager=IssueManager()).finalize_published_issue(
             issue_number=int(run.plan("release_issue_number")),
             release_tag=run.plan("release_tag"),
-            release_url=run.out("publish-release", "release_url"),
-            reference_tag=run.out("publish-release", "reference_tag"),
+            release_url=run.out("release_url"),
+            reference_tag=run.out("reference_tag"),
             sync_pr_url=sync.pr_url,
             sync_status=sync.status,
-            publish_warnings=run.out("publish-release", "error_message"),
+            publish_warnings=run.out("error_message"),
         )
 
 
@@ -380,6 +425,8 @@ def finalize(run: Run, clients: Clients, summary_path: str = "") -> Report:
         run_issue_sync(run, clients, report, summary_path)
     if result_due(run):
         run_result(run, clients, report)
+    elif run.action == "publish-on-merge":
+        run_merge_publication(run, clients, report)
     write_summary(run, report, summary_path)
     return report
 

@@ -389,6 +389,7 @@ def test_slash_command_plan_responds_with_interim(command):
         state=state.value,
         release_type="pre-release-alpha",
         response="interim_processing",
+        action="" if command == "sync-issue" else command,
     )
 
 
@@ -418,6 +419,7 @@ def test_non_slash_triggers_are_not_validated(trigger, state):
         state=state.value,
         release_type="pre-release-alpha",
         response="",
+        action=policy.action_for(result),
     )
     assert client.calls == []
 
@@ -475,6 +477,7 @@ def test_plan_and_rejection_serialise_to_json():
         "base_branch": "main",
         "publish_mode": "draft",
         "response": "publish_confirmation",
+        "action": "",
     }
     assert json.loads(rejection.to_json()) == {
         "allowed": False,
@@ -487,14 +490,19 @@ def test_plan_and_rejection_serialise_to_json():
 # ── main(): env → GITHUB_OUTPUT ──────────────────────────────────────────────
 
 
+STATE_KEYS = ("STATE", "RELEASE_TAG", "RELEASE_TYPE", "CONFIG_ERROR", "CONFIG_ERROR_TYPE", "SRC_COMMIT_SHA",
+              "SNAPSHOT_BRANCH", "RELEASE_REVIEW_BRANCH", "RELEASE_PR_NUMBER", "RELEASE_ISSUE_NUMBER",
+              "COMMONALITIES_RELEASE", "IDENTITY_CONSENT_MANAGEMENT_RELEASE")
+
+
 def run_main(tmp_path, monkeypatch, trigger, env, client):
     output_path = tmp_path / "output"
     output_path.write_text("")
     monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
     monkeypatch.setenv("TRIGGER_JSON", json.dumps(trigger.__dict__))
-    for name in ("STATE", "RELEASE_TAG", "RELEASE_TYPE", "CONFIG_ERROR", "CONFIG_ERROR_TYPE",
-                 "COMMON_CACHE_STATUS", "COMMON_CACHE_DETAILS", "COMMON_SYNC_PR_URL",
-                 "SRC_COMMIT_SHA"):
+    # STATE_JSON is toJSON(steps.state.outputs) of the derive-release-state step
+    monkeypatch.setenv("STATE_JSON", json.dumps({k.lower(): env[k] for k in STATE_KEYS if k in env}))
+    for name in ("COMMON_CACHE_STATUS", "COMMON_CACHE_DETAILS", "COMMON_SYNC_PR_URL", "BASE_CONTEXT", "ACK_COMMENT_ID"):
         monkeypatch.setenv(name, env.get(name, ""))
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
     monkeypatch.setenv("GITHUB_REPOSITORY", "camaraproject/ReleaseTest2")
@@ -512,9 +520,10 @@ def test_main_writes_allowed_plan(tmp_path, monkeypatch):
         FakeClient(permissions={"alice": "write"}),
     )
 
-    assert out["allowed"] == "true"
-    assert out["error_message"] == ""
-    assert json.loads(out["plan"])["response"] == "publish_confirmation"
+    plan = json.loads(out["plan"])
+    assert plan["allowed"] is True
+    assert plan["response"] == "publish_confirmation"
+    assert out["action"] == ""
 
 
 def test_main_writes_rejection_with_cache_inputs(tmp_path, monkeypatch):
@@ -525,9 +534,10 @@ def test_main_writes_rejection_with_cache_inputs(tmp_path, monkeypatch):
         FakeClient(permissions={"alice": "write"}),
     )
 
-    assert out["allowed"] == "false"
-    assert out["error_message"] == "Common file cache is stale: d. Merge the sync PR: https://x/pull/1"
-    assert json.loads(out["plan"])["allowed"] is False
+    plan = json.loads(out["plan"])
+    assert plan["allowed"] is False
+    assert plan["error_message"] == "Common file cache is stale: d. Merge the sync PR: https://x/pull/1"
+    assert (out["action"], out["finalize"]) == ("", "false")
 
 
 def test_main_config_error_plan(tmp_path, monkeypatch):
@@ -568,7 +578,7 @@ def test_main_rejection_response_context_is_valid_json(tmp_path, monkeypatch):
     )
 
     assert out["response"] == "command_rejected"
-    assert json.loads(out["response_context"]) == {"error_message": out["error_message"]}
+    assert json.loads(out["response_context"]) == {"error_message": json.loads(out["plan"])["error_message"]}
 
 
 def test_main_interim_response(tmp_path, monkeypatch):
@@ -589,9 +599,6 @@ def test_main_config_error_response(tmp_path, monkeypatch):
         FakeClient(),
     )
 
-    # allowed/error_message stay empty on a config error, as when Validate
-    # Command was skipped; the config_error template answers instead.
-    assert (out["allowed"], out["error_message"]) == ("", "")
     assert out["response"] == "config_error"
     assert out["response_release_tag"] == "unknown"
     assert json.loads(out["response_context"]) == {
@@ -610,10 +617,10 @@ def test_main_config_error_response(tmp_path, monkeypatch):
         Trigger(trigger_type="issue_close", issue_number="42", user="x", should_continue=True),
     ],
 )
-def test_main_non_slash_trigger_leaves_allowed_empty(tmp_path, monkeypatch, trigger):
+def test_main_non_slash_trigger_has_no_response(tmp_path, monkeypatch, trigger):
     out = run_main(tmp_path, monkeypatch, trigger, {"STATE": "planned", "RELEASE_TAG": "r1.2"}, FakeClient())
 
-    assert (out["allowed"], out["error_message"], out["response"]) == ("", "", "")
+    assert out["response"] == ""
     assert json.loads(out["plan"])["allowed"] is True
 
 
@@ -624,7 +631,7 @@ def test_main_non_slash_config_error(tmp_path, monkeypatch):
         {"CONFIG_ERROR": "bad", "CONFIG_ERROR_TYPE": "malformed_yaml"}, FakeClient(),
     )
 
-    assert (out["allowed"], out["response"]) == ("", "")
+    assert (out["response"], out["action"], out["finalize"]) == ("", "", "false")
     assert json.loads(out["plan"])["error_type"] == "malformed_yaml"
 
 
@@ -662,3 +669,85 @@ def test_main_writes_finalize(tmp_path, monkeypatch):
     )
 
     assert out["finalize"] == "true"
+
+
+# ── action: what snapshot/act execute ────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "trigger,state,action",
+    [
+        (slash("create-snapshot"), ReleaseState.PLANNED, "create-snapshot"),
+        (slash("discard-snapshot"), ReleaseState.SNAPSHOT_ACTIVE, "discard-snapshot"),
+        (slash("delete-draft"), ReleaseState.DRAFT_READY, "delete-draft"),
+        (slash("publish-release", confirm_tag="r1.2"), ReleaseState.DRAFT_READY, "publish-release"),
+        (slash("publish-release"), ReleaseState.DRAFT_READY, ""),  # confirmation request
+        (slash("sync-issue"), ReleaseState.PLANNED, ""),
+        (slash("create-snapshot"), ReleaseState.SNAPSHOT_ACTIVE, ""),  # rejected
+        (Trigger(trigger_type="pr_merge", user="x", should_continue=True), ReleaseState.SNAPSHOT_ACTIVE, "create-draft"),
+        (Trigger(trigger_type="issue_close", issue_number="42", should_continue=True), ReleaseState.SNAPSHOT_ACTIVE, "reopen-issue"),
+        (Trigger(trigger_type="issue_close", issue_number="42", should_continue=True), ReleaseState.DRAFT_READY, "reopen-issue"),
+        (Trigger(trigger_type="issue_close", issue_number="42", should_continue=True), ReleaseState.PLANNED, ""),
+        (Trigger(trigger_type="issue_close", issue_number="42", should_continue=True), ReleaseState.PUBLISHED, ""),
+        (Trigger(trigger_type="issue_reopen", issue_number="42", should_continue=True), ReleaseState.DRAFT_READY, ""),
+        (Trigger(trigger_type="push", command="sync-issue", should_continue=True), ReleaseState.PLANNED, ""),
+    ],
+)
+def test_action(trigger, state, action):
+    result = evaluate(trigger, info(state), client=FakeClient(permissions={"alice": "write"}, codeowners=""))
+
+    assert (result.action if result.allowed else "") == action
+
+
+def test_pr_merge_publishes_on_merge_when_the_policy_says_so(monkeypatch):
+    monkeypatch.setitem(policy.PUBLISH_MODES, "pre-release-rc", "on_merge")
+    trigger = Trigger(trigger_type="pr_merge", user="x", should_continue=True)
+
+    rc = evaluate(trigger, info(ReleaseState.SNAPSHOT_ACTIVE, release_type="pre-release-rc"), client=FakeClient())
+    public = evaluate(trigger, info(ReleaseState.SNAPSHOT_ACTIVE, release_type="public-release"), client=FakeClient())
+
+    assert (rc.publish_mode, rc.action) == ("on_merge", "publish-on-merge")
+    assert (public.publish_mode, public.action) == ("draft", "create-draft")
+
+
+def test_main_writes_the_plan_document(tmp_path, monkeypatch):
+    base = {"release_tag": "r1.2", "state": "snapshot-active", "user": "alice"}
+    out = run_main(
+        tmp_path, monkeypatch, slash("discard-snapshot", args="redo"),
+        {"STATE": "snapshot-active", "RELEASE_TAG": "r1.2", "RELEASE_TYPE": "pre-release-rc",
+         "SRC_COMMIT_SHA": "abcdef0123", "SNAPSHOT_BRANCH": "release-snapshot/r1.2-abcdef0",
+         "RELEASE_REVIEW_BRANCH": "release-review/r1.2-abcdef0", "RELEASE_PR_NUMBER": "24",
+         "RELEASE_ISSUE_NUMBER": "23", "COMMONALITIES_RELEASE": "r4.3",
+         "IDENTITY_CONSENT_MANAGEMENT_RELEASE": "r4.3",
+         "COMMON_CACHE_STATUS": "in_sync", "BASE_CONTEXT": json.dumps(base), "ACK_COMMENT_ID": "555"},
+        FakeClient(permissions={"alice": "write"}),
+    )
+
+    assert (out["action"], out["finalize"]) == ("discard-snapshot", "true")
+    assert json.loads(out["plan"]) == {
+        "allowed": True,
+        "trigger_type": "slash_command",
+        "command": "discard-snapshot",
+        "release_tag": "r1.2",
+        "state": "snapshot-active",
+        "release_type": "pre-release-rc",
+        "confirm_tag": "",
+        "base_branch": "main",
+        "publish_mode": "draft",
+        "response": "interim_processing",
+        "action": "discard-snapshot",
+        "command_args": "redo",
+        "issue_number": "42",
+        "user": "alice",
+        "snapshot_branch": "release-snapshot/r1.2-abcdef0",
+        "release_review_branch": "release-review/r1.2-abcdef0",
+        "release_pr_number": "24",
+        "release_issue_number": "23",
+        "src_commit_sha": "abcdef0123",
+        "commonalities_release": "r4.3",
+        "identity_consent_management_release": "r4.3",
+        "common_cache_status": "in_sync",
+        "common_cache_details": "",
+        "common_sync_pr_url": "",
+        "base_context": base,
+    }

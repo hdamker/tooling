@@ -10,6 +10,9 @@ rejection. Other triggers are not validated.
 Policy values that are expected to change (RM#675) sit in PUBLISH_MODES and
 PUBLISHERS; the initial values reproduce the behaviour before this module.
 
+A Plan names the action the snapshot or act job executes (action_for); the
+plan job writes it with the release references as one JSON document.
+
 Usage (workflow step):
     python3 -m release_automation.scripts.command_policy
 """
@@ -62,6 +65,16 @@ PUBLISHERS = {
 
 WRITE_PERMISSIONS = ("admin", "maintain", "write")
 
+# A Release Issue closed in these states is reopened
+BLOCK_CLOSURE_STATES = (config.STATE_SNAPSHOT_ACTIVE, config.STATE_DRAFT_READY)
+
+# Actions of the snapshot job (create-snapshot) and the act job (all others)
+ACTION_CREATE_SNAPSHOT = "create-snapshot"
+ACTION_CREATE_DRAFT = "create-draft"
+ACTION_PUBLISH_ON_MERGE = "publish-on-merge"
+ACTION_REOPEN_ISSUE = "reopen-issue"
+COMMAND_ACTIONS = ("create-snapshot", "discard-snapshot", "delete-draft", "publish-release")
+
 # App bots don't register as collaborators, so the permission API returns
 # 'none' for them; the write intent is established by the App installation on
 # the target repo. Used by the Release Automation Regression canary in
@@ -92,6 +105,7 @@ class Plan:
         response: Template the plan job posts ("" for non-slash triggers)
         base_branch: Branch the release is cut from
         publish_mode: draft | on_merge, per release type (PUBLISH_MODES)
+        action: What the snapshot/act job executes ("" for none; action_for)
     """
     trigger_type: str
     command: str
@@ -102,6 +116,7 @@ class Plan:
     base_branch: str = DEFAULT_BASE_BRANCH
     publish_mode: str = PUBLISH_MODE_DRAFT
     response: str = ""
+    action: str = ""
 
     allowed = True
 
@@ -192,6 +207,21 @@ def _check_publisher(user: str, permission: str, release_type: str, client) -> O
     raise ValueError(f"unknown publisher rule: {rule}")
 
 
+def action_for(plan: Plan) -> str:
+    """The action a plan executes, or "" when finalize alone follows."""
+    match plan.trigger_type:
+        case "slash_command":
+            if plan.response == RESPONSE_INTERIM and plan.command in COMMAND_ACTIONS:
+                return plan.command
+            return ""
+        case "pr_merge":
+            return ACTION_PUBLISH_ON_MERGE if plan.publish_mode == PUBLISH_MODE_ON_MERGE else ACTION_CREATE_DRAFT
+        case "issue_close":
+            return ACTION_REOPEN_ISSUE if plan.state in BLOCK_CLOSURE_STATES else ""
+        case _:
+            return ""
+
+
 def evaluate(
     trigger: Trigger,
     release_info: ReleaseInfoResult,
@@ -210,6 +240,16 @@ def evaluate(
     Returns:
         Plan to execute, or Rejection to answer
     """
+    result = _evaluate(trigger, release_info, cache, client)
+    return replace(result, action=action_for(result)) if result.allowed else result
+
+
+def _evaluate(
+    trigger: Trigger,
+    release_info: ReleaseInfoResult,
+    cache: CommonCache = CommonCache(),
+    client=None,
+) -> Union[Plan, Rejection]:
     is_slash = trigger.trigger_type == TRIGGER_SLASH_COMMAND
 
     if not release_info.success:
@@ -280,27 +320,62 @@ def finalize_due(result: Union[Plan, Rejection]) -> bool:
     return result.allowed and result.response != RESPONSE_PUBLISH_CONFIRMATION
 
 
-def release_info_from_env(env) -> ReleaseInfoResult:
+def release_info_from_state(state_outputs: dict) -> ReleaseInfoResult:
     """Rebuild a ReleaseInfoResult from the derive-release-state outputs."""
-    if env.get("CONFIG_ERROR"):
+    if state_outputs.get("config_error"):
         return ReleaseInfoResult(
             success=False,
             config_error=ConfigurationError(
-                error_type=env.get("CONFIG_ERROR_TYPE", ""),
-                message=env["CONFIG_ERROR"],
+                error_type=state_outputs.get("config_error_type", ""),
+                message=state_outputs["config_error"],
                 file_path=config.RELEASE_PLAN_FILE,
             ),
         )
-    state = env.get("STATE", "")
+    state = state_outputs.get("state", "")
     return ReleaseInfoResult(
         success=True,
-        release_tag=env.get("RELEASE_TAG", ""),
+        release_tag=state_outputs.get("release_tag", ""),
         state=ReleaseState(state) if state else None,
-        release_type=env.get("RELEASE_TYPE", ""),
+        release_type=state_outputs.get("release_type", ""),
     )
 
 
-def response_context(result: Union[Plan, Rejection], trigger: Trigger, env) -> dict:
+# Release references from derive-release-state that the snapshot, act and finalize jobs read
+STATE_REFS = (
+    "snapshot_branch",
+    "release_review_branch",
+    "release_pr_number",
+    "release_issue_number",
+    "src_commit_sha",
+    "commonalities_release",
+    "identity_consent_management_release",
+)
+
+
+def plan_document(
+    result: Union[Plan, Rejection],
+    trigger: Trigger,
+    state_outputs: dict,
+    cache: CommonCache,
+    base_context: dict,
+) -> dict:
+    """The plan job's one output: the decision, plus for a Plan what the later jobs read."""
+    document = json.loads(result.to_json())
+    if result.allowed:
+        document.update(
+            command_args=trigger.command_args,
+            issue_number=trigger.issue_number,
+            user=trigger.user,
+            **{name: state_outputs.get(name, "") for name in STATE_REFS},
+            common_cache_status=cache.status,
+            common_cache_details=cache.details,
+            common_sync_pr_url=cache.sync_pr_url,
+            base_context=base_context,
+        )
+    return document
+
+
+def response_context(result: Union[Plan, Rejection], trigger: Trigger, env, state_outputs: dict) -> dict:
     """Template variables the plan job's bot comment needs beyond the base context."""
     run_url = (
         f"{env.get('GITHUB_SERVER_URL', '')}/{env.get('GITHUB_REPOSITORY', '')}"
@@ -322,7 +397,7 @@ def response_context(result: Union[Plan, Rejection], trigger: Trigger, env) -> d
             "draft_release_url": (
                 f"{env.get('GITHUB_SERVER_URL', '')}/{env.get('GITHUB_REPOSITORY', '')}/releases"
             ),
-            "src_commit_sha_short": env.get("SRC_COMMIT_SHA", "")[:7],
+            "src_commit_sha_short": state_outputs.get("src_commit_sha", "")[:7],
         }
     return {}
 
@@ -332,12 +407,18 @@ def main(client=None) -> int:
 
     env = os.environ
     trigger = Trigger(**json.loads(env["TRIGGER_JSON"]))
-    release_info = release_info_from_env(env)
+    state_outputs = json.loads(env.get("STATE_JSON") or "{}")
+    release_info = release_info_from_state(state_outputs)
     cache = CommonCache(
         status=env.get("COMMON_CACHE_STATUS", ""),
         details=env.get("COMMON_CACHE_DETAILS", ""),
         sync_pr_url=env.get("COMMON_SYNC_PR_URL", ""),
     )
+    try:
+        base_context = json.loads(env.get("BASE_CONTEXT") or "{}")
+    except json.JSONDecodeError:
+        print("::warning::Invalid base_context JSON, ignoring")
+        base_context = {}
     if client is None:
         client = GitHubClient(repo=env["GITHUB_REPOSITORY"], token=env.get("GITHUB_TOKEN"))
 
@@ -347,23 +428,19 @@ def main(client=None) -> int:
 
     result = evaluate(trigger, release_info, cache, client=client)
     if result.allowed:
-        print("Command validated successfully")
+        print(f"Command validated successfully; action: {result.action or 'none'}")
     else:
         print(f"Rejected: {result.error_message}")
 
-    # allowed/error_message keep the meaning they had as Validate Command
-    # outputs: set for slash commands with a derived state, empty otherwise.
-    validated = trigger.trigger_type == TRIGGER_SLASH_COMMAND and release_info.success
     write_outputs(env["GITHUB_OUTPUT"], {
-        "allowed": ("true" if result.allowed else "false") if validated else "",
-        "error_message": result.error_message if validated and not result.allowed else "",
-        "plan": result.to_json(),
+        "plan": json.dumps(plan_document(result, trigger, state_outputs, cache, base_context)),
+        "action": result.action if result.allowed else "",
         "finalize": "true" if finalize_due(result) else "false",
         "response": result.response,
         "response_release_tag": (
             "unknown" if result.response == RESPONSE_CONFIG_ERROR else (release_info.release_tag or "")
         ),
-        "response_context": json.dumps(response_context(result, trigger, env)),
+        "response_context": json.dumps(response_context(result, trigger, env, state_outputs)),
     })
     return 0
 

@@ -24,17 +24,14 @@ from release_automation.scripts.finalize import (
 from release_automation.scripts.issue_sync import WorkflowSync
 from release_automation.scripts.sync_pr import SyncPrOutcome
 
-ACTION_JOBS = ("create-snapshot", "discard-snapshot", "delete-draft", "publish-release", "handle-pr-merge", "handle-issue-event")
-
 PLAN = {
     "trigger_type": "slash_command",
     "command": "create-snapshot",
     "command_args": "",
     "issue_number": "42",
     "user": "alice",
-    "allowed": "true",
-    "interim_posted": "true",
-    "config_error": "",
+    "allowed": True,
+    "action": "",
     "state": "planned",
     "release_tag": "r4.1",
     "release_issue_number": "42",
@@ -44,17 +41,25 @@ PLAN = {
     "common_cache_details": "",
     "common_sync_pr_url": "",
     "commonalities_release": "r4.3",
-    "base_context": json.dumps({"release_tag": "r4.1", "state": "planned"}),
-    "comment_id": "555",
+    "base_context": {"release_tag": "r4.1", "state": "planned"},
 }
 
 
 def make_run(plan=None, jobs=None, event=None):
-    needs = {"plan": {"result": "success", "outputs": {**PLAN, **(plan or {})}}}
-    for name in ACTION_JOBS:
-        needs[name] = {"result": "skipped", "outputs": {}}
-    for name, (result, outputs) in (jobs or {}).items():
-        needs[name] = {"result": result, "outputs": outputs}
+    """jobs: {action: (job result, outcome)} — at most one action per run."""
+    plan = {**PLAN, **(plan or {})}
+    result_comment_id = plan.pop("result_comment_id", "555")
+    needs = {
+        "snapshot": {"result": "skipped", "outputs": {}},
+        "act": {"result": "skipped", "outputs": {}},
+    }
+    for action, (result, outcome) in (jobs or {}).items():
+        plan["action"] = action
+        job = "snapshot" if action == "create-snapshot" else "act"
+        needs[job] = {"result": result, "outputs": {"outcome": json.dumps({"action": action, **outcome})} if outcome else {}}
+    needs["plan"] = {"result": "success", "outputs": {
+        "plan": json.dumps(plan), "action": plan["action"], "finalize": "true", "result_comment_id": result_comment_id,
+    }}
     return Run(
         needs=needs,
         event=event or {},
@@ -81,17 +86,20 @@ def failed(**outputs):
         ({}, {"create-snapshot": ok()}, True),
         ({}, {"discard-snapshot": ok()}, True),
         ({}, {"delete-draft": ok()}, True),
-        ({"trigger_type": "pr_merge"}, {"handle-pr-merge": ok()}, True),
-        ({"trigger_type": "issue_close"}, {"handle-issue-event": ("success", {"action_taken": "reopened"})}, True),
+        ({"trigger_type": "pr_merge"}, {"create-draft": ok()}, True),
+        ({"trigger_type": "issue_close", "command": ""}, {"reopen-issue": ok(action_taken="reopened")}, True),
+        ({"trigger_type": "issue_close", "command": ""}, {}, True),
+        ({"trigger_type": "issue_reopen", "command": ""}, {}, True),
         ({"command": "sync-issue"}, {}, True),
-        ({"trigger_type": "push", "command": "sync-issue", "allowed": ""}, {}, True),
+        ({"trigger_type": "push", "command": "sync-issue"}, {}, True),
         ({}, {"create-snapshot": failed()}, False),
         ({}, {"create-snapshot": ("failure", {"success": "true"})}, False),
-        ({"trigger_type": "pr_merge"}, {"handle-pr-merge": ("failure", {})}, False),
+        ({"trigger_type": "pr_merge"}, {"create-draft": ("failure", {})}, False),
+        ({"trigger_type": "issue_close", "command": ""}, {"reopen-issue": ("failure", {"success": "false"})}, False),
         # A publication never syncs the issue here; the published finalisation does.
         ({"command": "publish-release"}, {"publish-release": ok()}, False),
+        ({"trigger_type": "pr_merge"}, {"publish-on-merge": ok()}, False),
         ({"command": "sync-issue", "state": ""}, {}, False),
-        ({"command": "sync-issue", "config_error": "missing"}, {}, False),
     ],
 )
 def test_issue_sync_due(plan, jobs, due):
@@ -103,8 +111,7 @@ def test_issue_sync_due(plan, jobs, due):
     [
         ({}, True),
         ({"trigger_type": "push"}, False),
-        ({"allowed": "false"}, False),
-        ({"interim_posted": "false"}, False),
+        ({"result_comment_id": ""}, False),
     ],
 )
 def test_result_due(plan, due):
@@ -129,7 +136,7 @@ def test_overrides_after_create_snapshot():
 def test_overrides_after_draft_creation():
     run = make_run(
         {"trigger_type": "pr_merge"},
-        {"handle-pr-merge": ok(draft_release_url="https://github.com/camaraproject/Example/releases/tag/untagged-1")},
+        {"create-draft": ok(draft_release_url="https://github.com/camaraproject/Example/releases/tag/untagged-1")},
         event={"pull_request": {"number": 14}},
     )
 
@@ -318,10 +325,10 @@ def test_context_after_discard_without_rename():
     assert result_context(run, None) == {"reason": "No reason provided"}
 
 
-def publish(error_message=""):
-    return {"publish-release": ok(
+def publish(error_message="", reference_tag="src/r4.1", action="publish-release"):
+    return {action: ok(
         release_url="https://github.com/camaraproject/Example/releases/tag/r4.1",
-        reference_tag="src/r4.1",
+        reference_tag=reference_tag,
         error_message=error_message,
     )}
 
@@ -342,9 +349,7 @@ def test_context_after_publish():
 
 
 def test_context_after_publish_with_warnings():
-    run = make_run({"command": "publish-release"}, publish("Failed to create pointer branch"))
-    jobs_ref = run.needs["publish-release"]["outputs"]
-    jobs_ref["reference_tag"] = ""
+    run = make_run({"command": "publish-release"}, publish("Failed to create pointer branch", reference_tag=""))
 
     context = result_context(run, SyncPrOutcome(status="no_changes"))
 
@@ -504,7 +509,7 @@ def test_publish_with_failed_sync_pr_leaves_the_issue_open(stubs, tmp_path):
 def test_publish_without_interim_still_opens_the_sync_pr_only(stubs, tmp_path):
     gh = FakeGitHub()
 
-    run_finalize(make_run({**PUBLISH_PLAN, "interim_posted": "false"}, publish()), clients(gh, tmp_path))
+    run_finalize(make_run({**PUBLISH_PLAN, "result_comment_id": ""}, publish()), clients(gh, tmp_path))
 
     assert kinds(gh) == ["sync-pr"]
 
@@ -522,7 +527,7 @@ def test_result_comment_failure_skips_the_published_issue(stubs, tmp_path):
 def test_sync_issue_command(stubs, tmp_path):
     gh = FakeGitHub()
 
-    base = json.dumps({"release_tag": "r4.1", "command": "sync-issue", "user": "alice"})
+    base = {"release_tag": "r4.1", "command": "sync-issue", "user": "alice"}
     report = run_finalize(make_run({"command": "sync-issue", "base_context": base}), clients(gh, tmp_path))
 
     assert kinds(gh) == ["issue-sync", "update"]
@@ -534,7 +539,7 @@ def test_sync_issue_command(stubs, tmp_path):
 def test_stale_cache_runs_common_sync_before_the_issue_sync(stubs, tmp_path):
     gh = FakeGitHub()
     run = make_run({
-        "trigger_type": "push", "command": "sync-issue", "allowed": "", "interim_posted": "false",
+        "trigger_type": "push", "command": "sync-issue", "result_comment_id": "",
         "common_cache_status": "stale", "common_cache_details": "code/common/.sync-manifest.yaml is missing",
         "common_sync_pr_url": "",
     })
@@ -601,7 +606,36 @@ def test_main_exit_code(stubs, tmp_path, monkeypatch):
     event.write_text("{}")
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
     monkeypatch.setenv("GITHUB_REPOSITORY", "camaraproject/Example")
-    monkeypatch.setenv("NEEDS_JSON", json.dumps(make_run({"command": "sync-issue", "interim_posted": "false"}).needs))
+    monkeypatch.setenv("NEEDS_JSON", json.dumps(make_run({"command": "sync-issue", "result_comment_id": ""}).needs))
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
 
     assert finalize.main(clients(FakeGitHub(), tmp_path)) == 1
+
+
+# ── publish_mode on_merge ────────────────────────────────────────────────────
+
+MERGE_PLAN = {"trigger_type": "pr_merge", "command": "", "user": "bob", "issue_number": "", "state": "snapshot-active",
+              "result_comment_id": ""}
+
+
+def test_publish_on_merge_reports_on_the_release_issue_and_closes(stubs, tmp_path):
+    gh = FakeGitHub()
+
+    report = run_finalize(make_run(MERGE_PLAN, publish(action="publish-on-merge")), clients(gh, tmp_path))
+
+    assert kinds(gh) == ["sync-pr", "comment", "issue-body", "remove-labels", "add-labels", "close"]
+    _, issue, body = gh.events[1]
+    assert issue == 42
+    assert body.startswith("<!-- release-bot:r4.1 -->\n**🚀 Release published")
+    assert report.result_template == "release_published" and report.issue_finalized is True
+
+
+def test_failed_publish_on_merge_posts_publish_failed(stubs, tmp_path):
+    gh = FakeGitHub()
+    run = make_run(MERGE_PLAN, {"publish-on-merge": failed(error_message="Failed to publish release: 422")})
+
+    report = run_finalize(run, clients(gh, tmp_path))
+
+    assert kinds(gh) == ["comment"]
+    assert report.result_template == "publish_failed"
+    assert "Failed to publish release: 422" in gh.events[0][2]
