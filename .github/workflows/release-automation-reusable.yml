@@ -53,8 +53,6 @@ jobs:
       trigger_pr_number: ${{ steps.detect.outputs.trigger_pr_number }}
       trigger_pr_url: ${{ steps.detect.outputs.trigger_pr_url }}
       comment_id: ${{ steps.ack.outputs.comment_id }}
-      # Note: release_tag is NOT output here - it comes from derive-state job
-      # which reads from authoritative sources (release-plan.yaml or release-metadata.yaml)
     steps:
       - name: Fork Guard - Check Issues Enabled
         id: fork-guard
@@ -68,232 +66,33 @@ jobs:
             echo "::warning title=Issues disabled — Release Automation skipped::To use Release Automation here, enable Issues in repository Settings → General → Features. To stop Release Automation from running on this fork, disable the Release Automation workflow."
           fi
 
-      - name: Detect Trigger Type
-        id: detect
-        if: steps.fork-guard.outputs.issues_enabled == 'true'
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const eventName = context.eventName;
-            let triggerType = 'unknown';
-            let command = '';
-            let commandArgs = '';
-            let issueNumber = '';
-            let user = '';
-            let shouldContinue = 'false';
-            let confirmTag = '';
-
-            console.log(`Event: ${eventName}`);
-            console.log(`Action: ${context.payload.action || 'N/A'}`);
-
-            // Helper: Check if issue has release-issue label
-            function isReleaseIssue(labels) {
-              if (!labels) return false;
-              return labels.some(l => l.name === 'release-issue');
-            }
-
-            // NOTE: release_tag is NOT extracted here - it comes from derive-state job
-            // which reads from authoritative sources (release-plan.yaml or release-metadata.yaml)
-
-            // ─────────────────────────────────────────────────────────────────
-            // Event: issue_comment
-            // ─────────────────────────────────────────────────────────────────
-            if (eventName === 'issue_comment') {
-              const comment = context.payload.comment;
-              const issue = context.payload.issue;
-              const body = comment.body ? comment.body.trim() : '';
-
-              user = comment.user.login;
-              issueNumber = issue.number.toString();
-
-              // Check if this is a Release Issue
-              if (!isReleaseIssue(issue.labels)) {
-                console.log('Not a release issue, skipping');
-                core.setOutput('should_continue', 'false');
-                return;
-              }
-
-              // Parse slash commands. Each pattern anchors at start and
-              // requires either whitespace or end-of-string after the
-              // command so /create-snapshotextra does not match /create-snapshot.
-              //
-              // commandArgs is clamped to what follows on the SAME line as
-              // the command. Anything after the first newline is treated
-              // as free-form context and ignored. This clamp is for length
-              // and tidiness only — it does NOT sanitise shell metacharacters
-              // such as backticks or $(). Downstream shell steps that consume
-              // command_args (e.g. post-result's Resolve Reason) must pass it
-              // through step-level env: rather than via GitHub Actions
-              // expression interpolation.
-              const firstLine = body.split(/\r?\n/, 1)[0];
-
-              if (/^\/create-snapshot(?:\s|$)/.test(body)) {
-                triggerType = 'slash_command';
-                command = 'create-snapshot';
-                commandArgs = '';  // no arguments accepted
-                shouldContinue = 'true';
-              } else if (/^\/discard-snapshot(?:\s|$)/.test(body)) {
-                triggerType = 'slash_command';
-                command = 'discard-snapshot';
-                commandArgs = firstLine.replace(/^\/discard-snapshot/, '').trim();
-                shouldContinue = 'true';
-              } else if (/^\/delete-draft(?:\s|$)/.test(body)) {
-                triggerType = 'slash_command';
-                command = 'delete-draft';
-                commandArgs = firstLine.replace(/^\/delete-draft/, '').trim();
-                shouldContinue = 'true';
-              } else if (/^\/sync-issue(?:\s|$)/.test(body)) {
-                triggerType = 'slash_command';
-                command = 'sync-issue';
-                commandArgs = '';  // no arguments accepted
-                shouldContinue = 'true';
-              } else if (/^\/publish-release(?:\s|$)/.test(body)) {
-                triggerType = 'slash_command';
-                command = 'publish-release';
-                commandArgs = firstLine.replace(/^\/publish-release/, '').trim();
-                // Parse --confirm <tag> argument
-                const confirmMatch = commandArgs.match(/--confirm\s+(\S+)/);
-                confirmTag = confirmMatch ? confirmMatch[1] : '';
-                shouldContinue = 'true';
-              } else {
-                console.log('Comment is not a recognized slash command');
-              }
-            }
-
-            // ─────────────────────────────────────────────────────────────────
-            // Event: issues
-            // ─────────────────────────────────────────────────────────────────
-            else if (eventName === 'issues') {
-              const issue = context.payload.issue;
-              const action = context.payload.action;
-
-              user = issue.user.login;
-              issueNumber = issue.number.toString();
-
-              // Check if this is a Release Issue
-              if (!isReleaseIssue(issue.labels)) {
-                console.log('Not a release issue, skipping');
-                core.setOutput('should_continue', 'false');
-                return;
-              }
-
-              if (action === 'closed') {
-                triggerType = 'issue_close';
-                shouldContinue = 'true';
-              } else if (action === 'reopened') {
-                triggerType = 'issue_reopen';
-                shouldContinue = 'true';
-              }
-            }
-
-            // ─────────────────────────────────────────────────────────────────
-            // Event: pull_request
-            // ─────────────────────────────────────────────────────────────────
-            else if (eventName === 'pull_request') {
-              const pr = context.payload.pull_request;
-              const action = context.payload.action;
-
-              // Only handle merged PRs to release-snapshot branches
-              if (action === 'closed' && pr.merged) {
-                const baseBranch = pr.base.ref;
-
-                if (baseBranch.startsWith('release-snapshot/')) {
-                  triggerType = 'pr_merge';
-                  user = pr.merged_by ? pr.merged_by.login : pr.user.login;
-                  shouldContinue = 'true';
-                }
-              }
-            }
-
-            // ─────────────────────────────────────────────────────────────────
-            // Event: workflow_dispatch (sync-issue only)
-            // ─────────────────────────────────────────────────────────────────
-            else if (eventName === 'workflow_dispatch') {
-              triggerType = 'workflow_dispatch';
-              command = 'sync-issue';  // hardcode to sync-issue only
-              commandArgs = '';  // No args needed for sync-issue
-              user = context.actor;
-
-              // For workflow_dispatch, release_tag will be populated by derive-state
-              shouldContinue = 'true';
-            }
-
-            // ─────────────────────────────────────────────────────────────────
-            // Event: push (release-plan.yaml, code/common, or the caller
-            // workflow itself changed on main)
-            // ─────────────────────────────────────────────────────────────────
-            else if (eventName === 'push') {
-              // Classify by which paths changed
-              const changedFiles = (context.payload.commits || [])
-                .flatMap(c => [...(c.added || []), ...(c.modified || []), ...(c.removed || [])]);
-              const hasReleasePlanChange = changedFiles.includes('release-plan.yaml');
-
-              triggerType = hasReleasePlanChange ? 'release_plan_change' : 'push';
-              command = 'sync-issue';
-              user = context.actor;
-              shouldContinue = 'true';
-
-              // Look up the merged PR via commit SHA
-              const headSha = context.payload.head_commit?.id || context.sha;
-              try {
-                const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  commit_sha: headSha,
-                });
-                const mergedPr = prs.find(pr => pr.merged_at);
-                if (mergedPr) {
-                  core.setOutput('trigger_pr_number', mergedPr.number.toString());
-                  core.setOutput('trigger_pr_url', mergedPr.html_url);
-                  console.log(`Found merged PR: #${mergedPr.number}`);
-                }
-              } catch (e) {
-                console.log(`Warning: Could not look up PR: ${e.message}`);
-              }
-            }
-
-            // Set defaults for trigger_pr outputs (push handler sets them above if found)
-            if (eventName !== 'push') {
-              core.setOutput('trigger_pr_number', '');
-              core.setOutput('trigger_pr_url', '');
-            }
-
-            // Output results
-            console.log(`Trigger type: ${triggerType}`);
-            console.log(`Command: ${command}`);
-            console.log(`Command args: ${commandArgs}`);
-            console.log(`Issue number: ${issueNumber}`);
-            console.log(`User: ${user}`);
-            console.log(`Should continue: ${shouldContinue}`);
-            console.log(`Confirm tag: ${confirmTag}`);
-            console.log('Note: release_tag will come from derive-state job');
-
-            core.setOutput('trigger_type', triggerType);
-            core.setOutput('command', command);
-            core.setOutput('command_args', commandArgs);
-            core.setOutput('issue_number', issueNumber);
-            core.setOutput('user', user);
-            core.setOutput('should_continue', shouldContinue);
-            core.setOutput('confirm_tag', confirmTag);
-
-      # Post early acknowledgment for slash commands (within check-trigger to avoid runner cold-start)
-      # This comment is later updated by post-interim (valid) or post-rejection (rejected).
-      # Uses GITHUB_TOKEN (not App token) to avoid triggering extra workflow runs.
+      # Post early acknowledgment for slash commands, before any checkout so it
+      # lands within seconds. Later updated by post-interim (valid) or
+      # post-rejection (rejected). Uses GITHUB_TOKEN (not App token) to avoid
+      # triggering extra workflow runs. The command list mirrors SLASH_COMMANDS
+      # in release_automation/scripts/trigger.py (checked by a pytest).
       - name: Post Acknowledgment
         id: ack
-        if: steps.detect.outputs.trigger_type == 'slash_command'
+        if: |
+          steps.fork-guard.outputs.issues_enabled == 'true' &&
+          github.event_name == 'issue_comment' &&
+          contains(github.event.issue.labels.*.name, 'release-issue')
         continue-on-error: true
         uses: actions/github-script@v9
         with:
           github-token: ${{ github.token }}
           script: |
-            const command = '${{ steps.detect.outputs.command }}';
-            const user = '${{ steps.detect.outputs.user }}';
-            const issueNumber = parseInt('${{ steps.detect.outputs.issue_number }}');
+            const body = (context.payload.comment.body || '').trim();
+            const match = body.match(/^\/(create-snapshot|discard-snapshot|delete-draft|sync-issue|publish-release)(?:\s|$)/);
+            if (!match) return;
+
+            const command = match[1];
+            const user = context.payload.comment.user.login;
+            const issueNumber = context.payload.issue.number;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const marker = `<!-- release-bot:ack:${context.runId} -->`;
 
-            const body = [
+            const ackBody = [
               marker,
               `**\u23F3 Validating \`/${command}\`...**`,
               `**Requested by:** @${user} \u00B7 [View workflow run](${runUrl})`,
@@ -305,11 +104,45 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
-              body: body
+              body: ackBody
             });
 
             console.log(`Ack comment created: ${result.data.id}`);
             core.setOutput('comment_id', result.data.id.toString());
+
+      - name: Checkout tooling
+        if: steps.fork-guard.outputs.issues_enabled == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: _tooling
+          sparse-checkout: |
+            release_automation
+            shared-actions
+            tooling_lib
+            validation
+            linting/config
+
+      - name: Setup Python
+        if: steps.fork-guard.outputs.issues_enabled == 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        if: steps.fork-guard.outputs.issues_enabled == 'true'
+        run: pip install --quiet -r _tooling/requirements.txt
+
+      # release_tag is NOT output here - it comes from derive-state, which reads
+      # the authoritative sources (release-plan.yaml or release-metadata.yaml).
+      - name: Detect Trigger Type
+        id: detect
+        if: steps.fork-guard.outputs.issues_enabled == 'true'
+        working-directory: _tooling
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -m release_automation.scripts.trigger
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 2: Derive current state (runs first to get release_tag from artifacts)
