@@ -16,7 +16,7 @@ This document defines the required configuration for each API repository. It ser
 
 | Item | Mechanism |
 |------|-----------|
-| 6 labels | Auto-created on first use (`release-issue` + 5 state labels) |
+| 9 labels | Created on first use if missing, never modified: `release-issue` + 5 state labels on the Release Issue; `common-sync`, `post-release`, `automated` on sync PRs |
 | Concurrency | `concurrency:` block in reusable workflow (one run per repo) |
 | Permissions | `permissions:` block in caller workflow |
 

@@ -40,6 +40,8 @@ class FakeGitHub:
         self.fail_labels = fail_labels
         self.created = []
         self.labelled = []
+        self.labels = set()
+        self.created_labels = []
 
     def get_file_content(self, path, ref="main", strict=False):
         return self.files.get((ref, path))
@@ -52,6 +54,13 @@ class FakeGitHub:
             raise GitHubClientError("gh command failed: pull request create failed")
         self.created.append({"title": title, "body": body, "head": head, "base": base})
         return 31, "https://github.com/camaraproject/Example/pull/31"
+
+    def get_label(self, name):
+        return {"name": name} if name in self.labels else None
+
+    def create_label(self, name, color, description=""):
+        self.labels.add(name)
+        self.created_labels.append(name)
 
     def add_pr_labels(self, pr_number, labels):
         if self.fail_labels:
@@ -103,6 +112,7 @@ def test_readme_block_and_cycle_changelog_from_tag(tmp_path, remote):
         "head": "pr-to-main/r1.3",
         "base": "main",
     }]
+    assert gh.created_labels == ["post-release", "automated"]
     assert gh.labelled == [(31, ["post-release", "automated"])]
 
 
@@ -177,10 +187,11 @@ def test_pr_creation_failure_is_failed(tmp_path, remote, capsys):
     assert "::error::Failed to create post-release sync PR" in capsys.readouterr().out
 
 
-def test_label_failure_is_ignored(tmp_path, remote):
+def test_label_failure_is_a_warning(tmp_path, remote, capsys):
     gh = FakeGitHub(files=tag_files(**{"README.md": TAG_README}), fail_labels=True)
 
     assert run(tmp_path, remote, gh).status == "created"
+    assert "::warning::Could not add labels post-release, automated to #31" in capsys.readouterr().out
 
 
 def test_clone_failure_is_failed(tmp_path, capsys):

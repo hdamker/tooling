@@ -18,6 +18,7 @@ from typing import List, Optional
 
 from .git_operations import GitOperationsError
 from .github_client import GitHubClientError
+from .labels import add_pr_labels
 
 RELEASE_INFO_START = "<!-- CAMARA:RELEASE-INFO:START -->"
 RELEASE_INFO_END = "<!-- CAMARA:RELEASE-INFO:END -->"
@@ -174,9 +175,6 @@ def create_sync_pr(gh, git, tag: str, bot_name: str, bot_email: str) -> SyncPrOu
         print(f"PR creation failed: {e}")
         return _failed()
 
-    try:
-        gh.add_pr_labels(number, PR_LABELS)
-    except GitHubClientError as e:
-        print(f"Could not add labels: {e}")
+    add_pr_labels(gh, number, PR_LABELS)
     print(f"Sync PR created: {url}")
     return SyncPrOutcome(status="created", pr_url=url, pr_number=str(number))

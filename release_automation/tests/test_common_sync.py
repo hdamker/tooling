@@ -173,6 +173,8 @@ class FakeGitHub:
         self.closed = []
         self.created = []
         self.labelled = []
+        self.labels = {"automated"}
+        self.created_labels = []
 
     def find_open_pr(self, head_branch):
         for pr in self.prs:
@@ -193,6 +195,13 @@ class FakeGitHub:
             raise GitHubClientError("gh command failed: create")
         self.created.append({"title": title, "body": body, "head": head, "base": base})
         return 40, "https://github.com/camaraproject/Example/pull/40"
+
+    def get_label(self, name):
+        return {"name": name} if name in self.labels else None
+
+    def create_label(self, name, color, description=""):
+        self.labels.add(name)
+        self.created_labels.append(name)
 
     def add_pr_labels(self, pr_number, labels):
         self.labelled.append((pr_number, list(labels)))
@@ -314,6 +323,7 @@ def test_sync_copies_files_writes_manifest_and_opens_pr(tmp_path, remotes):
         "head": branch,
         "base": "main",
     }]
+    assert gh.created_labels == ["common-sync"]
     assert gh.labelled == [(40, ["common-sync", "automated"])]
 
 
