@@ -193,7 +193,7 @@ Installed at `.github/workflows/release-automation.yml`. Key configuration:
 
 | Aspect | Value | Purpose |
 |--------|-------|---------|
-| **Permissions** | `contents: write`, `issues: write`, `pull-requests: write`, `id-token: write` | Branch / release ops, issue management, PR creation, OIDC claim access for tooling checkout consistency |
+| **Permissions** | `contents: write`, `issues: write`, `pull-requests: write`, `id-token: write` | Branch / release ops, issue management, PR creation, `id-token: write` is retained by the template but no longer read by the release automation workflow |
 | **Concurrency** | `release-automation-${{ github.repository }}`, `cancel-in-progress: false` | Serialize runs, prevent race conditions |
 | **Triggers** | `issue_comment`, `issues`, `pull_request` (on `release-snapshot/**`), `push` (on `main`), `workflow_dispatch` | Slash commands, lifecycle events, auto-sync, manual |
 
@@ -208,9 +208,9 @@ Installed at `.github/workflows/camara-validation.yml`. Runs validation on PRs a
 
 ### Reusable-workflow checkout consistency
 
-Both reusable workflows derive their tooling checkout (Python scripts, shared actions) from OIDC claims on the caller's `id-token: write` — guaranteeing that helper code ships from the same repository + commit as the workflow itself, even when callers reference floating tags such as `@v1-rc` or `@v1`.
+The release automation workflow takes its tooling checkout (Python scripts, shared actions) from the `job` context (`job.workflow_repository`, `job.workflow_sha`) — guaranteeing that helper code ships from the same repository + commit as the workflow itself, even when callers reference floating tags such as `@v1-rc` or `@v1`. There is no caller-side override; testing a branch or a fork means pointing the caller's `uses:` at it.
 
-For break-glass or testing, the release-automation caller can set `with.tooling_ref_override` to a full 40-character SHA. No caller-side repository override is needed for fork testing — OIDC handles it.
+The validation workflow still derives its tooling checkout from OIDC claims on the caller's `id-token: write` and accepts `with.tooling_ref_override` (a full 40-character SHA) for break-glass or testing.
 
 ---
 

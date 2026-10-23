@@ -140,6 +140,7 @@ jobs:
             -pyflakes=
             -ignore 'missing input "app-id" which is required by action "actions/create-github-app-token@v3"'
             -ignore 'input "client-id" is not defined in action "actions/create-github-app-token@v3"'
+            -ignore 'property "workflow_(repository|sha)" is not defined in object type'
             -format '{{json .}}'
           )
 
