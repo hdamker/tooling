@@ -1173,7 +1173,8 @@ class GitHubClient:
             return True
         except GitHubClientError as e:
             error_msg = str(e).lower()
-            if "404" in error_msg or "not found" in error_msg:
+            # A DELETE on a missing ref answers 422 "Reference does not exist", not 404
+            if "404" in error_msg or "not found" in error_msg or "reference does not exist" in error_msg:
                 return False
             raise
 

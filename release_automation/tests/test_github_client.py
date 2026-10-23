@@ -70,6 +70,22 @@ class TestGitHubClient(unittest.TestCase):
         self.assertEqual(branches[1].sha, "sha2")
 
     @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_delete_branch(self, mock_run_gh):
+        mock_run_gh.return_value = ""
+        self.assertTrue(self.client.delete_branch("feature"))
+
+        # GitHub answers a DELETE on a missing ref with 422, not 404
+        mock_run_gh.side_effect = GitHubClientError("gh: Reference does not exist (HTTP 422)")
+        self.assertFalse(self.client.delete_branch("missing"))
+
+        mock_run_gh.side_effect = GitHubClientError("gh: Not Found (HTTP 404)")
+        self.assertFalse(self.client.delete_branch("missing"))
+
+        mock_run_gh.side_effect = GitHubClientError("gh: Resource not accessible by integration (HTTP 403)")
+        with self.assertRaises(GitHubClientError):
+            self.client.delete_branch("protected")
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
     def test_get_file_content(self, mock_run_gh):
         mock_run_gh.return_value = "file content"
         content = self.client.get_file_content("path/to/file")
