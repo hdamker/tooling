@@ -69,7 +69,7 @@ def test_tooling_checkouts_resolve_through_job_context():
         and step.get("with", {}).get("path") == "_tooling"
     ]
 
-    assert len(checkouts) == 12
+    assert len(checkouts) == 7
     for step in checkouts:
         assert step["with"]["repository"] == "${{ job.workflow_repository }}"
         assert step["with"]["ref"] == "${{ job.workflow_sha }}"
@@ -95,8 +95,8 @@ def _job_steps(job: str) -> list[dict]:
     return workflow["jobs"][job]["steps"]
 
 
-def test_check_trigger_acks_before_checkout_then_runs_trigger_module():
-    steps = _job_steps("check-trigger")
+def test_plan_acks_before_checkout_then_runs_trigger_module():
+    steps = _job_steps("plan")
     names = [step.get("name") for step in steps]
 
     assert names.index("Post Acknowledgment") < names.index("Checkout tooling")
@@ -110,7 +110,7 @@ def test_check_trigger_acks_before_checkout_then_runs_trigger_module():
 
 
 def test_ack_command_list_matches_trigger_module():
-    ack = _step_by_name(_job_steps("check-trigger"), "Post Acknowledgment")
+    ack = _step_by_name(_job_steps("plan"), "Post Acknowledgment")
     script = ack["with"]["script"]
 
     match = re.search(r"body\.match\(/\^\\/\(([a-z|-]+)\)", script)
@@ -120,17 +120,52 @@ def test_ack_command_list_matches_trigger_module():
     assert "steps." not in script
 
 
-def test_validate_command_runs_command_policy_module():
+def test_plan_runs_policy_then_one_response():
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    assert workflow["jobs"]["check-trigger"]["outputs"]["trigger"] == (
-        "${{ steps.detect.outputs.trigger }}"
-    )
+    plan = workflow["jobs"]["plan"]
+    names = [step.get("name") for step in plan["steps"]]
 
-    validate = _step_by_name(_job_steps("derive-state"), "Validate Command")
-    assert validate["working-directory"] == "_tooling"
-    assert validate["run"].strip() == "python -m release_automation.scripts.command_policy"
-    assert validate["env"]["TRIGGER_JSON"] == "${{ needs.check-trigger.outputs.trigger }}"
-    assert validate["env"]["COMMON_CACHE_STATUS"] == (
-        "${{ steps.cache-sync.outputs.common_cache_status }}"
-    )
-    assert "uses" not in validate
+    order = [
+        "Detect Trigger Type",
+        "Derive Release State",
+        "Check common cache sync",
+        "Find existing sync PR",
+        "Apply Command Policy",
+        "Assemble Context",
+        "Post Response",
+    ]
+    assert [n for n in names if n in order] == order
+
+    policy = _step_by_name(plan["steps"], "Apply Command Policy")
+    assert policy["run"].strip() == "python -m release_automation.scripts.command_policy"
+    assert policy["env"]["TRIGGER_JSON"] == "${{ steps.detect.outputs.trigger }}"
+    cache = _step_by_name(plan["steps"], "Check common cache sync")
+    assert cache["run"].strip() == "python -m release_automation.scripts.common_sync"
+
+    respond = _step_by_name(plan["steps"], "Post Response")
+    assert respond["uses"] == "./_tooling/shared-actions/post-bot-comment"
+    assert respond["with"]["template"] == "${{ steps.policy.outputs.response }}"
+    assert respond["with"]["context"] == "${{ steps.policy.outputs.response_context }}"
+    assert plan["outputs"]["plan"] == "${{ steps.policy.outputs.plan }}"
+
+    # The ack is the only inline script left in plan.
+    scripts = [s for s in plan["steps"] if str(s.get("uses", "")).startswith("actions/github-script")]
+    assert [s["name"] for s in scripts] == ["Post Acknowledgment"]
+
+
+def test_folded_jobs_are_gone_and_compat_outputs_cover_every_reader():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    workflow = yaml.safe_load(text)
+    jobs = workflow["jobs"]
+
+    for gone in ("check-trigger", "derive-state", "handle-config-error",
+                 "post-interim", "post-rejection", "publish-confirmation"):
+        assert gone not in jobs
+        assert f"needs.{gone}." not in text
+
+    read = set(re.findall(r"needs\.plan\.outputs\.([a-z_]+)", text))
+    assert read <= set(jobs["plan"]["outputs"])
+    for name, job in jobs.items():
+        if name != "plan":
+            needs = job.get("needs", [])
+            assert "plan" in ([needs] if isinstance(needs, str) else needs), name

@@ -494,8 +494,12 @@ def run_main(tmp_path, monkeypatch, trigger, env, client):
     monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
     monkeypatch.setenv("TRIGGER_JSON", json.dumps(trigger.__dict__))
     for name in ("STATE", "RELEASE_TAG", "RELEASE_TYPE", "CONFIG_ERROR", "CONFIG_ERROR_TYPE",
-                 "COMMON_CACHE_STATUS", "COMMON_CACHE_DETAILS", "COMMON_SYNC_PR_URL"):
+                 "COMMON_CACHE_STATUS", "COMMON_CACHE_DETAILS", "COMMON_SYNC_PR_URL",
+                 "SRC_COMMIT_SHA"):
         monkeypatch.setenv(name, env.get(name, ""))
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "camaraproject/ReleaseTest2")
+    monkeypatch.setenv("GITHUB_RUN_ID", "123")
     policy.main(client=client)
 
     from release_automation.tests.test_trigger import read_outputs
@@ -527,7 +531,7 @@ def test_main_writes_rejection_with_cache_inputs(tmp_path, monkeypatch):
     assert json.loads(out["plan"])["allowed"] is False
 
 
-def test_main_config_error(tmp_path, monkeypatch):
+def test_main_config_error_plan(tmp_path, monkeypatch):
     out = run_main(
         tmp_path, monkeypatch, slash("sync-issue"),
         {"CONFIG_ERROR": "release-plan.yaml not found", "CONFIG_ERROR_TYPE": "missing_file"},
@@ -540,3 +544,86 @@ def test_main_config_error(tmp_path, monkeypatch):
         "response": "config_error",
         "error_type": "missing_file",
     }
+
+
+def test_main_publish_confirmation_response(tmp_path, monkeypatch):
+    out = run_main(
+        tmp_path, monkeypatch, publish(confirm_tag=""),
+        {"STATE": "draft-ready", "RELEASE_TAG": "r1.2", "SRC_COMMIT_SHA": "abcdef0123456789"},
+        FakeClient(permissions={"alice": "write"}),
+    )
+
+    assert out["response"] == "publish_confirmation"
+    assert out["response_release_tag"] == "r1.2"
+    assert json.loads(out["response_context"]) == {
+        "draft_release_url": "https://github.com/camaraproject/ReleaseTest2/releases",
+        "src_commit_sha_short": "abcdef0",
+    }
+
+
+def test_main_rejection_response_context_is_valid_json(tmp_path, monkeypatch):
+    out = run_main(
+        tmp_path, monkeypatch, publish(confirm_tag='r"1'),
+        {"STATE": "draft-ready", "RELEASE_TAG": "r1.2"},
+        FakeClient(permissions={"alice": "write"}),
+    )
+
+    assert out["response"] == "command_rejected"
+    assert json.loads(out["response_context"]) == {"error_message": out["error_message"]}
+
+
+def test_main_interim_response(tmp_path, monkeypatch):
+    out = run_main(
+        tmp_path, monkeypatch, slash("sync-issue"), {"STATE": "planned", "RELEASE_TAG": "r1.2"},
+        FakeClient(permissions={"alice": "write"}),
+    )
+
+    assert (out["response"], out["response_context"], out["response_release_tag"]) == (
+        "interim_processing", "{}", "r1.2"
+    )
+
+
+def test_main_config_error_response(tmp_path, monkeypatch):
+    out = run_main(
+        tmp_path, monkeypatch, slash("create-snapshot"),
+        {"CONFIG_ERROR": "release-plan.yaml not found", "CONFIG_ERROR_TYPE": "missing_file"},
+        FakeClient(),
+    )
+
+    # allowed/error_message stay empty on a config error, as when Validate
+    # Command was skipped; the config_error template answers instead.
+    assert (out["allowed"], out["error_message"]) == ("", "")
+    assert out["response"] == "config_error"
+    assert out["response_release_tag"] == "unknown"
+    assert json.loads(out["response_context"]) == {
+        "error_type": "missing_file",
+        "error_message": "release-plan.yaml not found",
+        "command": "create-snapshot",
+        "user": "alice",
+        "workflow_run_url": "https://github.com/camaraproject/ReleaseTest2/actions/runs/123",
+    }
+
+
+@pytest.mark.parametrize(
+    "trigger",
+    [
+        Trigger(trigger_type="push", command="sync-issue", user="x", should_continue=True),
+        Trigger(trigger_type="issue_close", issue_number="42", user="x", should_continue=True),
+    ],
+)
+def test_main_non_slash_trigger_leaves_allowed_empty(tmp_path, monkeypatch, trigger):
+    out = run_main(tmp_path, monkeypatch, trigger, {"STATE": "planned", "RELEASE_TAG": "r1.2"}, FakeClient())
+
+    assert (out["allowed"], out["error_message"], out["response"]) == ("", "", "")
+    assert json.loads(out["plan"])["allowed"] is True
+
+
+def test_main_non_slash_config_error(tmp_path, monkeypatch):
+    out = run_main(
+        tmp_path, monkeypatch,
+        Trigger(trigger_type="push", command="sync-issue", should_continue=True),
+        {"CONFIG_ERROR": "bad", "CONFIG_ERROR_TYPE": "malformed_yaml"}, FakeClient(),
+    )
+
+    assert (out["allowed"], out["response"]) == ("", "")
+    assert json.loads(out["plan"])["error_type"] == "malformed_yaml"
