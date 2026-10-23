@@ -129,7 +129,6 @@ def test_plan_runs_policy_then_one_response():
         "Detect Trigger Type",
         "Derive Release State",
         "Check common cache sync",
-        "Find existing sync PR",
         "Apply Command Policy",
         "Assemble Context",
         "Post Response",
@@ -141,6 +140,9 @@ def test_plan_runs_policy_then_one_response():
     assert policy["env"]["TRIGGER_JSON"] == "${{ steps.detect.outputs.trigger }}"
     cache = _step_by_name(plan["steps"], "Check common cache sync")
     assert cache["run"].strip() == "python -m release_automation.scripts.common_sync"
+    # The existing-PR lookup is part of common_sync (exact sync-common/<release> head).
+    assert policy["env"]["COMMON_SYNC_PR_URL"] == "${{ steps.cache-sync.outputs.common_sync_pr_url }}"
+    assert cache["env"]["ICM_RELEASE"] == "${{ steps.state.outputs.identity_consent_management_release }}"
 
     respond = _step_by_name(plan["steps"], "Post Response")
     assert respond["uses"] == "./_tooling/shared-actions/post-bot-comment"

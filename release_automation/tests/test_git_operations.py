@@ -392,3 +392,56 @@ class TestConfigureUser:
         email_call = calls[1][0][0]
         assert "user.email" in email_call
         assert "bot@example.com" in email_call
+
+
+class TestLocalRemote:
+    """Clone, reset branch, change detection and force push against a local bare repository."""
+
+    def test_clone_shallow_from_remote_url(self, tmp_path):
+        from release_automation.tests.local_git import git, git_ops, make_remote
+        remote = make_remote(tmp_path, "r", {"a.txt": "a\n"}, tag="r1.1")
+
+        ops = git_ops(remote, tmp_path / "work")
+        ops.clone("r1.1", depth=1)
+
+        assert (tmp_path / "work" / "a.txt").read_text() == "a\n"
+        assert git(tmp_path / "work", "rev-parse", "--is-shallow-repository") == "true"
+
+    def test_reset_branch_keeps_working_tree_changes(self, tmp_path):
+        from release_automation.tests.local_git import git_ops, make_remote
+        remote = make_remote(tmp_path, "r", {"a.txt": "a\n"})
+        ops = git_ops(remote, tmp_path / "work")
+        ops.clone("main")
+        ops.create_branch("sync/x")
+        ops.checkout("main")
+        (tmp_path / "work" / "a.txt").write_text("changed\n")
+
+        ops.create_branch("sync/x", reset=True)
+
+        assert ops.has_changes()
+        assert ops.has_changes("a.txt")
+        assert not ops.has_changes("b")
+
+    def test_has_changes_on_clean_tree(self, tmp_path):
+        from release_automation.tests.local_git import git_ops, make_remote
+        ops = git_ops(make_remote(tmp_path, "r", {"a.txt": "a\n"}), tmp_path / "work")
+        ops.clone("main")
+
+        assert not ops.has_changes()
+
+    def test_force_push_replaces_remote_branch(self, tmp_path):
+        from release_automation.tests.local_git import git, git_ops, make_remote, push_branch
+        remote = make_remote(tmp_path, "r", {"a.txt": "a\n"})
+        push_branch(remote, tmp_path, "sync/x", {"a.txt": "old\n"})
+        ops = git_ops(remote, tmp_path / "work")
+        ops.clone("main")
+        ops.configure_user("bot", "bot@example.com")
+        ops.create_branch("sync/x", reset=True)
+        (tmp_path / "work" / "a.txt").write_text("new\n")
+        ops.commit_all("sync")
+
+        with pytest.raises(PushError):
+            ops.push("sync/x", set_upstream=False)
+        ops.push("sync/x", set_upstream=False, force=True)
+
+        assert git(remote, "show", "sync/x:a.txt") == "new"

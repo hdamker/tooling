@@ -11,7 +11,7 @@ import json
 import subprocess
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
@@ -561,6 +561,94 @@ class GitHubClient:
             return int(output.strip()) if output.strip() else None
         except (GitHubClientError, ValueError):
             return None
+
+    def find_open_pr(self, head_branch: str) -> Optional[Tuple[int, str]]:
+        """
+        Find the open PR whose head is exactly head_branch.
+
+        Returns:
+            (PR number, PR URL), or None if there is none or the lookup fails
+        """
+        try:
+            output = self._run_gh([
+                "pr", "list",
+                "--repo", self.repo,
+                "--head", head_branch,
+                "--state", "open",
+                "--json", "number,url",
+            ])
+            prs = json.loads(output or "[]")
+        except (GitHubClientError, ValueError) as e:
+            print(f"Warning: Could not look up PR for {head_branch}: {e}")
+            return None
+        return (prs[0]["number"], prs[0]["url"]) if prs else None
+
+    def list_open_prs(self) -> List[Dict[str, Any]]:
+        """
+        List open PRs.
+
+        Returns:
+            Dicts with number, head (branch name) and url
+        """
+        output = self._run_gh([
+            "pr", "list",
+            "--repo", self.repo,
+            "--state", "open",
+            "--limit", "100",
+            "--json", "number,headRefName,url",
+        ])
+        return [
+            {"number": pr["number"], "head": pr["headRefName"], "url": pr["url"]}
+            for pr in json.loads(output or "[]")
+        ]
+
+    def create_pr(self, title: str, body: str, head: str, base: str) -> Tuple[int, str]:
+        """
+        Open a PR from a branch of this repository.
+
+        Returns:
+            (PR number, PR URL)
+
+        Raises:
+            GitHubClientError: If creation fails or the URL cannot be parsed
+        """
+        output = self._run_gh([
+            "pr", "create",
+            "--repo", self.repo,
+            "--title", title,
+            "--body", body,
+            "--head", head,
+            "--base", base,
+        ])
+        url = output.strip()
+        try:
+            return int(url.rstrip("/").split("/")[-1]), url
+        except ValueError:
+            raise GitHubClientError(f"Failed to parse PR number from: {url}")
+
+    def add_pr_labels(self, pr_number: int, labels: List[str]) -> None:
+        """
+        Add existing labels to a PR (fails if a label does not exist).
+
+        Raises:
+            GitHubClientError: If the edit fails
+        """
+        args = ["pr", "edit", str(pr_number), "--repo", self.repo]
+        for label in labels:
+            args.extend(["--add-label", label])
+        self._run_gh(args)
+
+    def close_pr(self, pr_number: int, comment: str = "") -> None:
+        """
+        Close a PR without merging, optionally with a comment.
+
+        Raises:
+            GitHubClientError: If closing fails
+        """
+        args = ["pr", "close", str(pr_number), "--repo", self.repo]
+        if comment:
+            args.extend(["--comment", comment])
+        self._run_gh(args)
 
     # -------------------------------------------------------------------------
     # Retry helper for eventual consistency

@@ -3,27 +3,47 @@ Common-file sync for CAMARA release automation.
 
 Detection: compare an API repository's code/common/ cache with the
 Commonalities release it declares (tooling_lib.cache_sync). The plan job uses
-the result to block /create-snapshot on a stale cache and to feed the drift
-warning. Repair (rebuilding the cache and its sync PR) still runs inline in the
-workflow.
+the result to block /create-snapshot on a stale cache and to show the cache
+state on the Release Issue.
 
-This module depends only on tooling_lib.cache_sync; the release-state gate
-stays with the caller.
+Sync: copy artifacts/common/*.yaml of that release into code/common/, write
+the sync manifest, rebuild the sync-common/<release> branch from main and
+open (or reuse) its PR.
 
-Usage (workflow step):
+The interface takes a git client and a GitHub client and no release-automation
+types, so the module can move to a repository-reconcile workflow; the
+release-state gate stays with the caller.
+
+Usage (workflow step, detection):
     python3 -m release_automation.scripts.common_sync
 """
 
 import os
 import re
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Dict, List, Tuple
 
-from tooling_lib.cache_sync import SyncStatus, check_sync_status
+import yaml
+
+from release_automation.scripts.git_operations import GitOperationsError
+from tooling_lib.cache_sync import (
+    COMMON_DIR,
+    MANIFEST_FILENAME,
+    SyncStatus,
+    check_sync_status,
+    git_blob_sha,
+)
 
 # Releases before r4.2 have no sync manifest to check against.
 FIRST_CHECKED_RELEASE = (4, 2)
+
+COMMONALITIES = "Commonalities"
+ICM = "IdentityAndConsentManagement"
+SYNC_BRANCH_PREFIX = "sync-common/"
+PR_LABELS = ["common-sync", "automated"]
 
 
 @dataclass(frozen=True)
@@ -52,13 +72,36 @@ def describe(status: SyncStatus) -> str:
     return "; ".join(parts) if parts else "cache mismatch detected"
 
 
-def detect(api_repo: Path, commonalities_release: str) -> CacheCheck:
+def _manifest_repositories(api_repo: Path) -> List[str]:
+    try:
+        manifest = yaml.safe_load((api_repo / COMMON_DIR / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+        return [s.get("repository") for s in manifest["sources"] if isinstance(s, dict)]
+    except (OSError, yaml.YAMLError, KeyError, TypeError):
+        return []
+
+
+def expected_releases(api_repo: Path, commonalities_release: str, icm_release: str = "") -> Dict[str, str]:
     """
-    Check code/common/ against the declared Commonalities release.
+    Source releases code/common/ must match.
+
+    The ICM release counts only once the manifest records ICM files: ICM
+    publishes no common artifacts today, so requiring it would leave every
+    cache stale with no common sync able to fix it.
+    """
+    expected = {COMMONALITIES: commonalities_release}
+    if icm_release and ICM in _manifest_repositories(api_repo):
+        expected[ICM] = icm_release
+    return expected
+
+
+def detect(api_repo: Path, commonalities_release: str, icm_release: str = "") -> CacheCheck:
+    """
+    Check code/common/ against the declared Commonalities (and ICM) release.
 
     Args:
         api_repo: Checkout of the API repository (code/common/ is enough)
         commonalities_release: Declared release, e.g. "r4.2"
+        icm_release: Declared ICM release (see expected_releases)
 
     Returns:
         CacheCheck; empty status when the release is unparsable or before r4.2
@@ -71,7 +114,7 @@ def detect(api_repo: Path, commonalities_release: str) -> CacheCheck:
         print(f"commonalities_release {commonalities_release} < r4.2, skipping cache check")
         return CacheCheck()
 
-    status = check_sync_status(api_repo, {"Commonalities": commonalities_release})
+    status = check_sync_status(api_repo, expected_releases(api_repo, commonalities_release, icm_release))
     if status.in_sync:
         print(f"Common file cache is in sync with {commonalities_release}")
         return CacheCheck(status="in_sync")
@@ -81,13 +124,219 @@ def detect(api_repo: Path, commonalities_release: str) -> CacheCheck:
     return CacheCheck(status="stale", details=details)
 
 
-def main() -> int:
+def sync_branch(release: str) -> str:
+    return f"{SYNC_BRANCH_PREFIX}{release}"
+
+
+def find_sync_pr(gh, release: str) -> str:
+    """URL of the open sync PR for exactly this release's branch, or ""."""
+    found = gh.find_open_pr(sync_branch(release))
+    return found[1] if found else ""
+
+
+@dataclass(frozen=True)
+class CommonSyncOutcome:
+    """
+    Common sync result; status is created | updated | no_changes | failed.
+
+    unexpected_files lists names under code/common/ the release does not
+    provide (left in place, named in the PR body).
+    """
+    status: str
+    pr_url: str = ""
+    pr_number: str = ""
+    unexpected_files: Tuple[str, ...] = ()
+
+
+class CommonSyncError(Exception):
+    """A common sync step failed; the message is the ::error:: text."""
+
+
+def copy_common_files(source_dir: Path, api_repo: Path, release: str) -> Dict[str, str]:
+    """
+    Copy the release's *.yaml files into code/common/ and write the manifest.
+
+    Returns:
+        File name -> git blob SHA of each copied file
+
+    Raises:
+        CommonSyncError: When the release has no artifacts/common or no YAML in it
+    """
+    if not source_dir.is_dir():
+        raise CommonSyncError(f"Commonalities artifacts/common not found at tag {release}")
+    source_files = sorted(p for p in source_dir.iterdir() if p.suffix == ".yaml")
+    if not source_files:
+        raise CommonSyncError(f"No YAML files in Commonalities artifacts/common at {release}")
+
+    common_dir = api_repo / COMMON_DIR
+    common_dir.mkdir(parents=True, exist_ok=True)
+    files = {}
+    for src in source_files:
+        dest = common_dir / src.name
+        shutil.copy2(src, dest)
+        files[src.name] = git_blob_sha(dest.read_bytes())
+        print(f"Synced: {src.name} ({files[src.name][:12]})")
+
+    manifest = {"sources": [{"repository": COMMONALITIES, "release": release, "files": files}]}
+    (common_dir / MANIFEST_FILENAME).write_text(
+        yaml.dump(manifest, default_flow_style=False, sort_keys=False), encoding="utf-8"
+    )
+    print(f"Wrote manifest: {common_dir / MANIFEST_FILENAME} ({len(files)} files)")
+    return files
+
+
+def pr_body(release: str, unexpected: Tuple[str, ...] = ()) -> str:
+    body = (
+        "> [!WARNING]\n"
+        "> This branch is owned by Release Automation and is rebuilt from `main` on every run.\n"
+        "> **Do not commit fixes to this branch** — any commits here are overwritten the next time the sync runs.\n"
+        "\n"
+        f"Automated sync of `code/common/` files from `camaraproject/Commonalities` at release tag `{release}`.\n"
+        "\n"
+        "This PR was created by release automation because the cached Commonalities files were out of sync "
+        "with the declared dependency in `release-plan.yaml`.\n"
+        "\n"
+        "**What changed:**\n"
+        f"- Updated files in `code/common/` to match Commonalities {release}\n"
+        "- Added/updated `.sync-manifest.yaml` with file integrity hashes\n"
+        "\n"
+        "**How to handle this PR:**\n"
+        "- **Validation green** — review and merge.\n"
+        "- **Validation red** — choose one:\n"
+        "  - *(recommended)* fix the errors on `main`, then re-trigger the sync; this PR is rebuilt from "
+        "the new `main` HEAD with the corrected content.\n"
+        "  - merge this PR with the errors and fix them on `main` afterwards.\n"
+        "\n"
+        "To re-trigger the sync, run the **CAMARA Release Automation** workflow from the repository's "
+        "**Actions** tab.\n"
+        "\n"
+        "`/create-snapshot` is blocked until common files are in sync."
+    )
+    if unexpected:
+        names = ", ".join(f"`{name}`" for name in unexpected)
+        body += (
+            f"\n\n**Not provided by Commonalities {release}:** {names} in `code/common/` — "
+            "remove them on `main` if they are no longer needed."
+        )
+    return body
+
+
+def _close_superseded_prs(gh, branch: str, release: str) -> None:
+    try:
+        prs = gh.list_open_prs()
+    except Exception as e:
+        print(f"Could not list open PRs: {e}")
+        return
+    for pr in prs:
+        if pr["head"].startswith(SYNC_BRANCH_PREFIX) and pr["head"] != branch:
+            print(f"Closing stale sync PR #{pr['number']}")
+            try:
+                gh.close_pr(pr["number"], comment=f"Superseded by sync to Commonalities {release}")
+            except Exception as e:
+                print(f"Could not close #{pr['number']}: {e}")
+
+
+def sync_common(api_git, commonalities_git, gh, release: str, bot_name: str, bot_email: str) -> CommonSyncOutcome:
+    """
+    Rebuild code/common/ from the Commonalities release and open or reuse its sync PR.
+
+    Args:
+        api_git: Git client of the API repository; main is cloned into its work_dir
+        commonalities_git: Git client of camaraproject/Commonalities; the release
+            tag is cloned into its work_dir
+        gh: GitHub client of the API repository
+        release: Declared Commonalities release, e.g. "r4.3"
+        bot_name: Commit author and committer name
+        bot_email: Commit author and committer email
+
+    Returns:
+        CommonSyncOutcome; every failed step is status "failed", nothing raises
+    """
+    branch = sync_branch(release)
+    api_repo = Path(api_git.work_dir)
+    try:
+        api_git.clone("main", depth=1)
+    except GitOperationsError as e:
+        print(f"::error::Could not clone the API repository: {e}")
+        return CommonSyncOutcome(status="failed")
+    try:
+        commonalities_git.clone(release, depth=1)
+    except GitOperationsError as e:
+        print(f"::error::Could not fetch Commonalities {release}: {e}")
+        return CommonSyncOutcome(status="failed")
+
+    try:
+        # Reset the RA-owned branch to main first, then copy onto it.
+        api_git.create_branch(branch, reset=True)
+        synced = copy_common_files(Path(commonalities_git.work_dir) / "artifacts" / "common", api_repo, release)
+    except (GitOperationsError, CommonSyncError) as e:
+        print(f"::error::{e}")
+        return CommonSyncOutcome(status="failed")
+
+    unexpected = tuple(sorted(
+        p.name for p in (api_repo / COMMON_DIR).iterdir()
+        if p.name != MANIFEST_FILENAME and p.name not in synced
+    ))
+    if unexpected:
+        print(
+            f"::warning::code/common/ has files not provided by Commonalities {release}: "
+            f"{', '.join(unexpected)}"
+        )
+
+    _close_superseded_prs(gh, branch, release)
+
+    try:
+        if not api_git.has_changes(COMMON_DIR):
+            print(f"code/common already matches Commonalities {release}; nothing to sync")
+            return CommonSyncOutcome(status="no_changes", unexpected_files=unexpected)
+        api_git.configure_user(bot_name, bot_email)
+        api_git.commit_all(f"chore: sync common files from Commonalities {release}")
+        # Force: the branch is rebuilt from main each run; RA is its only owner.
+        api_git.push(branch, set_upstream=False, force=True)
+    except GitOperationsError as e:
+        print(f"::error::Could not push {branch}: {e}")
+        return CommonSyncOutcome(status="failed", unexpected_files=unexpected)
+
+    existing = gh.find_open_pr(branch)
+    if existing:
+        number, url = existing
+        print(f"Reusing open sync PR: {url}")
+        return CommonSyncOutcome(status="updated", pr_url=url, pr_number=str(number), unexpected_files=unexpected)
+
+    try:
+        number, url = gh.create_pr(
+            title=f"Sync common files from Commonalities {release}",
+            body=pr_body(release, unexpected),
+            head=branch,
+            base="main",
+        )
+    except Exception as e:
+        print(f"::error::Failed to create sync PR: {e}")
+        return CommonSyncOutcome(status="failed", unexpected_files=unexpected)
+    try:
+        gh.add_pr_labels(number, PR_LABELS)
+    except Exception as e:
+        print(f"Could not add labels: {e}")
+    print(f"Sync PR created: {url}")
+    return CommonSyncOutcome(status="created", pr_url=url, pr_number=str(number), unexpected_files=unexpected)
+
+
+def main(client=None) -> int:
     from release_automation.scripts.trigger import write_outputs
 
-    check = detect(Path(os.environ["API_REPO_PATH"]), os.environ["COMMONALITIES_RELEASE"])
+    release = os.environ["COMMONALITIES_RELEASE"]
+    check = detect(Path(os.environ["API_REPO_PATH"]), release, os.environ.get("ICM_RELEASE", ""))
+    sync_pr_url = ""
+    if check.status == "stale":
+        if client is None:
+            from .github_client import GitHubClient
+            client = GitHubClient(repo=os.environ["GITHUB_REPOSITORY"], token=os.environ.get("GITHUB_TOKEN"))
+        sync_pr_url = find_sync_pr(client, release)
+        print(f"Found existing sync PR: {sync_pr_url}" if sync_pr_url else "No existing sync PR found")
     write_outputs(os.environ["GITHUB_OUTPUT"], {
         "common_cache_status": check.status,
         "common_cache_details": check.details,
+        "common_sync_pr_url": sync_pr_url,
     })
     return 0
 
