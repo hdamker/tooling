@@ -69,7 +69,7 @@ def test_tooling_checkouts_resolve_through_job_context():
         and step.get("with", {}).get("path") == "_tooling"
     ]
 
-    assert len(checkouts) == 7
+    assert len(checkouts) == 6
     for step in checkouts:
         assert step["with"]["repository"] == "${{ job.workflow_repository }}"
         assert step["with"]["ref"] == "${{ job.workflow_sha }}"
@@ -171,3 +171,30 @@ def test_folded_jobs_are_gone_and_compat_outputs_cover_every_reader():
         if name != "plan":
             needs = job.get("needs", [])
             assert "plan" in ([needs] if isinstance(needs, str) else needs), name
+
+
+def test_finalize_replaces_the_tail_jobs():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    jobs = yaml.safe_load(text)["jobs"]
+
+    for gone in ("update-issue", "post-result", "create-sync-pr"):
+        assert gone not in jobs
+        assert f"needs.{gone}." not in text
+
+    finalize = jobs["finalize"]
+    assert finalize["if"] == "always() && needs.plan.outputs.finalize == 'true'"
+    assert set(finalize["needs"]) == set(jobs) - {"finalize"}
+    step = _step_by_name(finalize["steps"], "Finalize")
+    assert step["run"].strip() == "python -m release_automation.scripts.finalize"
+    assert step["env"]["NEEDS_JSON"] == "${{ toJSON(needs) }}"
+
+
+def test_finalize_reads_only_defined_outputs():
+    """finalize.py reads plan and command-job outputs from toJSON(needs), not expressions."""
+    jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    source = (WORKFLOW.parents[2] / "release_automation" / "scripts" / "finalize.py").read_text(encoding="utf-8")
+
+    plan_reads = set(re.findall(r'\.plan\("([a-z_]+)"\)', source))
+    assert plan_reads and plan_reads <= set(jobs["plan"]["outputs"])
+    for job, name in re.findall(r'\.out\("([a-z-]+)", "([a-z_]+)"\)', source):
+        assert name in jobs[job]["outputs"], (job, name)

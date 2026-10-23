@@ -8,7 +8,10 @@ artifacts.
 
 from dataclasses import dataclass
 import re
+import traceback
 from typing import Any, Dict, List, Optional
+
+import yaml
 
 from .github_client import GitHubClient
 from .state_manager import ReleaseState, ReleaseStateManager
@@ -79,9 +82,9 @@ class IssueSyncManager:
 
         Args:
             github_client: GitHubClient for repository operations
-            state_manager: ReleaseStateManager for state derivation (optional for close_release_issue)
-            issue_manager: IssueManager for issue content management (optional for close_release_issue)
-            bot_responder: BotResponder for message templates (optional for close_release_issue)
+            state_manager: ReleaseStateManager for state derivation (optional for finalize_published_issue)
+            issue_manager: IssueManager for issue content management
+            bot_responder: BotResponder for message templates (optional for finalize_published_issue)
         """
         self.gh = github_client
         self.state_manager = state_manager
@@ -624,83 +627,243 @@ class IssueSyncManager:
         """
         return f"{self.STATE_LABEL_PREFIX}{state.value.replace('_', '-')}"
 
-    def close_release_issue(
+    def finalize_published_issue(
         self,
         issue_number: int,
         release_tag: str,
         release_url: str,
         reference_tag: str,
-        sync_pr_url: str = ""
+        sync_pr_url: str,
+        sync_status: str,
+        publish_warnings: str = "",
     ) -> bool:
         """
-        Update and close Release Issue after publication.
+        Mark the Release Issue published; close it only if the sync PR was created.
 
         Steps:
-        1. Update STATE section with publication info
-        2. Update ACTIONS section (no actions available)
-        3. Change label to release-state:published
-        4. Close issue with reason "completed"
+        1. STATE section: release, reference tag, sync PR, post-publish warnings
+        2. ACTIONS section: no actions when sync_status is "created", the
+           manual follow-up for that status otherwise
+        3. State label to release-state:published
+        4. Close with reason "completed" only when sync_status is "created"
 
         Args:
-            issue_number: Issue number to close
+            issue_number: Release Issue number
             release_tag: Release tag (e.g., "r4.1")
             release_url: URL to the published release
-            reference_tag: Reference tag (e.g., "source/r4.1")
-            sync_pr_url: Optional URL to the post-release sync PR
+            reference_tag: Reference tag (e.g., "src/r4.1"), "" if its creation failed
+            sync_pr_url: URL of the post-release sync PR, "" if none
+            sync_status: Post-release sync status (created | failed | no_changes | other)
+            publish_warnings: Warnings of the non-critical publish steps
 
         Returns:
-            True if successful, False on error
+            True if every step succeeded, False on an API error (logged, never
+            raised: the release is already published)
         """
         try:
-            # Get current issue
             issue = self.gh.get_issue(issue_number)
-            current_body = issue.get("body", "")
-
-            # Update STATE section
-            new_state_content = self.issue_manager.generate_published_state_section(
-                release_tag=release_tag,
-                release_url=release_url,
-                reference_tag=reference_tag,
-                sync_pr_url=sync_pr_url or None
+            body = issue.get("body", "") or ""
+            body = self.issue_manager.update_section(
+                body,
+                "STATE",
+                self.issue_manager.generate_published_state_section(
+                    release_tag=release_tag,
+                    release_url=release_url,
+                    reference_tag=reference_tag,
+                    repo=self.gh.repo,
+                    sync_pr_url=sync_pr_url,
+                    warnings=post_publish_warnings(publish_warnings, sync_status),
+                ),
             )
-            updated_body = self.issue_manager.update_section(
-                current_body, "STATE", new_state_content
+            body = self.issue_manager.update_section(
+                body, "ACTIONS", self.issue_manager.generate_published_actions_section(sync_status)
             )
+            self.gh.update_issue(issue_number, body=body)
 
-            # Update ACTIONS section
-            new_actions_content = self.issue_manager.generate_published_actions_section()
-            updated_body = self.issue_manager.update_section(
-                updated_body, "ACTIONS", new_actions_content
-            )
-
-            # Update issue body if changed
-            if updated_body != current_body:
-                self.gh.update_issue(issue_number, body=updated_body)
-
-            # Update labels: remove old state labels, add published
             current_labels = [
                 label.get("name", "") if isinstance(label, dict) else label
                 for label in issue.get("labels", [])
             ]
-            old_state_labels = [
-                l for l in current_labels
-                if l.startswith(self.STATE_LABEL_PREFIX)
-            ]
+            old_state_labels = [l for l in current_labels if l.startswith(self.STATE_LABEL_PREFIX)]
             if old_state_labels:
                 self.gh.remove_labels(issue_number, old_state_labels)
+            self.gh.add_labels(issue_number, [f"{self.STATE_LABEL_PREFIX}published"])
 
-            new_state_label = f"{self.STATE_LABEL_PREFIX}published"
-            self.gh.add_labels(issue_number, [new_state_label])
-
-            # Close the issue
-            self.gh.close_issue(issue_number, state_reason="completed")
-
+            if sync_status == "created":
+                self.gh.close_issue(issue_number, state_reason="completed")
+                print(f"Issue #{issue_number} closed successfully")
+            else:
+                print(f"Issue #{issue_number} left open — sync status: {sync_status}")
             return True
-
         except Exception as e:
-            # Log error but don't raise - issue closure is non-critical
-            import logging
-            logging.getLogger(__name__).error(
-                f"Failed to close release issue #{issue_number}: {e}"
-            )
+            print(f"::warning::Failed to close issue: {e}")
             return False
+
+
+def post_publish_warnings(publish_warnings: str, sync_status: str) -> str:
+    """
+    Warnings of a publication: the non-critical publish steps, then the sync PR status.
+
+    Returns:
+        "; "-joined text, "" when there is nothing to warn about
+    """
+    warnings = [publish_warnings] if publish_warnings else []
+    if sync_status == "failed":
+        warnings.append("Post-release sync PR creation failed — create manually")
+    elif sync_status == "no_changes":
+        warnings.append("Post-release sync skipped (no changes detected) — verify README/CHANGELOG")
+    elif sync_status != "created":
+        warnings.append("Post-release sync status unknown — verify README/CHANGELOG")
+    return "; ".join(warnings)
+
+
+@dataclass(frozen=True)
+class WorkflowSync:
+    """Release Issue sync as the workflow sees it; issue_action is
+    created | updated | unchanged | skipped | error."""
+    issue_number: str = ""
+    issue_action: str = "skipped"
+    issue_url: str = ""
+
+
+def parse_state(value: str) -> Optional[ReleaseState]:
+    """ReleaseState for a value or name in any case, - or _; None for ""."""
+    normalized = value.strip().lower().replace("-", "_")
+    if not normalized:
+        return None
+    for state in ReleaseState:
+        if normalized in {state.value.lower().replace("-", "_"), state.name.lower()}:
+            return state
+    raise ValueError(f"Unknown release state override: {value}")
+
+
+def _summary(path: str, text: str) -> None:
+    if path:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(text)
+
+
+def sync_for_workflow(
+    gh: GitHubClient,
+    release_tag: str,
+    state: str,
+    state_override: str = "",
+    snapshot_branch_override: str = "",
+    release_pr_number_override: str = "",
+    draft_release_url_override: str = "",
+    force_update: bool = False,
+    common_cache_status: str = "",
+    common_cache_details: str = "",
+    common_sync_pr_url: str = "",
+    summary_path: str = "",
+) -> WorkflowSync:
+    """
+    Sync the Release Issue for a workflow run (create, update, or leave it).
+
+    Args:
+        gh: GitHub client of the API repository
+        release_tag: Release tag from the plan
+        state: State derived by the plan job
+        state_override: State the run's command moved the release to ("" for none)
+        snapshot_branch_override, release_pr_number_override,
+        draft_release_url_override: Artifacts the run's command created
+        force_update: Refresh the issue even if its state label matches
+        common_cache_status, common_cache_details, common_sync_pr_url: Cache
+            detection and common sync PR, shown in the CONFIG section
+        summary_path: GITHUB_STEP_SUMMARY ("" to skip)
+
+    Returns:
+        WorkflowSync; issue_action "error" when the sync failed (logged)
+    """
+    try:
+        override = parse_state(state_override)
+    except ValueError as e:
+        print(f"::error::{e}")
+        return WorkflowSync(issue_action="error")
+
+    requested_state = state_override or state
+    print("Effective sync context:")
+    print(f"  Source: {'override' if override else 're-derived'}")
+    print(f"  Requested state: {requested_state or '(none)'}")
+    print(f"  Snapshot branch override: {snapshot_branch_override or '(none)'}")
+    print(f"  Release PR override: {release_pr_number_override or '(none)'}")
+    print(f"  Draft release URL override present: {'yes' if draft_release_url_override else 'no'}")
+    print(f"  Force update: {force_update}")
+
+    if not release_tag:
+        print("No release tag provided - skipping issue sync")
+        return WorkflowSync()
+
+    if requested_state.lower() in ("published", ""):
+        print(f"State '{requested_state}' does not require issue sync - skipping")
+        if requested_state.lower() == "published":
+            _summary(summary_path, (
+                "## Release Status: Published\n\n"
+                f"Release `{release_tag}` has already been published. No further actions needed.\n"
+            ))
+        else:
+            _summary(summary_path, (
+                "## Release Status\n\n"
+                f"No release state detected for `{release_tag}`. Check release-plan.yaml configuration.\n"
+            ))
+        return WorkflowSync()
+
+    print(f"Reading release-plan.yaml for {release_tag}")
+    release_plan = gh.get_file_content("release-plan.yaml", ref="main")
+    if release_plan is None:
+        print("::warning::Could not read release-plan.yaml - skipping issue sync")
+        return WorkflowSync()
+    try:
+        release_plan_data = yaml.safe_load(release_plan)
+    except yaml.YAMLError as e:
+        print(f"::warning::Could not parse release-plan.yaml: {e}")
+        return WorkflowSync()
+    if not isinstance(release_plan_data, dict):
+        print("::warning::release-plan.yaml is not a valid YAML mapping")
+        return WorkflowSync()
+
+    plan_tag = (release_plan_data.get("repository") or {}).get("target_release_tag", "")
+    if plan_tag != release_tag:
+        print(f"::warning::release-plan.yaml tag '{plan_tag}' doesn't match input '{release_tag}'")
+
+    sync_manager = IssueSyncManager(
+        github_client=gh,
+        state_manager=ReleaseStateManager(github_client=gh),
+        issue_manager=IssueManager(),
+        bot_responder=BotResponder(),
+    )
+    print(f"Syncing Release Issue for {release_tag} (state: {requested_state})")
+    try:
+        result = sync_manager.sync_release_issue(
+            release_plan_data,
+            state_override=override,
+            snapshot_branch_override=snapshot_branch_override or None,
+            release_pr_number_override=release_pr_number_override or None,
+            draft_release_url_override=draft_release_url_override or None,
+            force_update=force_update,
+            common_cache_status=common_cache_status,
+            common_cache_details=common_cache_details,
+            common_sync_pr_url=common_sync_pr_url,
+        )
+    except Exception as e:
+        print(f"::error::Issue sync failed: {e}")
+        traceback.print_exc()
+        return WorkflowSync(issue_action="error")
+
+    if result.action == "none":
+        print(f"No action taken: {result.reason}")
+        if result.reason == "no_planned_release":
+            _summary(summary_path, (
+                "## Release Status: Not Planned\n\n"
+                f"No release is currently planned for `{release_tag}` (`target_release_type: none`).\n"
+                "No open Release Issue exists.\n"
+            ))
+        return WorkflowSync(issue_action="unchanged")
+    if result.issue:
+        number = result.issue.get("number", "")
+        url = result.issue.get("html_url", "")
+        print(f"Issue {result.action}: #{number}")
+        print(f"  URL: {url}")
+        return WorkflowSync(issue_number=str(number), issue_action=result.action, issue_url=url)
+    print(f"Action {result.action} but no issue returned")
+    return WorkflowSync(issue_action=result.action)

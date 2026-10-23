@@ -75,61 +75,28 @@ runs:
         print(f"Added to sys.path: {tooling_root}")
 
         from release_automation.scripts.bot_responder import BotResponder
-        from release_automation.scripts.context_builder import build_context
-
-        # Parse context
-        base_context_json = os.environ.get('BASE_CONTEXT_JSON', '{}')
-        context_json = os.environ['CONTEXT_JSON']
 
         base_context = {}
+        base_context_json = os.environ.get('BASE_CONTEXT_JSON', '{}')
         if base_context_json:
             try:
                 base_context = json.loads(base_context_json)
-                if not isinstance(base_context, dict):
-                    base_context = {}
             except json.JSONDecodeError:
                 print("::warning::Invalid base_context JSON, ignoring")
 
         try:
-            raw_context_delta = json.loads(context_json)
+            context_delta = json.loads(os.environ['CONTEXT_JSON'])
         except json.JSONDecodeError as e:
             print(f"::error::Invalid JSON context: {e}")
             sys.exit(1)
 
-        # Merge delta into base
-        raw_context = base_context.copy()
-        raw_context.update(raw_context_delta)
-
-        # Convert apis_json to apis list if present
-        # Handle both cases: string (from shell) or list (from jq JSON parsing)
-        if 'apis_json' in raw_context:
-            apis_val = raw_context['apis_json']
-            if isinstance(apis_val, str):
-                try:
-                    raw_context['apis'] = json.loads(apis_val)
-                except (json.JSONDecodeError, TypeError):
-                    raw_context['apis'] = []
-            elif isinstance(apis_val, list):
-                raw_context['apis'] = apis_val
-            else:
-                raw_context['apis'] = []
-            del raw_context['apis_json']
-
-        # Guarantee schema completeness via build_context()
-        # - Fills missing keys with type-appropriate defaults
-        # - Derives boolean flags from string fields (e.g., is_missing_file from error_type)
-        # - Ignores unknown keys silently
-        context = build_context(**raw_context)
-
-        # Render template
+        # Delta over base, apis_json to apis, full schema via build_context()
         template_name = os.environ['TEMPLATE_NAME']
         release_tag = os.environ['RELEASE_TAG']
         run_id = os.environ['RUN_ID']
 
-        responder = BotResponder()
-
         try:
-            content = responder.render_with_marker(template_name, context, release_tag)
+            content = BotResponder().render_comment(template_name, base_context, context_delta, release_tag)
         except Exception as e:
             print(f"::error::Failed to render template '{template_name}': {e}")
             sys.exit(1)

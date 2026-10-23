@@ -795,7 +795,7 @@ def _fire_command_phase(
     2. The caller run reached `completed` with `conclusion == 'success'`;
     3. A bot comment appeared on the Release Issue after we posted, and its
        first non-blank line starts with `expected_title`;
-    4. With *require_sync_job*, the run's sync-issue job concluded success.
+    4. With *require_sync_job*, the run's finalize job concluded success.
 
     Rejection (e.g. cache-stale, permission-denied) surfaces as the caller
     bot posting `command_rejected` as its final reply — case (3) fails with
@@ -885,13 +885,13 @@ def _fire_command_phase(
     return report, run_id
 
 
-# Job name of the reusable workflow's update-issue job, which runs the
+# Job name of the reusable workflow's finalize job, which runs the
 # Release Issue sync. Source of truth: .github/workflows/release-automation-reusable.yml
-_SYNC_ISSUE_JOB = "sync-issue"
+_SYNC_ISSUE_JOB = "finalize"
 
 
 def _check_sync_job(report: PhaseReport, repo: str, run_id: str) -> bool:
-    """True iff the run's sync-issue job concluded success; detail set otherwise.
+    """True iff the run's finalize job concluded success; detail set otherwise.
 
     A run can conclude success with the sync job skipped (e.g. a condition
     regression), so the run conclusion alone does not prove the sync ran.
@@ -918,7 +918,7 @@ def phase_dispatch_sync_issue(
     """Dispatch the caller workflow (sync-issue) and check its sync job.
 
     workflow_dispatch posts no bot comment, so the assertions are the run
-    conclusion and the sync-issue job conclusion.
+    conclusion and the finalize job conclusion.
     """
     report = PhaseReport(name="dispatch sync-issue")
     if dry_run:
@@ -979,7 +979,7 @@ def phase_fire_sync_issue(
     dry_run: bool,
     expected_titles: dict[str, str] | None = None,
 ) -> tuple[PhaseReport, str | None]:
-    """Post /sync-issue; check the final bot reply and the sync-issue job."""
+    """Post /sync-issue; check the final bot reply and the finalize job."""
     titles = expected_titles or load_expected_comment_titles()
     return _fire_command_phase(
         repo, issue_number,

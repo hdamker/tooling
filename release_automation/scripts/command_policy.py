@@ -275,6 +275,11 @@ def evaluate(
     return replace(plan, response=RESPONSE_INTERIM)
 
 
+def finalize_due(result: Union[Plan, Rejection]) -> bool:
+    """Whether the finalize job runs: a Plan whose command runs, not a rejection or confirmation request."""
+    return result.allowed and result.response != RESPONSE_PUBLISH_CONFIRMATION
+
+
 def release_info_from_env(env) -> ReleaseInfoResult:
     """Rebuild a ReleaseInfoResult from the derive-release-state outputs."""
     if env.get("CONFIG_ERROR"):
@@ -353,6 +358,7 @@ def main(client=None) -> int:
         "allowed": ("true" if result.allowed else "false") if validated else "",
         "error_message": result.error_message if validated and not result.allowed else "",
         "plan": result.to_json(),
+        "finalize": "true" if finalize_due(result) else "false",
         "response": result.response,
         "response_release_tag": (
             "unknown" if result.response == RESPONSE_CONFIG_ERROR else (release_info.release_tag or "")

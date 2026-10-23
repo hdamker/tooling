@@ -346,7 +346,9 @@ class IssueManager:
         release_tag: str,
         release_url: str,
         reference_tag: str,
-        sync_pr_url: Optional[str] = None
+        repo: str,
+        sync_pr_url: str = "",
+        warnings: str = "",
     ) -> str:
         """
         Generate content for the STATE section in published state.
@@ -354,31 +356,46 @@ class IssueManager:
         Args:
             release_tag: Release tag (e.g., "r4.1")
             release_url: URL to the published release
-            reference_tag: Reference tag (e.g., "source/r4.1")
-            sync_pr_url: Optional URL to the post-release sync PR
+            reference_tag: Reference tag (e.g., "src/r4.1"); the line stays when empty
+            repo: Repository "owner/name" for the reference tag link
+            sync_pr_url: URL of the post-release sync PR, if one was created
+            warnings: "; "-joined post-publish warnings (post_publish_warnings())
 
         Returns:
             Formatted state section content
         """
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
         lines = [
-            f"**State:** `published` | **Last Updated:** {timestamp}",
+            "**State:** `published`",
             "",
-            f"**Release:** [{release_tag}]({release_url})",
-            f"**Reference tag:** `{reference_tag}`",
+            f"✅ **Release published:** [{release_tag}]({release_url})",
+            f"📌 **Reference tag:** [`{reference_tag}`](https://github.com/{repo}/tree/{reference_tag})",
         ]
-
         if sync_pr_url:
-            lines.append(f"**Sync PR:** {sync_pr_url}")
-
+            lines.append(f"🔄 **Sync PR:** [View PR]({sync_pr_url})")
+        if warnings:
+            lines.append(f"⚠️ **Warnings:** {warnings}")
         return "\n".join(lines)
 
-    def generate_published_actions_section(self) -> str:
+    def generate_published_actions_section(self, sync_status: str) -> str:
         """
         Generate content for the ACTIONS section in published state.
 
+        Args:
+            sync_status: Post-release sync status (created | failed | no_changes | other)
+
         Returns:
-            Formatted actions section content (no actions available)
+            No-actions text when the sync PR was created, manual follow-up otherwise
         """
-        return "**Valid actions:** No further actions available — release is published"
+        if sync_status == "created":
+            return "_No actions available - release is published._"
+        if sync_status == "failed":
+            return (
+                "**Manual action required:** Create post-release sync PR manually "
+                "(update README and CHANGELOG on main), then close this issue."
+            )
+        if sync_status == "no_changes":
+            return (
+                "**Manual action required:** Verify README and CHANGELOG on main are correct, "
+                "then close this issue."
+            )
+        return "**Manual action required:** Verify post-release sync status, then close this issue."

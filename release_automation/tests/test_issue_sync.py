@@ -7,11 +7,14 @@ Tests the IssueSyncManager class which handles Release Issue synchronization.
 import pytest
 from unittest.mock import MagicMock, patch
 
+from release_automation.scripts.github_client import GitHubClientError
+from release_automation.scripts.issue_manager import IssueManager
 from release_automation.scripts.issue_sync import (
     IssueSyncManager,
     SyncResult,
     WORKFLOW_MARKER,
     REQUIRED_LABELS,
+    post_publish_warnings,
 )
 from release_automation.scripts.state_manager import ReleaseInfoResult, ReleaseState
 
@@ -784,140 +787,231 @@ class TestSyncReleaseIssueWithLabels:
         assert gh.create_label.call_count == 6
 
 
-class TestCloseReleaseIssue:
-    """Tests for close_release_issue method."""
+PUBLISHED_BODY = (
+    "<!-- release-automation:workflow-owned -->\n"
+    "<!-- BEGIN:STATE -->\nold state\n<!-- END:STATE -->\n"
+    "<!-- BEGIN:CONFIG -->\nconfig\n<!-- END:CONFIG -->\n"
+    "<!-- BEGIN:ACTIONS -->\nold actions\n<!-- END:ACTIONS -->\n"
+)
 
-    def test_close_release_issue_success(self):
-        """Test successful issue closure flow."""
-        gh = MagicMock()
-        state_manager = MagicMock()
-        issue_manager = MagicMock()
-        bot_responder = MagicMock()
 
-        # Setup issue
+class TestFinalizePublishedIssue:
+    """Published Release Issue: STATE/ACTIONS, label swap, close only on a created sync PR.
+
+    Reproduces the former inline "Update and Close Release Issue" step.
+    """
+
+    def finalize(self, gh, sync_status="created", publish_warnings="", sync_pr_url="https://github.com/org/repo/pull/9"):
+        gh.repo = "org/repo"
         gh.get_issue.return_value = {
             "number": 42,
-            "body": "<!-- BEGIN:STATE -->\nold\n<!-- END:STATE -->\n<!-- BEGIN:ACTIONS -->\nold\n<!-- END:ACTIONS -->",
-            "labels": [{"name": "release-state:draft-ready"}]
+            "body": PUBLISHED_BODY,
+            "labels": [{"name": "release-issue"}, {"name": "release-state:draft-ready"}],
         }
-
-        # Setup issue_manager section generators
-        issue_manager.generate_published_state_section.return_value = "published state"
-        issue_manager.generate_published_actions_section.return_value = "no actions"
-        issue_manager.update_section.side_effect = lambda body, section, content: body.replace(
-            f"<!-- BEGIN:{section} -->\nold\n<!-- END:{section} -->",
-            f"<!-- BEGIN:{section} -->\n{content}\n<!-- END:{section} -->"
-        )
-
-        manager = IssueSyncManager(gh, state_manager, issue_manager, bot_responder)
-
-        result = manager.close_release_issue(
+        manager = IssueSyncManager(gh, issue_manager=IssueManager())
+        return manager.finalize_published_issue(
             issue_number=42,
             release_tag="r4.1",
-            release_url="https://github.com/test/releases/tag/r4.1",
-            reference_tag="source/r4.1",
-            sync_pr_url="https://github.com/test/pull/123"
+            release_url="https://github.com/org/repo/releases/tag/r4.1",
+            reference_tag="src/r4.1",
+            sync_pr_url=sync_pr_url,
+            sync_status=sync_status,
+            publish_warnings=publish_warnings,
         )
 
-        assert result is True
+    def body(self, gh):
+        return gh.update_issue.call_args.kwargs["body"]
 
-        # Verify STATE section was updated
-        issue_manager.generate_published_state_section.assert_called_once_with(
-            release_tag="r4.1",
-            release_url="https://github.com/test/releases/tag/r4.1",
-            reference_tag="source/r4.1",
-            sync_pr_url="https://github.com/test/pull/123"
+    def test_created_updates_body_swaps_labels_and_closes(self):
+        gh = MagicMock()
+
+        assert self.finalize(gh) is True
+
+        assert self.body(gh) == (
+            "<!-- release-automation:workflow-owned -->\n"
+            "<!-- BEGIN:STATE -->\n"
+            "**State:** `published`\n"
+            "\n"
+            "✅ **Release published:** [r4.1](https://github.com/org/repo/releases/tag/r4.1)\n"
+            "📌 **Reference tag:** [`src/r4.1`](https://github.com/org/repo/tree/src/r4.1)\n"
+            "🔄 **Sync PR:** [View PR](https://github.com/org/repo/pull/9)\n"
+            "<!-- END:STATE -->\n"
+            "<!-- BEGIN:CONFIG -->\nconfig\n<!-- END:CONFIG -->\n"
+            "<!-- BEGIN:ACTIONS -->\n_No actions available - release is published._\n<!-- END:ACTIONS -->\n"
         )
-
-        # Verify ACTIONS section was updated
-        issue_manager.generate_published_actions_section.assert_called_once()
-
-        # Verify labels were updated
         gh.remove_labels.assert_called_once_with(42, ["release-state:draft-ready"])
         gh.add_labels.assert_called_once_with(42, ["release-state:published"])
-
-        # Verify issue was closed
         gh.close_issue.assert_called_once_with(42, state_reason="completed")
 
-    def test_close_release_issue_without_sync_pr(self):
-        """Test closure without sync PR URL."""
+    @pytest.mark.parametrize(
+        "sync_status,warning,action",
+        [
+            ("failed", "Post-release sync PR creation failed — create manually", "Create post-release sync PR manually"),
+            ("no_changes", "Post-release sync skipped (no changes detected) — verify README/CHANGELOG", "Verify README and CHANGELOG"),
+            ("", "Post-release sync status unknown — verify README/CHANGELOG", "Verify post-release sync status"),
+            ("unexpected", "Post-release sync status unknown — verify README/CHANGELOG", "Verify post-release sync status"),
+        ],
+    )
+    def test_without_created_sync_pr_issue_stays_open(self, sync_status, warning, action):
         gh = MagicMock()
-        state_manager = MagicMock()
-        issue_manager = MagicMock()
-        bot_responder = MagicMock()
 
-        gh.get_issue.return_value = {
-            "number": 42,
-            "body": "body content",
-            "labels": []
-        }
-        issue_manager.update_section.side_effect = lambda body, section, content: body
+        assert self.finalize(gh, sync_status=sync_status, sync_pr_url="") is True
 
-        manager = IssueSyncManager(gh, state_manager, issue_manager, bot_responder)
-
-        result = manager.close_release_issue(
-            issue_number=42,
-            release_tag="r4.1",
-            release_url="https://github.com/test/releases/tag/r4.1",
-            reference_tag="source/r4.1"
-        )
-
-        assert result is True
-
-        # sync_pr_url should be None when empty string passed
-        issue_manager.generate_published_state_section.assert_called_once()
-        call_kwargs = issue_manager.generate_published_state_section.call_args
-        assert call_kwargs.kwargs.get("sync_pr_url") is None
-
-    def test_close_release_issue_api_error(self):
-        """Test graceful handling of API errors."""
-        gh = MagicMock()
-        state_manager = MagicMock()
-        issue_manager = MagicMock()
-        bot_responder = MagicMock()
-
-        # Simulate API error
-        gh.get_issue.side_effect = Exception("API error")
-
-        manager = IssueSyncManager(gh, state_manager, issue_manager, bot_responder)
-
-        result = manager.close_release_issue(
-            issue_number=42,
-            release_tag="r4.1",
-            release_url="https://github.com/test/releases/tag/r4.1",
-            reference_tag="source/r4.1"
-        )
-
-        # Should return False on error, not raise
-        assert result is False
-
-    def test_close_release_issue_no_existing_state_labels(self):
-        """Test closure when no state labels exist."""
-        gh = MagicMock()
-        state_manager = MagicMock()
-        issue_manager = MagicMock()
-        bot_responder = MagicMock()
-
-        gh.get_issue.return_value = {
-            "number": 42,
-            "body": "body",
-            "labels": [{"name": "release-issue"}]  # No state label
-        }
-        issue_manager.update_section.side_effect = lambda body, section, content: body
-
-        manager = IssueSyncManager(gh, state_manager, issue_manager, bot_responder)
-
-        result = manager.close_release_issue(
-            issue_number=42,
-            release_tag="r4.1",
-            release_url="https://github.com/test/releases/tag/r4.1",
-            reference_tag="source/r4.1"
-        )
-
-        assert result is True
-
-        # Should not call remove_labels if no state labels
-        gh.remove_labels.assert_not_called()
-
-        # Should still add published label
+        body = self.body(gh)
+        assert f"⚠️ **Warnings:** {warning}\n<!-- END:STATE -->" in body
+        assert "Sync PR" not in body
+        assert f"<!-- BEGIN:ACTIONS -->\n**Manual action required:** {action}" in body
         gh.add_labels.assert_called_once_with(42, ["release-state:published"])
+        gh.close_issue.assert_not_called()
+
+    def test_publish_warnings_appear_in_state(self):
+        gh = MagicMock()
+
+        self.finalize(gh, publish_warnings="Failed to create reference tag; Failed to create pointer branch")
+
+        assert (
+            "⚠️ **Warnings:** Failed to create reference tag; Failed to create pointer branch\n<!-- END:STATE -->"
+        ) in self.body(gh)
+        gh.close_issue.assert_called_once()
+
+    def test_publish_and_sync_warnings_are_joined(self):
+        gh = MagicMock()
+
+        self.finalize(gh, sync_status="failed", publish_warnings="Failed to create pointer branch")
+
+        assert (
+            "⚠️ **Warnings:** Failed to create pointer branch; "
+            "Post-release sync PR creation failed — create manually"
+        ) in self.body(gh)
+
+    @pytest.mark.parametrize("failing", ["get_issue", "update_issue", "add_labels", "close_issue"])
+    def test_api_errors_are_logged_not_raised(self, failing, capsys):
+        gh = MagicMock()
+        getattr(gh, failing).side_effect = GitHubClientError("gh command failed: 502")
+
+        assert self.finalize(gh) is False
+        assert "::warning::Failed to close issue: gh command failed: 502" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "publish_warnings,sync_status,expected",
+    [
+        ("", "created", ""),
+        ("a; b", "created", "a; b"),
+        ("", "failed", "Post-release sync PR creation failed — create manually"),
+        ("a", "no_changes", "a; Post-release sync skipped (no changes detected) — verify README/CHANGELOG"),
+        ("", "", "Post-release sync status unknown — verify README/CHANGELOG"),
+    ],
+)
+def test_post_publish_warnings(publish_warnings, sync_status, expected):
+    assert post_publish_warnings(publish_warnings, sync_status) == expected
+
+
+
+# ── sync_for_workflow: the former sync-release-issue composite ───────────────
+
+from release_automation.scripts import issue_sync as issue_sync_mod  # noqa: E402
+from release_automation.scripts.issue_sync import WorkflowSync, sync_for_workflow  # noqa: E402
+
+PLAN_YAML = "repository:\n  target_release_tag: r4.1\n  target_release_type: pre-release-alpha\n"
+
+
+class TestSyncForWorkflow:
+    def run(self, monkeypatch, tmp_path, result=None, plan=PLAN_YAML, raises=None, **kwargs):
+        gh = MagicMock()
+        gh.get_file_content.return_value = plan
+        calls = {}
+
+        def fake_sync(self, release_plan, **kw):
+            calls.update(release_plan=release_plan, **kw)
+            if raises:
+                raise raises
+            return result
+
+        monkeypatch.setattr(IssueSyncManager, "sync_release_issue", fake_sync)
+        summary = tmp_path / "summary"
+        args = dict(release_tag="r4.1", state="planned")
+        args.update(kwargs)
+        outcome = sync_for_workflow(gh, summary_path=str(summary), **args)
+        return outcome, calls, summary.read_text() if summary.exists() else ""
+
+    def test_created(self, monkeypatch, tmp_path):
+        issue = {"number": 7, "html_url": "https://github.com/o/r/issues/7"}
+
+        outcome, calls, _ = self.run(
+            monkeypatch, tmp_path, SyncResult(action="created", issue=issue),
+            state_override="snapshot-active", snapshot_branch_override="release-snapshot/r4.1-abc",
+            release_pr_number_override="12", force_update=True,
+            common_cache_status="stale", common_cache_details="d", common_sync_pr_url="u",
+        )
+
+        assert outcome == WorkflowSync(issue_number="7", issue_action="created", issue_url="https://github.com/o/r/issues/7")
+        assert calls["release_plan"]["repository"]["target_release_tag"] == "r4.1"
+        assert calls["state_override"] == ReleaseState.SNAPSHOT_ACTIVE
+        assert calls["snapshot_branch_override"] == "release-snapshot/r4.1-abc"
+        assert calls["release_pr_number_override"] == "12"
+        assert calls["draft_release_url_override"] is None
+        assert calls["force_update"] is True
+        assert (calls["common_cache_status"], calls["common_cache_details"], calls["common_sync_pr_url"]) == ("stale", "d", "u")
+
+    def test_no_action_is_unchanged(self, monkeypatch, tmp_path):
+        outcome, _, summary = self.run(monkeypatch, tmp_path, SyncResult(action="none", reason="up_to_date"))
+
+        assert outcome == WorkflowSync(issue_action="unchanged")
+        assert summary == ""
+
+    def test_no_planned_release_writes_summary(self, monkeypatch, tmp_path):
+        outcome, _, summary = self.run(monkeypatch, tmp_path, SyncResult(action="none", reason="no_planned_release"))
+
+        assert outcome == WorkflowSync(issue_action="unchanged")
+        assert summary == (
+            "## Release Status: Not Planned\n\n"
+            "No release is currently planned for `r4.1` (`target_release_type: none`).\n"
+            "No open Release Issue exists.\n"
+        )
+
+    @pytest.mark.parametrize("state,override", [("published", ""), ("planned", "published")])
+    def test_published_is_skipped_with_summary(self, monkeypatch, tmp_path, state, override):
+        outcome, calls, summary = self.run(monkeypatch, tmp_path, state=state, state_override=override)
+
+        assert outcome == WorkflowSync(issue_action="skipped")
+        assert calls == {}
+        assert summary == (
+            "## Release Status: Published\n\n"
+            "Release `r4.1` has already been published. No further actions needed.\n"
+        )
+
+    def test_without_release_tag_is_skipped(self, monkeypatch, tmp_path):
+        outcome, calls, _ = self.run(monkeypatch, tmp_path, release_tag="")
+
+        assert outcome == WorkflowSync(issue_action="skipped")
+        assert calls == {}
+
+    @pytest.mark.parametrize("plan", [None, "a: [", "- just a list\n"])
+    def test_unreadable_release_plan_is_skipped(self, monkeypatch, tmp_path, plan):
+        outcome, calls, _ = self.run(monkeypatch, tmp_path, plan=plan)
+
+        assert outcome == WorkflowSync(issue_action="skipped")
+        assert calls == {}
+
+    def test_unknown_override_is_an_error(self, monkeypatch, tmp_path):
+        outcome, calls, _ = self.run(monkeypatch, tmp_path, state_override="bogus")
+
+        assert outcome == WorkflowSync(issue_action="error")
+        assert calls == {}
+
+    @pytest.mark.parametrize("value,state", [
+        ("draft-ready", ReleaseState.DRAFT_READY),
+        ("draft_ready", ReleaseState.DRAFT_READY),
+        ("PLANNED", ReleaseState.PLANNED),
+        ("not-planned", ReleaseState.NOT_PLANNED),
+    ])
+    def test_override_spellings(self, monkeypatch, tmp_path, value, state):
+        _, calls, _ = self.run(monkeypatch, tmp_path, SyncResult(action="none"), state_override=value)
+
+        assert calls["state_override"] == state
+
+    def test_sync_exception_is_an_error(self, monkeypatch, tmp_path):
+        outcome, _, _ = self.run(monkeypatch, tmp_path, raises=RuntimeError("boom"))
+
+        assert outcome == WorkflowSync(issue_action="error")

@@ -626,3 +626,39 @@ def test_main_non_slash_config_error(tmp_path, monkeypatch):
 
     assert (out["allowed"], out["response"]) == ("", "")
     assert json.loads(out["plan"])["error_type"] == "malformed_yaml"
+
+
+# ── finalize gate ────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "trigger,state,due",
+    [
+        (slash("create-snapshot"), ReleaseState.PLANNED, True),
+        (slash("sync-issue"), ReleaseState.PUBLISHED, True),
+        (publish(confirm_tag="r1.2"), ReleaseState.DRAFT_READY, True),
+        # The confirmation request is the whole response; nothing ran to finalize.
+        (publish(confirm_tag=""), ReleaseState.DRAFT_READY, False),
+        (slash("delete-draft"), ReleaseState.PLANNED, False),
+        (Trigger(trigger_type="push", command="sync-issue", should_continue=True), ReleaseState.PLANNED, True),
+        (Trigger(trigger_type="pr_merge", should_continue=True), ReleaseState.SNAPSHOT_ACTIVE, True),
+        (Trigger(trigger_type="issue_close", issue_number="4", should_continue=True), ReleaseState.DRAFT_READY, True),
+    ],
+)
+def test_finalize_due(trigger, state, due):
+    assert policy.finalize_due(evaluate(trigger, info(state), client=WRITE)) is due
+
+
+@pytest.mark.parametrize("trigger", [slash("create-snapshot"), Trigger(trigger_type="pr_merge", should_continue=True)])
+def test_no_finalize_on_config_error(trigger):
+    assert policy.finalize_due(evaluate(trigger, CONFIG_ERROR, client=FakeClient())) is False
+
+
+def test_main_writes_finalize(tmp_path, monkeypatch):
+    out = run_main(
+        tmp_path, monkeypatch, slash("create-snapshot"),
+        {"STATE": "planned", "RELEASE_TAG": "r1.2", "RELEASE_TYPE": "pre-release-alpha"},
+        FakeClient(permissions={"alice": "write"}),
+    )
+
+    assert out["finalize"] == "true"

@@ -5,11 +5,14 @@ This module provides template-based message rendering for bot comments
 posted during the release automation workflow.
 """
 
+import json
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pystache
+
+from .context_builder import build_context
 
 
 class BotResponderError(Exception):
@@ -112,6 +115,29 @@ class BotResponder:
         marker = self.MARKER_FORMAT.format(release_tag=release_tag)
         return f"{marker}\n{content}"
 
+    def render_comment(
+        self,
+        template_name: str,
+        base_context: Any,
+        delta: Dict[str, Any],
+        release_tag: str,
+    ) -> str:
+        """
+        Render a bot comment from the run's base context plus a per-comment delta.
+
+        Args:
+            template_name: Name of the template file (without .md extension)
+            base_context: Context assembled by the plan job (ignored unless a dict)
+            delta: Variables of this comment; they override the base context
+            release_tag: Release tag for the marker
+
+        Returns:
+            Rendered message with marker prepended
+        """
+        return self.render_with_marker(
+            template_name, merge_comment_context(base_context, delta), release_tag
+        )
+
     def list_templates(self) -> List[str]:
         """
         List all available template names.
@@ -142,3 +168,21 @@ class BotResponder:
         pattern = r"<!-- release-bot:([^\s]+) -->"
         match = re.search(pattern, content)
         return match.group(1) if match else None
+
+
+def merge_comment_context(base_context: Any, delta: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Base context updated by delta, with apis_json (JSON string or list) turned
+    into apis, completed to the full schema by build_context().
+    """
+    raw = dict(base_context) if isinstance(base_context, dict) else {}
+    raw.update(delta)
+    if "apis_json" in raw:
+        apis = raw.pop("apis_json")
+        if isinstance(apis, str):
+            try:
+                apis = json.loads(apis)
+            except (json.JSONDecodeError, TypeError):
+                apis = []
+        raw["apis"] = apis if isinstance(apis, list) else []
+    return build_context(**raw)

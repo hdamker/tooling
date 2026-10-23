@@ -1408,7 +1408,7 @@ def _jobs(sync_conclusion: str) -> dict:
     return {
         "jobs": [
             {"name": "release-automation / check-trigger", "conclusion": "success"},
-            {"name": "release-automation / sync-issue", "conclusion": sync_conclusion},
+            {"name": "release-automation / finalize", "conclusion": sync_conclusion},
         ]
     }
 
@@ -1470,7 +1470,7 @@ class TestPhaseDispatchSyncIssue:
                 "camaraproject/ReleaseTest", poll_timeout=10, dry_run=False,
             )
         assert report.passed is False
-        assert "sync-issue job" in report.detail
+        assert "finalize job" in report.detail
         assert "'skipped'" in report.detail
 
     def test_fail_when_run_failed(self, frozen_now):
@@ -1538,7 +1538,7 @@ class TestPhaseFireSyncIssue:
                 poll_timeout=10, dry_run=False, expected_titles=_EXPECTED_ALL,
             )
         assert report.passed is False
-        assert "sync-issue job" in report.detail
+        assert "finalize job" in report.detail
 
     def test_fail_when_only_ack_visible(self, frozen_now):
         ack = "<!-- release-bot:ack:1 -->\n**⏳ Validating `/sync-issue`...**"
