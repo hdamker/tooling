@@ -17,6 +17,7 @@ from .github_client import GitHubClient
 from .state_manager import ReleaseState, ReleaseStateManager
 from .issue_manager import IssueManager
 from .bot_responder import BotResponder
+from .labels import RELEASE_ISSUE_LABELS, ensure_labels
 
 
 # Marker to identify workflow-owned issues
@@ -24,18 +25,6 @@ WORKFLOW_MARKER = "<!-- release-automation:workflow-owned -->"
 RELEASE_TAG_MARKER_RE = re.compile(
     r"<!--\s*release-automation:release-tag:(?P<tag>.*?)\s*-->"
 )
-
-# Required labels for release automation
-# Format: (name, color_hex_without_hash, description)
-REQUIRED_LABELS = [
-    ("release-issue", "5319E7", "Release tracking issue managed by automation"),
-    ("release-state:planned", "0E8A16", "Release is planned"),
-    ("release-state:snapshot-active", "FBCA04", "Release snapshot is active"),
-    ("release-state:draft-ready", "1D76DB", "Draft release is ready"),
-    ("release-state:published", "0E8A16", "Release has been published"),
-    ("release-state:not-planned", "C2C9D1", "No release is currently planned"),
-]
-
 
 @dataclass
 class SyncResult:
@@ -105,13 +94,7 @@ class IssueSyncManager:
         if self._labels_ensured:
             return []
 
-        created = []
-        for name, color, description in REQUIRED_LABELS:
-            existing = self.gh.get_label(name)
-            if existing is None:
-                self.gh.create_label(name, color, description)
-                created.append(name)
-
+        created = ensure_labels(self.gh, RELEASE_ISSUE_LABELS)
         self._labels_ensured = True
         return created
 

@@ -29,6 +29,7 @@ from typing import Dict, List, Tuple
 import yaml
 
 from release_automation.scripts.git_operations import GitOperationsError
+from release_automation.scripts.labels import add_pr_labels
 from tooling_lib.cache_sync import (
     COMMON_DIR,
     MANIFEST_FILENAME,
@@ -313,10 +314,7 @@ def sync_common(api_git, commonalities_git, gh, release: str, bot_name: str, bot
     except Exception as e:
         print(f"::error::Failed to create sync PR: {e}")
         return CommonSyncOutcome(status="failed", unexpected_files=unexpected)
-    try:
-        gh.add_pr_labels(number, PR_LABELS)
-    except Exception as e:
-        print(f"Could not add labels: {e}")
+    add_pr_labels(gh, number, PR_LABELS)
     print(f"Sync PR created: {url}")
     return CommonSyncOutcome(status="created", pr_url=url, pr_number=str(number), unexpected_files=unexpected)
 

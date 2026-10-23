@@ -9,11 +9,11 @@ from unittest.mock import MagicMock, patch
 
 from release_automation.scripts.github_client import GitHubClientError
 from release_automation.scripts.issue_manager import IssueManager
+from release_automation.scripts.labels import RELEASE_ISSUE_LABELS
 from release_automation.scripts.issue_sync import (
     IssueSyncManager,
     SyncResult,
     WORKFLOW_MARKER,
-    REQUIRED_LABELS,
     post_publish_warnings,
 )
 from release_automation.scripts.state_manager import ReleaseInfoResult, ReleaseState
@@ -654,39 +654,6 @@ class TestWorkflowMarkerConstant:
         assert WORKFLOW_MARKER.endswith("-->")
 
 
-class TestRequiredLabels:
-    """Tests for REQUIRED_LABELS constant."""
-
-    def test_required_labels_defined(self):
-        """Test required labels are defined."""
-        assert len(REQUIRED_LABELS) == 6
-
-    def test_required_labels_have_correct_format(self):
-        """Test each label has (name, color, description) format."""
-        for label in REQUIRED_LABELS:
-            assert len(label) == 3
-            name, color, description = label
-            assert isinstance(name, str)
-            assert isinstance(color, str)
-            assert isinstance(description, str)
-            # Color should be 6 hex chars
-            assert len(color) == 6
-
-    def test_required_labels_include_release_issue(self):
-        """Test release-issue label is included."""
-        names = [l[0] for l in REQUIRED_LABELS]
-        assert "release-issue" in names
-
-    def test_required_labels_include_all_states(self):
-        """Test all state labels are included."""
-        names = [l[0] for l in REQUIRED_LABELS]
-        assert "release-state:planned" in names
-        assert "release-state:snapshot-active" in names
-        assert "release-state:draft-ready" in names
-        assert "release-state:published" in names
-        assert "release-state:not-planned" in names
-
-
 class TestEnsureLabelsExist:
     """Tests for ensure_labels_exist method."""
 
@@ -740,7 +707,7 @@ class TestEnsureLabelsExist:
         manager = IssueSyncManager(gh, MagicMock(), MagicMock(), MagicMock())
         created = manager.ensure_labels_exist()
 
-        expected_names = [l[0] for l in REQUIRED_LABELS]
+        expected_names = RELEASE_ISSUE_LABELS
         assert sorted(created) == sorted(expected_names)
 
     def test_passes_correct_color_and_description(self):
