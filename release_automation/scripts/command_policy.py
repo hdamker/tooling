@@ -295,6 +295,33 @@ def release_info_from_env(env) -> ReleaseInfoResult:
     )
 
 
+def response_context(result: Union[Plan, Rejection], trigger: Trigger, env) -> dict:
+    """Template variables the plan job's bot comment needs beyond the base context."""
+    run_url = (
+        f"{env.get('GITHUB_SERVER_URL', '')}/{env.get('GITHUB_REPOSITORY', '')}"
+        f"/actions/runs/{env.get('GITHUB_RUN_ID', '')}"
+    )
+    if result.response == RESPONSE_CONFIG_ERROR:
+        return {
+            "error_type": result.error_type,
+            "error_message": result.error_message,
+            "command": trigger.command,
+            "user": trigger.user,
+            "workflow_run_url": run_url,
+        }
+    if result.response == RESPONSE_REJECTED:
+        return {"error_message": result.error_message}
+    if result.response == RESPONSE_PUBLISH_CONFIRMATION:
+        return {
+            # Draft releases have no direct URL
+            "draft_release_url": (
+                f"{env.get('GITHUB_SERVER_URL', '')}/{env.get('GITHUB_REPOSITORY', '')}/releases"
+            ),
+            "src_commit_sha_short": env.get("SRC_COMMIT_SHA", "")[:7],
+        }
+    return {}
+
+
 def main(client=None) -> int:
     from .trigger import write_outputs
 
@@ -319,10 +346,18 @@ def main(client=None) -> int:
     else:
         print(f"Rejected: {result.error_message}")
 
+    # allowed/error_message keep the meaning they had as Validate Command
+    # outputs: set for slash commands with a derived state, empty otherwise.
+    validated = trigger.trigger_type == TRIGGER_SLASH_COMMAND and release_info.success
     write_outputs(env["GITHUB_OUTPUT"], {
-        "allowed": "true" if result.allowed else "false",
-        "error_message": "" if result.allowed else result.error_message,
+        "allowed": ("true" if result.allowed else "false") if validated else "",
+        "error_message": result.error_message if validated and not result.allowed else "",
         "plan": result.to_json(),
+        "response": result.response,
+        "response_release_tag": (
+            "unknown" if result.response == RESPONSE_CONFIG_ERROR else (release_info.release_tag or "")
+        ),
+        "response_context": json.dumps(response_context(result, trigger, env)),
     })
     return 0
 

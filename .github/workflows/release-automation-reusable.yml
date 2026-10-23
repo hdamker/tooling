@@ -38,11 +38,17 @@ permissions:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 1: Detect and classify trigger
+  # Phase 1: Plan — classify the trigger, derive state, apply the command
+  # policy, post the one response (ack update, rejection, config error or
+  # publish confirmation).
   # ─────────────────────────────────────────────────────────────────────────────
-  check-trigger:
+  plan:
     runs-on: ubuntu-latest
     outputs:
+      plan: ${{ steps.policy.outputs.plan }}
+      # Compatibility outputs under the names of the former check-trigger,
+      # derive-state and post-interim jobs, so the jobs after plan read them
+      # unchanged; removed when those jobs move into act/finalize.
       trigger_type: ${{ steps.detect.outputs.trigger_type }}
       command: ${{ steps.detect.outputs.command }}
       command_args: ${{ steps.detect.outputs.command_args }}
@@ -52,8 +58,34 @@ jobs:
       confirm_tag: ${{ steps.detect.outputs.confirm_tag }}
       trigger_pr_number: ${{ steps.detect.outputs.trigger_pr_number }}
       trigger_pr_url: ${{ steps.detect.outputs.trigger_pr_url }}
-      comment_id: ${{ steps.ack.outputs.comment_id }}
       trigger: ${{ steps.detect.outputs.trigger }}
+      release_tag: ${{ steps.state.outputs.release_tag }}
+      state: ${{ steps.state.outputs.state }}
+      snapshot_id: ${{ steps.state.outputs.snapshot_id }}
+      snapshot_branch: ${{ steps.state.outputs.snapshot_branch }}
+      release_review_branch: ${{ steps.state.outputs.release_review_branch }}
+      release_pr_number: ${{ steps.state.outputs.release_pr_number }}
+      release_issue_number: ${{ steps.state.outputs.release_issue_number }}
+      src_commit_sha: ${{ steps.state.outputs.src_commit_sha }}
+      release_type: ${{ steps.state.outputs.release_type }}
+      apis_json: ${{ steps.state.outputs.apis_json }}
+      commonalities_release: ${{ steps.state.outputs.commonalities_release }}
+      identity_consent_management_release: ${{ steps.state.outputs.identity_consent_management_release }}
+      source: ${{ steps.state.outputs.source }}
+      config_error: ${{ steps.state.outputs.config_error }}
+      config_error_type: ${{ steps.state.outputs.config_error_type }}
+      release_plan_url: ${{ steps.state.outputs.release_plan_url }}
+      src_commit_sha_short: ${{ steps.state.outputs.src_commit_sha_short }}
+      meta_release: ${{ steps.state.outputs.meta_release }}
+      common_cache_status: ${{ steps.cache-sync.outputs.common_cache_status }}
+      common_cache_details: ${{ steps.cache-sync.outputs.common_cache_details }}
+      common_sync_pr_url: ${{ steps.find-sync-pr.outputs.common_sync_pr_url }}
+      allowed: ${{ steps.policy.outputs.allowed }}
+      error_message: ${{ steps.policy.outputs.error_message }}
+      base_context: ${{ steps.assemble.outputs.base_context }}
+      comment_id: ${{ steps.respond.outputs.comment_id || steps.ack.outputs.comment_id }}
+      # True where the former post-interim job succeeded
+      interim_posted: ${{ steps.policy.outputs.response == 'interim_processing' && steps.respond.outcome == 'success' }}
     steps:
       - name: Fork Guard - Check Issues Enabled
         id: fork-guard
@@ -68,8 +100,8 @@ jobs:
           fi
 
       # Post early acknowledgment for slash commands, before any checkout so it
-      # lands within seconds. Later updated by post-interim (valid) or
-      # post-rejection (rejected). Uses GITHUB_TOKEN (not App token) to avoid
+      # lands within seconds. Later updated by Post Response with the policy's
+      # template. Uses GITHUB_TOKEN (not App token) to avoid
       # triggering extra workflow runs. The command list mirrors SLASH_COMMANDS
       # in release_automation/scripts/trigger.py (checked by a pytest).
       - name: Post Acknowledgment
@@ -135,8 +167,8 @@ jobs:
         if: steps.fork-guard.outputs.issues_enabled == 'true'
         run: pip install --quiet -r _tooling/requirements.txt
 
-      # release_tag is NOT output here - it comes from derive-state, which reads
-      # the authoritative sources (release-plan.yaml or release-metadata.yaml).
+      # release_tag is NOT output here - it comes from Derive Release State, which
+      # reads the authoritative sources (release-plan.yaml or release-metadata.yaml).
       - name: Detect Trigger Type
         id: detect
         if: steps.fork-guard.outputs.issues_enabled == 'true'
@@ -145,59 +177,10 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python -m release_automation.scripts.trigger
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 2: Derive current state (runs first to get release_tag from artifacts)
-  # ─────────────────────────────────────────────────────────────────────────────
-  derive-state:
-    needs: check-trigger
-    if: needs.check-trigger.outputs.should_continue == 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      release_tag: ${{ steps.state.outputs.release_tag }}
-      state: ${{ steps.state.outputs.state }}
-      snapshot_id: ${{ steps.state.outputs.snapshot_id }}
-      snapshot_branch: ${{ steps.state.outputs.snapshot_branch }}
-      release_review_branch: ${{ steps.state.outputs.release_review_branch }}
-      release_pr_number: ${{ steps.state.outputs.release_pr_number }}
-      release_issue_number: ${{ steps.state.outputs.release_issue_number }}
-      src_commit_sha: ${{ steps.state.outputs.src_commit_sha }}
-      release_type: ${{ steps.state.outputs.release_type }}
-      apis_json: ${{ steps.state.outputs.apis_json }}
-      commonalities_release: ${{ steps.state.outputs.commonalities_release }}
-      identity_consent_management_release: ${{ steps.state.outputs.identity_consent_management_release }}
-      source: ${{ steps.state.outputs.source }}
-      config_error: ${{ steps.state.outputs.config_error }}
-      config_error_type: ${{ steps.state.outputs.config_error_type }}
-      release_plan_url: ${{ steps.state.outputs.release_plan_url }}
-      src_commit_sha_short: ${{ steps.state.outputs.src_commit_sha_short }}
-      meta_release: ${{ steps.state.outputs.meta_release }}
-      # Common file cache sync outputs
-      common_cache_status: ${{ steps.cache-sync.outputs.common_cache_status }}
-      common_cache_details: ${{ steps.cache-sync.outputs.common_cache_details }}
-      common_sync_pr_url: ${{ steps.find-sync-pr.outputs.common_sync_pr_url }}
-      # Validate-command outputs (slash-command path; empty for non-slash triggers)
-      allowed: ${{ steps.validate.outputs.allowed }}
-      error_message: ${{ steps.validate.outputs.error_message }}
-      # Assemble-context output (empty when config_error is set)
-      base_context: ${{ steps.assemble.outputs.base_context }}
-    steps:
-      - name: Checkout tooling
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: _tooling
-          sparse-checkout: |
-            release_automation
-            shared-actions
-            tooling_lib
-            validation
-            linting/config
-
       - name: Derive Release State
         id: state
+        if: steps.detect.outputs.should_continue == 'true'
         uses: ./_tooling/shared-actions/derive-release-state
-        # No release_tag input - derived from repository artifacts (release-plan.yaml or release-metadata.yaml)
 
       # ── Common file cache sync detection ──────────────────────────────
       - name: Checkout API repo (sparse, for cache sync check)
@@ -216,75 +199,11 @@ jobs:
         if: |
           steps.state.outputs.config_error == '' &&
           steps.state.outputs.commonalities_release != ''
-        shell: python
+        working-directory: _tooling
         env:
           API_REPO_PATH: ${{ github.workspace }}/_api_repo
           COMMONALITIES_RELEASE: ${{ steps.state.outputs.commonalities_release }}
-          TOOLING_PATH: ${{ github.workspace }}/_tooling
-        run: |
-          import os, sys
-          from pathlib import Path
-
-          sys.path.insert(0, os.environ['TOOLING_PATH'])
-
-          comm_release = os.environ['COMMONALITIES_RELEASE']
-          api_repo = Path(os.environ['API_REPO_PATH'])
-          output_file = os.environ['GITHUB_OUTPUT']
-
-          # Version gate: only check for r4.2+
-          import re
-          m = re.match(r'^r(\d+)\.(\d+)$', comm_release)
-          if not m:
-              print(f"Cannot parse commonalities_release '{comm_release}', skipping cache check")
-              with open(output_file, 'a') as f:
-                  f.write("common_cache_status=\n")
-                  f.write("common_cache_details=\n")
-              sys.exit(0)
-
-          major, minor = int(m.group(1)), int(m.group(2))
-          if major < 4 or (major == 4 and minor < 2):
-              print(f"commonalities_release {comm_release} < r4.2, skipping cache check")
-              with open(output_file, 'a') as f:
-                  f.write("common_cache_status=\n")
-                  f.write("common_cache_details=\n")
-              sys.exit(0)
-
-          from tooling_lib.cache_sync import check_sync_status
-
-          expected = {"Commonalities": comm_release}
-          status = check_sync_status(api_repo, expected)
-
-          if status.in_sync:
-              print(f"Common file cache is in sync with {comm_release}")
-              with open(output_file, 'a') as f:
-                  f.write("common_cache_status=in_sync\n")
-                  f.write("common_cache_details=\n")
-              sys.exit(0)
-
-          # Build descriptive details
-          details_parts = []
-          if status.no_common_dir:
-              details_parts.append("code/common/ directory is missing")
-          elif status.no_manifest:
-              details_parts.append("code/common/.sync-manifest.yaml is missing")
-          else:
-              for src in status.sources:
-                  if src.tag_mismatch:
-                      expected_tag, actual_tag = src.tag_mismatch
-                      details_parts.append(
-                          f"{src.repository}: expected {expected_tag}, manifest has {actual_tag}"
-                      )
-                  for fname in src.missing_files:
-                      details_parts.append(f"{fname} missing from code/common/")
-                  for fname in src.modified_files:
-                      details_parts.append(f"{fname} modified since last sync")
-
-          details = "; ".join(details_parts) if details_parts else "cache mismatch detected"
-          print(f"Common file cache is stale: {details}")
-
-          with open(output_file, 'a') as f:
-              f.write("common_cache_status=stale\n")
-              f.write(f"common_cache_details={details}\n")
+        run: python -m release_automation.scripts.common_sync
 
       - name: Find existing sync PR
         id: find-sync-pr
@@ -302,18 +221,19 @@ jobs:
             echo "No existing sync PR found"
           fi
 
-      # ── Validate command (slash-command path; skipped on config error) ──
-      - name: Validate Command
-        id: validate
-        if: |
-          needs.check-trigger.outputs.trigger_type == 'slash_command' &&
-          steps.state.outputs.config_error == ''
+      # ── Command policy: Plan or Rejection, and the response to post ──
+      - name: Apply Command Policy
+        id: policy
+        if: steps.detect.outputs.should_continue == 'true'
         working-directory: _tooling
         env:
-          TRIGGER_JSON: ${{ needs.check-trigger.outputs.trigger }}
+          TRIGGER_JSON: ${{ steps.detect.outputs.trigger }}
           STATE: ${{ steps.state.outputs.state }}
           RELEASE_TAG: ${{ steps.state.outputs.release_tag }}
           RELEASE_TYPE: ${{ steps.state.outputs.release_type }}
+          SRC_COMMIT_SHA: ${{ steps.state.outputs.src_commit_sha }}
+          CONFIG_ERROR: ${{ steps.state.outputs.config_error }}
+          CONFIG_ERROR_TYPE: ${{ steps.state.outputs.config_error_type }}
           COMMON_CACHE_STATUS: ${{ steps.cache-sync.outputs.common_cache_status }}
           COMMON_CACHE_DETAILS: ${{ steps.cache-sync.outputs.common_cache_details }}
           COMMON_SYNC_PR_URL: ${{ steps.find-sync-pr.outputs.common_sync_pr_url }}
@@ -323,14 +243,16 @@ jobs:
       # ── Assemble Context (skipped on config error) ──
       - name: Assemble Context
         id: assemble
-        if: steps.state.outputs.config_error == ''
+        if: |
+          steps.detect.outputs.should_continue == 'true' &&
+          steps.state.outputs.config_error == ''
         run: |
           python3 _tooling/release_automation/scripts/workflow_context.py
         env:
-          CTX_COMMAND: ${{ needs.check-trigger.outputs.command }}
-          CTX_COMMAND_ARGS: ${{ needs.check-trigger.outputs.command_args }}
-          CTX_USER: ${{ needs.check-trigger.outputs.user }}
-          CTX_TRIGGER_TYPE: ${{ needs.check-trigger.outputs.trigger_type }}
+          CTX_COMMAND: ${{ steps.detect.outputs.command }}
+          CTX_COMMAND_ARGS: ${{ steps.detect.outputs.command_args }}
+          CTX_USER: ${{ steps.detect.outputs.user }}
+          CTX_TRIGGER_TYPE: ${{ steps.detect.outputs.trigger_type }}
           CTX_RELEASE_TAG: ${{ steps.state.outputs.release_tag }}
           CTX_STATE: ${{ steps.state.outputs.state }}
           CTX_RELEASE_TYPE: ${{ steps.state.outputs.release_type }}
@@ -345,86 +267,54 @@ jobs:
           CTX_IDENTITY_CONSENT_MANAGEMENT_RELEASE: ${{ steps.state.outputs.identity_consent_management_release }}
           CTX_COMMON_CACHE_STATUS: ${{ steps.cache-sync.outputs.common_cache_status }}
           CTX_COMMON_CACHE_DETAILS: ${{ steps.cache-sync.outputs.common_cache_details }}
-          CTX_TRIGGER_PR_NUMBER: ${{ needs.check-trigger.outputs.trigger_pr_number }}
-          CTX_TRIGGER_PR_URL: ${{ needs.check-trigger.outputs.trigger_pr_url }}
+          CTX_TRIGGER_PR_NUMBER: ${{ steps.detect.outputs.trigger_pr_number }}
+          CTX_TRIGGER_PR_URL: ${{ steps.detect.outputs.trigger_pr_url }}
           GITHUB_TOKEN: ${{ github.token }}
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 2b: Handle configuration errors (if derive-state detected any)
-  # ─────────────────────────────────────────────────────────────────────────────
-  handle-config-error:
-    needs: [check-trigger, derive-state]
-    if: |
-      always() &&
-      needs.derive-state.result == 'success' &&
-      needs.check-trigger.outputs.should_continue == 'true' &&
-      needs.derive-state.outputs.config_error != ''
-    runs-on: ubuntu-latest
-    steps:
-      - name: Determine Error Response
-        id: decide
-        run: |
-          TRIGGER_TYPE="${{ needs.check-trigger.outputs.trigger_type }}"
-          echo "Trigger type: $TRIGGER_TYPE"
-          echo "Config error: ${{ needs.derive-state.outputs.config_error }}"
-          echo "Error type: ${{ needs.derive-state.outputs.config_error_type }}"
-
-          if [[ "$TRIGGER_TYPE" == "slash_command" ]]; then
-            echo "action=post_comment" >> $GITHUB_OUTPUT
-          else
-            echo "action=fail_workflow" >> $GITHUB_OUTPUT
-          fi
-
+      # ── Response: one bot comment, template chosen by the policy ──
+      # interim_processing and command_rejected update the ack with GITHUB_TOKEN
+      # (no extra issue_comment runs); config_error and publish_confirmation use
+      # the App token, as their former jobs did. A failed interim post does not
+      # stop the command (post-result then skips, as before).
       - name: Generate App Token
         id: app-token
-        if: steps.decide.outputs.action == 'post_comment' && vars.RELEASE_APP_CLIENT_ID != ''
+        if: |
+          (steps.policy.outputs.response == 'config_error' ||
+           steps.policy.outputs.response == 'publish_confirmation') &&
+          vars.RELEASE_APP_CLIENT_ID != ''
         uses: actions/create-github-app-token@v3
         with:
           client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
-      - name: Checkout tooling (for slash command)
-        if: steps.decide.outputs.action == 'post_comment'
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: _tooling
-          sparse-checkout: |
-            release_automation
-            shared-actions
-            tooling_lib
-            validation
-            linting/config
-
-      - name: Post Config Error Comment
-        if: steps.decide.outputs.action == 'post_comment'
+      - name: Post Response
+        id: respond
+        if: steps.policy.outputs.response != ''
+        continue-on-error: ${{ steps.policy.outputs.response == 'interim_processing' }}
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
-          github_token: ${{ steps.app-token.outputs.token || github.token }}
-          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
-          release_tag: "unknown"
+          github_token: ${{ (steps.policy.outputs.response == 'config_error' || steps.policy.outputs.response == 'publish_confirmation') && steps.app-token.outputs.token || github.token }}
+          issue_number: ${{ steps.detect.outputs.issue_number }}
+          release_tag: ${{ steps.policy.outputs.response_release_tag }}
           run_id: ${{ github.run_id }}
-          template: config_error
-          context: |
-            {
-              "error_type": "${{ needs.derive-state.outputs.config_error_type }}",
-              "error_message": "${{ needs.derive-state.outputs.config_error }}",
-              "command": "${{ needs.check-trigger.outputs.command }}",
-              "user": "${{ needs.check-trigger.outputs.user }}",
-              "workflow_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            }
-          comment_id: ${{ needs.check-trigger.outputs.comment_id }}
+          template: ${{ steps.policy.outputs.response }}
+          base_context: ${{ steps.assemble.outputs.base_context || '{}' }}
+          context: ${{ steps.policy.outputs.response_context }}
+          comment_id: ${{ steps.ack.outputs.comment_id }}
 
-      - name: Fail workflow (for non-slash-command triggers)
-        if: steps.decide.outputs.action == 'fail_workflow'
+      - name: Fail workflow (config error on a non-slash-command trigger)
+        if: |
+          steps.state.outputs.config_error != '' &&
+          steps.detect.outputs.trigger_type != 'slash_command'
+        env:
+          CONFIG_ERROR: ${{ steps.state.outputs.config_error }}
+          ERROR_TYPE: ${{ steps.state.outputs.config_error_type }}
         run: |
-          echo "::error::Configuration Error: ${{ needs.derive-state.outputs.config_error }}"
+          echo "::error::Configuration Error: $CONFIG_ERROR"
           echo ""
-          echo "Error type: ${{ needs.derive-state.outputs.config_error_type }}"
+          echo "Error type: $ERROR_TYPE"
           echo ""
           echo "How to fix:"
-          ERROR_TYPE="${{ needs.derive-state.outputs.config_error_type }}"
           case "$ERROR_TYPE" in
             missing_file)
               echo "  1. Create release-plan.yaml in repository root"
@@ -444,108 +334,14 @@ jobs:
           esac
           exit 1
 
-  # assemble-context was folded into derive-state (single runner; same setup).
-  # See the "Assemble Context" step at the end of derive-state for the canonical
-  # location. Output is exposed as needs.derive-state.outputs.base_context.
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 3: Post interim comment (for slash commands only)
-  # ─────────────────────────────────────────────────────────────────────────────
-  post-interim:
-    needs: [check-trigger, derive-state]
-    if: |
-      needs.check-trigger.outputs.should_continue == 'true' &&
-      needs.check-trigger.outputs.trigger_type == 'slash_command' &&
-      needs.derive-state.outputs.config_error == '' &&
-      needs.derive-state.outputs.allowed == 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      comment_id: ${{ steps.post.outputs.comment_id }}
-    steps:
-      # No App token needed — interim updates the ack comment using GITHUB_TOKEN
-      # to avoid triggering extra workflow runs from issue_comment events.
-      - name: Checkout tooling
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: _tooling
-          sparse-checkout: |
-            release_automation
-            shared-actions
-            tooling_lib
-            validation
-            linting/config
-
-      - name: Post Processing Comment
-        id: post
-        uses: ./_tooling/shared-actions/post-bot-comment
-        with:
-          github_token: ${{ github.token }}
-          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
-          release_tag: ${{ needs.derive-state.outputs.release_tag }}
-          run_id: ${{ github.run_id }}
-          template: interim_processing
-          base_context: ${{ needs.derive-state.outputs.base_context }}
-          context: "{}"
-          comment_id: ${{ needs.check-trigger.outputs.comment_id }}
-
-  # validate-command was folded into derive-state (single runner; same setup).
-  # See the "Validate Command" step at the end of derive-state for the canonical
-  # location. Outputs are exposed as needs.derive-state.outputs.{allowed,error_message}.
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 5a: Handle rejected command
-  # ─────────────────────────────────────────────────────────────────────────────
-  post-rejection:
-    needs:
-      [
-        check-trigger,
-        derive-state,
-      ]
-    if: |
-      needs.check-trigger.outputs.trigger_type == 'slash_command' &&
-      needs.derive-state.outputs.allowed == 'false'
-    runs-on: ubuntu-latest
-    steps:
-      # No App token needed — rejection updates the ack comment using GITHUB_TOKEN
-      # to avoid triggering extra workflow runs from issue_comment events.
-      - name: Checkout tooling
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: _tooling
-          sparse-checkout: |
-            release_automation
-            shared-actions
-            tooling_lib
-            validation
-            linting/config
-
-      - name: Post Rejection Comment
-        uses: ./_tooling/shared-actions/post-bot-comment
-        with:
-          github_token: ${{ github.token }}
-          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
-          release_tag: ${{ needs.derive-state.outputs.release_tag }}
-          run_id: ${{ github.run_id }}
-          template: command_rejected
-          base_context: ${{ needs.derive-state.outputs.base_context }}
-          context: |
-            {
-              "error_message": "${{ needs.derive-state.outputs.error_message }}"
-            }
-          comment_id: ${{ needs.check-trigger.outputs.comment_id }}
-
   # ─────────────────────────────────────────────────────────────────────────────
   # Phase 5b: Execute create-snapshot command
   # ─────────────────────────────────────────────────────────────────────────────
   create-snapshot:
-    needs: [check-trigger, derive-state]
+    needs: [plan]
     if: |
-      needs.check-trigger.outputs.command == 'create-snapshot' &&
-      needs.derive-state.outputs.allowed == 'true'
+      needs.plan.outputs.command == 'create-snapshot' &&
+      needs.plan.outputs.allowed == 'true'
     runs-on: ubuntu-latest
     outputs:
       success: ${{ steps.create.outputs.success || steps.validation-gate.outputs.success }}
@@ -731,7 +527,7 @@ jobs:
         id: create
         uses: ./_tooling/shared-actions/create-snapshot
         with:
-          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          release_tag: ${{ needs.plan.outputs.release_tag }}
           base_branch: main
           github_token: ${{ steps.app-token.outputs.token || github.token }}
           tooling_path: ${{ github.workspace }}/_tooling
@@ -759,10 +555,10 @@ jobs:
   # Phase 5c: Execute discard-snapshot command
   # ─────────────────────────────────────────────────────────────────────────────
   discard-snapshot:
-    needs: [check-trigger, derive-state]
+    needs: [plan]
     if: |
-      needs.check-trigger.outputs.command == 'discard-snapshot' &&
-      needs.derive-state.outputs.allowed == 'true'
+      needs.plan.outputs.command == 'discard-snapshot' &&
+      needs.plan.outputs.allowed == 'true'
     runs-on: ubuntu-latest
     outputs:
       success: ${{ steps.discard.outputs.success }}
@@ -783,9 +579,9 @@ jobs:
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
-            const snapshotBranch = '${{ needs.derive-state.outputs.snapshot_branch }}';
-            const prNumber = '${{ needs.derive-state.outputs.release_pr_number }}';
-            const releaseTag = '${{ needs.derive-state.outputs.release_tag }}';
+            const snapshotBranch = '${{ needs.plan.outputs.snapshot_branch }}';
+            const prNumber = '${{ needs.plan.outputs.release_pr_number }}';
+            const releaseTag = '${{ needs.plan.outputs.release_tag }}';
 
             console.log(`Discarding snapshot for ${releaseTag}`);
             console.log(`  Snapshot branch: ${snapshotBranch}`);
@@ -831,7 +627,7 @@ jobs:
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
-            const reviewBranch = '${{ needs.derive-state.outputs.release_review_branch }}';
+            const reviewBranch = '${{ needs.plan.outputs.release_review_branch }}';
             if (!reviewBranch) return;
 
             const newName = `${reviewBranch}-preserved`;
@@ -869,10 +665,10 @@ jobs:
   # Phase 5d: Execute delete-draft command
   # ─────────────────────────────────────────────────────────────────────────────
   delete-draft:
-    needs: [check-trigger, derive-state]
+    needs: [plan]
     if: |
-      needs.check-trigger.outputs.command == 'delete-draft' &&
-      needs.derive-state.outputs.allowed == 'true'
+      needs.plan.outputs.command == 'delete-draft' &&
+      needs.plan.outputs.allowed == 'true'
     runs-on: ubuntu-latest
     outputs:
       success: ${{ steps.delete.outputs.success }}
@@ -893,8 +689,8 @@ jobs:
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
-            const releaseTag = '${{ needs.derive-state.outputs.release_tag }}';
-            const snapshotBranch = '${{ needs.derive-state.outputs.snapshot_branch }}';
+            const releaseTag = '${{ needs.plan.outputs.release_tag }}';
+            const snapshotBranch = '${{ needs.plan.outputs.snapshot_branch }}';
 
             console.log(`Deleting draft release for ${releaseTag}`);
             console.log(`  Snapshot branch: ${snapshotBranch}`);
@@ -962,7 +758,7 @@ jobs:
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
-            const reviewBranch = '${{ needs.derive-state.outputs.release_review_branch }}';
+            const reviewBranch = '${{ needs.plan.outputs.release_review_branch }}';
             if (!reviewBranch) return;
 
             const newName = `${reviewBranch}-preserved`;
@@ -997,72 +793,15 @@ jobs:
             }
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Phase 5e: Handle publish-release confirmation (no --confirm flag)
-  # ─────────────────────────────────────────────────────────────────────────────
-  publish-confirmation:
-    needs: [check-trigger, derive-state, post-interim]
-    if: |
-      needs.check-trigger.outputs.command == 'publish-release' &&
-      needs.derive-state.outputs.allowed == 'true' &&
-      needs.check-trigger.outputs.confirm_tag == ''
-    runs-on: ubuntu-latest
-    steps:
-      - name: Generate App Token
-        id: app-token
-        if: vars.RELEASE_APP_CLIENT_ID != ''
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
-      - name: Checkout tooling
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: _tooling
-          sparse-checkout: |
-            release_automation
-            shared-actions
-            tooling_lib
-            validation
-            linting/config
-
-      - name: Derive context values
-        id: context
-        run: |
-          # Get short SHA (first 7 chars)
-          SRC_SHA="${{ needs.derive-state.outputs.src_commit_sha }}"
-          echo "src_commit_sha_short=${SRC_SHA:0:7}" >> $GITHUB_OUTPUT
-          # Construct releases page URL (draft releases don't have direct URLs)
-          echo "draft_release_url=https://github.com/${{ github.repository }}/releases" >> $GITHUB_OUTPUT
-
-      - name: Post confirmation message
-        uses: ./_tooling/shared-actions/post-bot-comment
-        with:
-          github_token: ${{ steps.app-token.outputs.token || github.token }}
-          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
-          release_tag: ${{ needs.derive-state.outputs.release_tag }}
-          run_id: ${{ github.run_id }}
-          template: publish_confirmation
-          base_context: ${{ needs.derive-state.outputs.base_context }}
-          context: |
-            {
-              "draft_release_url": "${{ steps.context.outputs.draft_release_url }}",
-              "src_commit_sha_short": "${{ steps.context.outputs.src_commit_sha_short }}"
-            }
-          comment_id: ${{ needs.post-interim.outputs.comment_id }}
-
-  # ─────────────────────────────────────────────────────────────────────────────
   # Phase 5f: Handle publish-release (with --confirm flag)
   # ─────────────────────────────────────────────────────────────────────────────
   publish-release:
     name: "Publish Release"
-    needs: [check-trigger, derive-state]
+    needs: [plan]
     if: |
-      needs.check-trigger.outputs.command == 'publish-release' &&
-      needs.check-trigger.outputs.confirm_tag != '' &&
-      needs.derive-state.outputs.allowed == 'true'
+      needs.plan.outputs.command == 'publish-release' &&
+      needs.plan.outputs.confirm_tag != '' &&
+      needs.plan.outputs.allowed == 'true'
     runs-on: ubuntu-latest
     outputs:
       success: ${{ steps.publish.outputs.success }}
@@ -1106,11 +845,11 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           OWNER: ${{ github.repository_owner }}
           REPO: ${{ github.event.repository.name }}
-          RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
-          SNAPSHOT_BRANCH: ${{ needs.derive-state.outputs.snapshot_branch }}
-          RELEASE_REVIEW_BRANCH: ${{ needs.derive-state.outputs.release_review_branch }}
-          SRC_COMMIT_SHA: ${{ needs.derive-state.outputs.src_commit_sha }}
-          RELEASE_ISSUE_NUMBER: ${{ needs.derive-state.outputs.release_issue_number }}
+          RELEASE_TAG: ${{ needs.plan.outputs.release_tag }}
+          SNAPSHOT_BRANCH: ${{ needs.plan.outputs.snapshot_branch }}
+          RELEASE_REVIEW_BRANCH: ${{ needs.plan.outputs.release_review_branch }}
+          SRC_COMMIT_SHA: ${{ needs.plan.outputs.src_commit_sha }}
+          RELEASE_ISSUE_NUMBER: ${{ needs.plan.outputs.release_issue_number }}
         run: |
           cd _tooling
           python3 -u - <<'PYTHON_SCRIPT'
@@ -1215,7 +954,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   create-sync-pr:
     name: "Create Post-Release Sync PR"
-    needs: [check-trigger, derive-state, publish-release]
+    needs: [plan, publish-release]
     if: |
       needs.publish-release.outputs.success == 'true'
     runs-on: ubuntu-latest
@@ -1241,7 +980,7 @@ jobs:
       - name: Copy README release info from tag
         id: readme
         env:
-          RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
+          RELEASE_TAG: ${{ needs.plan.outputs.release_tag }}
         uses: actions/github-script@v9
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
@@ -1313,7 +1052,7 @@ jobs:
         id: changelog
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
-          RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
+          RELEASE_TAG: ${{ needs.plan.outputs.release_tag }}
         uses: actions/github-script@v9
         with:
           script: |
@@ -1381,7 +1120,7 @@ jobs:
         id: sync
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
-          RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
+          RELEASE_TAG: ${{ needs.plan.outputs.release_tag }}
           README_CHANGED: ${{ steps.readme.outputs.changed }}
           CHANGELOG_SYNCED: ${{ steps.changelog.outputs.synced }}
         run: |
@@ -1453,8 +1192,13 @@ jobs:
   # Phase 5g: Handle PR merge (draft release creation)
   # ─────────────────────────────────────────────────────────────────────────────
   handle-pr-merge:
-    needs: [check-trigger, derive-state]
-    if: needs.check-trigger.outputs.trigger_type == 'pr_merge'
+    needs: [plan]
+    # Runs on a config error too (the plan job then fails on purpose), as it
+    # did when a separate job reported the config error.
+    if: |
+      !cancelled() &&
+      needs.plan.outputs.trigger_type == 'pr_merge' &&
+      (needs.plan.result == 'success' || needs.plan.outputs.config_error != '')
     runs-on: ubuntu-latest
     outputs:
       success: ${{ steps.create-draft.outputs.success }}
@@ -1475,8 +1219,8 @@ jobs:
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
-            const snapshotBranch = '${{ needs.derive-state.outputs.snapshot_branch }}';
-            const releaseTag = '${{ needs.derive-state.outputs.release_tag }}';
+            const snapshotBranch = '${{ needs.plan.outputs.snapshot_branch }}';
+            const releaseTag = '${{ needs.plan.outputs.release_tag }}';
 
             // Derive meta-release from tag: r4.1 → r4, r3.2 → r3
             const metaRelease = releaseTag.match(/^(r\d+)/)?.[1] || '';
@@ -1609,9 +1353,9 @@ jobs:
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
-            const releaseTag = '${{ needs.derive-state.outputs.release_tag }}';
-            const snapshotBranch = '${{ needs.derive-state.outputs.snapshot_branch }}';
-            const releaseType = '${{ needs.derive-state.outputs.release_type }}';
+            const releaseTag = '${{ needs.plan.outputs.release_tag }}';
+            const snapshotBranch = '${{ needs.plan.outputs.snapshot_branch }}';
+            const releaseType = '${{ needs.plan.outputs.release_type }}';
             const releaseNotes = process.env.RELEASE_NOTES || '';
 
             console.log(`Creating draft release for ${releaseTag}`);
@@ -1659,7 +1403,7 @@ jobs:
       # release_date is set during /publish-release (finalize_metadata), not at draft creation
 
       - name: Checkout tooling for bot comment
-        if: steps.create-draft.outputs.success == 'true' && needs.derive-state.outputs.release_issue_number != ''
+        if: steps.create-draft.outputs.success == 'true' && needs.plan.outputs.release_issue_number != ''
         uses: actions/checkout@v7
         with:
           repository: ${{ job.workflow_repository }}
@@ -1673,14 +1417,14 @@ jobs:
             linting/config
 
       - name: Post draft_created comment
-        if: steps.create-draft.outputs.success == 'true' && needs.derive-state.outputs.release_issue_number != ''
+        if: steps.create-draft.outputs.success == 'true' && needs.plan.outputs.release_issue_number != ''
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
-          issue_number: ${{ needs.derive-state.outputs.release_issue_number }}
-          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          issue_number: ${{ needs.plan.outputs.release_issue_number }}
+          release_tag: ${{ needs.plan.outputs.release_tag }}
           run_id: ${{ github.run_id }}
           template: draft_created
-          base_context: ${{ needs.derive-state.outputs.base_context }}
+          base_context: ${{ needs.plan.outputs.base_context }}
           github_token: ${{ steps.app-token.outputs.token || github.token }}
           context: |
             {
@@ -1694,13 +1438,13 @@ jobs:
   # Phase 5f: Handle issue close/reopen events
   # ─────────────────────────────────────────────────────────────────────────────
   handle-issue-event:
-    needs: [check-trigger, derive-state]
+    needs: [plan]
     if: |
       always() &&
-      needs.derive-state.result == 'success' &&
-      needs.derive-state.outputs.config_error == '' &&
-      (needs.check-trigger.outputs.trigger_type == 'issue_close' ||
-      needs.check-trigger.outputs.trigger_type == 'issue_reopen')
+      needs.plan.result == 'success' &&
+      needs.plan.outputs.config_error == '' &&
+      (needs.plan.outputs.trigger_type == 'issue_close' ||
+      needs.plan.outputs.trigger_type == 'issue_reopen')
     runs-on: ubuntu-latest
     outputs:
       action_taken: ${{ steps.handle.outputs.action_taken }}
@@ -1732,9 +1476,9 @@ jobs:
         with:
           github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
-            const triggerType = '${{ needs.check-trigger.outputs.trigger_type }}';
-            const currentState = '${{ needs.derive-state.outputs.state }}';
-            const issueNumber = parseInt('${{ needs.check-trigger.outputs.issue_number }}');
+            const triggerType = '${{ needs.plan.outputs.trigger_type }}';
+            const currentState = '${{ needs.plan.outputs.state }}';
+            const issueNumber = parseInt('${{ needs.plan.outputs.issue_number }}');
 
             console.log(`Handling ${triggerType} event`);
             console.log(`Current state: ${currentState}`);
@@ -1771,11 +1515,11 @@ jobs:
         if: steps.handle.outputs.action_taken == 'reopened'
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
-          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
-          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          issue_number: ${{ needs.plan.outputs.issue_number }}
+          release_tag: ${{ needs.plan.outputs.release_tag }}
           run_id: ${{ github.run_id }}
           template: issue_reopened
-          base_context: ${{ needs.derive-state.outputs.base_context }}
+          base_context: ${{ needs.plan.outputs.base_context }}
           github_token: ${{ steps.app-token.outputs.token || github.token }}
           context: |
             {
@@ -1789,8 +1533,7 @@ jobs:
     name: "sync-issue"
     needs:
       [
-        check-trigger,
-        derive-state,
+        plan,
         create-snapshot,
         discard-snapshot,
         delete-draft,
@@ -1799,15 +1542,15 @@ jobs:
       ]
     if: |
       always() &&
-      needs.derive-state.outputs.config_error == '' &&
-      needs.derive-state.outputs.state != '' &&
+      needs.plan.outputs.config_error == '' &&
+      needs.plan.outputs.state != '' &&
       (
         (needs.create-snapshot.result == 'success' && needs.create-snapshot.outputs.success == 'true') ||
         (needs.discard-snapshot.result == 'success' && needs.discard-snapshot.outputs.success == 'true') ||
         (needs.delete-draft.result == 'success' && needs.delete-draft.outputs.success == 'true') ||
         (needs.handle-pr-merge.result == 'success' && needs.handle-pr-merge.outputs.success == 'true') ||
         (needs.handle-issue-event.result == 'success') ||
-        (needs.check-trigger.outputs.command == 'sync-issue')
+        (needs.plan.outputs.command == 'sync-issue')
       )
     runs-on: ubuntu-latest
     outputs:
@@ -1843,7 +1586,7 @@ jobs:
 
       - name: Checkout API repo (for common sync)
         id: sync-checkout-api
-        if: needs.derive-state.outputs.common_cache_status == 'stale'
+        if: needs.plan.outputs.common_cache_status == 'stale'
         continue-on-error: true
         uses: actions/checkout@v7
         with:
@@ -1858,7 +1601,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: camaraproject/Commonalities
-          ref: ${{ needs.derive-state.outputs.commonalities_release }}
+          ref: ${{ needs.plan.outputs.commonalities_release }}
           path: _commonalities
           sparse-checkout: artifacts/common
           sparse-checkout-cone-mode: true
@@ -1868,7 +1611,7 @@ jobs:
         if: steps.sync-checkout-commonalities.outcome == 'success'
         continue-on-error: true
         env:
-          COMMONALITIES_RELEASE: ${{ needs.derive-state.outputs.commonalities_release }}
+          COMMONALITIES_RELEASE: ${{ needs.plan.outputs.commonalities_release }}
           TOOLING_PATH: ${{ github.workspace }}/_tooling
         shell: python
         run: |
@@ -1932,7 +1675,7 @@ jobs:
 
       - name: Resolve Bot Identity (for common sync)
         id: sync-bot-identity
-        if: needs.derive-state.outputs.common_cache_status == 'stale' && steps.sync-common.outputs.synced == 'true'
+        if: needs.plan.outputs.common_cache_status == 'stale' && steps.sync-common.outputs.synced == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
         run: |
@@ -1949,11 +1692,11 @@ jobs:
 
       - name: Create or update common sync PR
         id: sync-pr
-        if: needs.derive-state.outputs.common_cache_status == 'stale' && steps.sync-common.outputs.synced == 'true'
+        if: needs.plan.outputs.common_cache_status == 'stale' && steps.sync-common.outputs.synced == 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
-          COMMONALITIES_RELEASE: ${{ needs.derive-state.outputs.commonalities_release }}
+          COMMONALITIES_RELEASE: ${{ needs.plan.outputs.commonalities_release }}
         run: |
           cd _api_repo
 
@@ -2068,7 +1811,7 @@ jobs:
             force_update="true"
           elif [ "${{ needs.handle-pr-merge.result }}" = "success" ] && [ "${{ needs.handle-pr-merge.outputs.success }}" = "true" ]; then
             state_override="draft-ready"
-            snapshot_branch_override="${{ needs.derive-state.outputs.snapshot_branch }}"
+            snapshot_branch_override="${{ needs.plan.outputs.snapshot_branch }}"
             release_pr_number_override="${{ github.event.pull_request.number }}"
             draft_release_url_override="${{ needs.handle-pr-merge.outputs.draft_release_url }}"
             force_update="true"
@@ -2078,7 +1821,7 @@ jobs:
           elif [ "${{ needs.delete-draft.result }}" = "success" ] && [ "${{ needs.delete-draft.outputs.success }}" = "true" ]; then
             state_override="planned"
             force_update="true"
-          elif [ "${{ needs.check-trigger.outputs.command }}" = "sync-issue" ]; then
+          elif [ "${{ needs.plan.outputs.command }}" = "sync-issue" ]; then
             force_update="true"
           fi
 
@@ -2094,20 +1837,20 @@ jobs:
         id: sync
         uses: ./_tooling/shared-actions/sync-release-issue
         with:
-          release_tag: ${{ needs.derive-state.outputs.release_tag }}
-          state: ${{ needs.derive-state.outputs.state }}
-          snapshot_branch: ${{ needs.derive-state.outputs.snapshot_branch }}
-          release_pr_number: ${{ needs.derive-state.outputs.release_pr_number }}
+          release_tag: ${{ needs.plan.outputs.release_tag }}
+          state: ${{ needs.plan.outputs.state }}
+          snapshot_branch: ${{ needs.plan.outputs.snapshot_branch }}
+          release_pr_number: ${{ needs.plan.outputs.release_pr_number }}
           state_override: ${{ steps.sync-context.outputs.state_override }}
           snapshot_branch_override: ${{ steps.sync-context.outputs.snapshot_branch_override }}
           release_pr_number_override: ${{ steps.sync-context.outputs.release_pr_number_override }}
           draft_release_url_override: ${{ steps.sync-context.outputs.draft_release_url_override }}
           force_update: ${{ steps.sync-context.outputs.force_update }}
-          trigger_type: ${{ needs.check-trigger.outputs.trigger_type }}
+          trigger_type: ${{ needs.plan.outputs.trigger_type }}
           github_token: ${{ steps.app-token.outputs.token || github.token }}
-          common_cache_status: ${{ needs.derive-state.outputs.common_cache_status }}
-          common_cache_details: ${{ needs.derive-state.outputs.common_cache_details }}
-          common_sync_pr_url: ${{ steps.sync-pr.outputs.sync_pr_url || needs.derive-state.outputs.common_sync_pr_url }}
+          common_cache_status: ${{ needs.plan.outputs.common_cache_status }}
+          common_cache_details: ${{ needs.plan.outputs.common_cache_details }}
+          common_sync_pr_url: ${{ steps.sync-pr.outputs.sync_pr_url || needs.plan.outputs.common_sync_pr_url }}
 
       - name: Log Result
         run: |
@@ -2119,15 +1862,15 @@ jobs:
       - name: Post Not-Planned Notification
         if: |
           steps.sync.outputs.issue_action == 'updated' &&
-          needs.derive-state.outputs.state == 'not_planned' &&
+          needs.plan.outputs.state == 'not_planned' &&
           steps.sync.outputs.issue_number != ''
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
           issue_number: ${{ steps.sync.outputs.issue_number }}
-          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          release_tag: ${{ needs.plan.outputs.release_tag }}
           run_id: ${{ github.run_id }}
           template: state_not_planned
-          base_context: ${{ needs.derive-state.outputs.base_context }}
+          base_context: ${{ needs.plan.outputs.base_context }}
           github_token: ${{ steps.app-token.outputs.token || github.token }}
           context: |
             {
@@ -2141,17 +1884,17 @@ jobs:
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
           issue_number: ${{ steps.sync.outputs.issue_number }}
-          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          release_tag: ${{ needs.plan.outputs.release_tag }}
           run_id: ${{ github.run_id }}
           template: issue_created
-          base_context: ${{ needs.derive-state.outputs.base_context }}
+          base_context: ${{ needs.plan.outputs.base_context }}
           github_token: ${{ steps.app-token.outputs.token || github.token }}
           context: |
             {
               "state": "planned",
-              "trigger_type": "${{ needs.check-trigger.outputs.trigger_type }}",
-              "trigger_pr_number": "${{ needs.check-trigger.outputs.trigger_pr_number }}",
-              "trigger_pr_url": "${{ needs.check-trigger.outputs.trigger_pr_url }}",
+              "trigger_type": "${{ needs.plan.outputs.trigger_type }}",
+              "trigger_pr_number": "${{ needs.plan.outputs.trigger_pr_number }}",
+              "trigger_pr_url": "${{ needs.plan.outputs.trigger_pr_url }}",
               "release_plan_url": "${{ github.server_url }}/${{ github.repository }}/blob/main/release-plan.yaml",
               "closed_issue_number": "${{ github.event.issue.number }}",
               "closed_issue_url": "${{ github.event.issue.html_url }}"
@@ -2159,55 +1902,55 @@ jobs:
 
       - name: Post Config Drift Warning
         if: |
-          needs.check-trigger.outputs.trigger_type == 'release_plan_change' &&
-          needs.derive-state.outputs.release_issue_number != '' &&
-          (needs.derive-state.outputs.state == 'snapshot-active' ||
-           needs.derive-state.outputs.state == 'draft-ready')
+          needs.plan.outputs.trigger_type == 'release_plan_change' &&
+          needs.plan.outputs.release_issue_number != '' &&
+          (needs.plan.outputs.state == 'snapshot-active' ||
+           needs.plan.outputs.state == 'draft-ready')
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
-          issue_number: ${{ needs.derive-state.outputs.release_issue_number }}
-          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          issue_number: ${{ needs.plan.outputs.release_issue_number }}
+          release_tag: ${{ needs.plan.outputs.release_tag }}
           run_id: ${{ github.run_id }}
           template: config_drift_warning
-          base_context: ${{ needs.derive-state.outputs.base_context }}
+          base_context: ${{ needs.plan.outputs.base_context }}
           github_token: ${{ steps.app-token.outputs.token || github.token }}
           context: |
             {
               "trigger_type": "release_plan_change",
-              "trigger_pr_number": "${{ needs.check-trigger.outputs.trigger_pr_number }}",
-              "trigger_pr_url": "${{ needs.check-trigger.outputs.trigger_pr_url }}",
+              "trigger_pr_number": "${{ needs.plan.outputs.trigger_pr_number }}",
+              "trigger_pr_url": "${{ needs.plan.outputs.trigger_pr_url }}",
               "release_plan_url": "${{ github.server_url }}/${{ github.repository }}/blob/main/release-plan.yaml"
             }
 
       - name: Post Common Sync PR Created
         if: |
           steps.sync-pr.outputs.sync_status == 'created' &&
-          (needs.derive-state.outputs.release_issue_number != '' || steps.sync.outputs.issue_number != '')
+          (needs.plan.outputs.release_issue_number != '' || steps.sync.outputs.issue_number != '')
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
-          issue_number: ${{ needs.derive-state.outputs.release_issue_number || steps.sync.outputs.issue_number }}
-          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          issue_number: ${{ needs.plan.outputs.release_issue_number || steps.sync.outputs.issue_number }}
+          release_tag: ${{ needs.plan.outputs.release_tag }}
           run_id: ${{ github.run_id }}
           template: common_sync_pr_created
-          base_context: ${{ needs.derive-state.outputs.base_context }}
+          base_context: ${{ needs.plan.outputs.base_context }}
           github_token: ${{ steps.app-token.outputs.token || github.token }}
           context: |
             {
-              "common_cache_details": "${{ needs.derive-state.outputs.common_cache_details }}",
+              "common_cache_details": "${{ needs.plan.outputs.common_cache_details }}",
               "common_sync_pr_url": "${{ steps.sync-pr.outputs.sync_pr_url }}"
             }
 
       - name: Post Common Sync Failed
         if: |
           steps.sync-checkout-commonalities.outcome == 'failure' &&
-          (needs.derive-state.outputs.release_issue_number != '' || steps.sync.outputs.issue_number != '')
+          (needs.plan.outputs.release_issue_number != '' || steps.sync.outputs.issue_number != '')
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
-          issue_number: ${{ needs.derive-state.outputs.release_issue_number || steps.sync.outputs.issue_number }}
-          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          issue_number: ${{ needs.plan.outputs.release_issue_number || steps.sync.outputs.issue_number }}
+          release_tag: ${{ needs.plan.outputs.release_tag }}
           run_id: ${{ github.run_id }}
           template: common_sync_failed
-          base_context: ${{ needs.derive-state.outputs.base_context }}
+          base_context: ${{ needs.plan.outputs.base_context }}
           github_token: ${{ steps.app-token.outputs.token || github.token }}
           context: '{}'
 
@@ -2217,22 +1960,18 @@ jobs:
   post-result:
     needs:
       [
-        check-trigger,
-        post-interim,
-        derive-state,
+        plan,
         create-snapshot,
         discard-snapshot,
         delete-draft,
         publish-release,
         create-sync-pr,
-        publish-confirmation,
       ]
     if: |
       always() &&
-      needs.check-trigger.outputs.trigger_type == 'slash_command' &&
-      needs.derive-state.outputs.allowed == 'true' &&
-      needs.post-interim.result == 'success' &&
-      needs.publish-confirmation.result != 'success'
+      needs.plan.outputs.trigger_type == 'slash_command' &&
+      needs.plan.outputs.allowed == 'true' &&
+      needs.plan.outputs.interim_posted == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Generate App Token
@@ -2259,7 +1998,7 @@ jobs:
       - name: Determine Result Template
         id: template
         run: |
-          COMMAND="${{ needs.check-trigger.outputs.command }}"
+          COMMAND="${{ needs.plan.outputs.command }}"
 
           # Map command to success/failure templates
           case "$COMMAND" in
@@ -2303,8 +2042,8 @@ jobs:
       - name: Resolve Reason
         id: reason
         env:
-          COMMAND: ${{ needs.check-trigger.outputs.command }}
-          COMMAND_ARGS: ${{ needs.check-trigger.outputs.command_args }}
+          COMMAND: ${{ needs.plan.outputs.command }}
+          COMMAND_ARGS: ${{ needs.plan.outputs.command_args }}
         run: |
           # Pass user-supplied reason text via env (not via GitHub Actions
           # expression interpolation) so backticks, $(), and other shell
@@ -2385,7 +2124,7 @@ jobs:
               REF_TAG_URL="${{ github.server_url }}/${{ github.repository }}/tree/${REF_TAG}"
             fi
             # Get short SHA for display
-            SRC_SHA="${{ needs.derive-state.outputs.src_commit_sha }}"
+            SRC_SHA="${{ needs.plan.outputs.src_commit_sha }}"
             SRC_SHA_SHORT="${SRC_SHA:0:7}"
             CONTEXT=$(echo "$CONTEXT" | jq \
               --arg release_url "${{ needs.publish-release.outputs.release_url }}" \
@@ -2458,24 +2197,24 @@ jobs:
       - name: Post Result Comment
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
-          issue_number: ${{ needs.check-trigger.outputs.issue_number }}
-          release_tag: ${{ needs.derive-state.outputs.release_tag }}
+          issue_number: ${{ needs.plan.outputs.issue_number }}
+          release_tag: ${{ needs.plan.outputs.release_tag }}
           run_id: ${{ github.run_id }}
           template: ${{ steps.template.outputs.template }}
           # Use base_context + delta
-          base_context: ${{ needs.derive-state.outputs.base_context }}
+          base_context: ${{ needs.plan.outputs.base_context }}
           github_token: ${{ steps.app-token.outputs.token || github.token }}
           context: ${{ steps.context.outputs.context }}
-          comment_id: ${{ needs.post-interim.outputs.comment_id }}
+          comment_id: ${{ needs.plan.outputs.comment_id }}
 
       # Update issue state and conditionally close (not in publish-release job)
       - name: Update and Close Release Issue
         if: |
           needs.publish-release.outputs.success == 'true' &&
-          needs.derive-state.outputs.release_issue_number != ''
+          needs.plan.outputs.release_issue_number != ''
         env:
-          ISSUE_NUMBER: ${{ needs.derive-state.outputs.release_issue_number }}
-          RELEASE_TAG: ${{ needs.derive-state.outputs.release_tag }}
+          ISSUE_NUMBER: ${{ needs.plan.outputs.release_issue_number }}
+          RELEASE_TAG: ${{ needs.plan.outputs.release_tag }}
           RELEASE_URL: ${{ needs.publish-release.outputs.release_url }}
           REFERENCE_TAG: ${{ needs.publish-release.outputs.reference_tag }}
           SYNC_PR_URL: ${{ needs.create-sync-pr.outputs.sync_pr_url }}
