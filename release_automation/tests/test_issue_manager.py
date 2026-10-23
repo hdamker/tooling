@@ -472,56 +472,67 @@ Content with <!-- inner comment -->
 
 
 class TestIssueManagerPublishedSections:
-    """Tests for published state section generators."""
+    """Published STATE/ACTIONS sections; text reproduces the former inline
+    "Update and Close Release Issue" step of the post-result job."""
 
-    def test_generate_published_state_section_basic(self):
-        """Test generating published state section."""
-        manager = IssueManager()
-
-        content = manager.generate_published_state_section(
+    def test_published_state_section(self):
+        content = IssueManager().generate_published_state_section(
             release_tag="r4.1",
-            release_url="https://github.com/test/releases/tag/r4.1",
-            reference_tag="source/r4.1"
+            release_url="https://github.com/org/repo/releases/tag/r4.1",
+            reference_tag="src/r4.1",
+            repo="org/repo",
+            sync_pr_url="https://github.com/org/repo/pull/123",
         )
 
-        assert "**State:** `published`" in content
-        assert "**Release:** [r4.1](https://github.com/test/releases/tag/r4.1)" in content
-        assert "**Reference tag:** `source/r4.1`" in content
-        # No sync PR line when not provided
+        assert content == (
+            "**State:** `published`\n"
+            "\n"
+            "✅ **Release published:** [r4.1](https://github.com/org/repo/releases/tag/r4.1)\n"
+            "📌 **Reference tag:** [`src/r4.1`](https://github.com/org/repo/tree/src/r4.1)\n"
+            "🔄 **Sync PR:** [View PR](https://github.com/org/repo/pull/123)"
+        )
+
+    def test_published_state_section_without_sync_pr_with_warnings(self):
+        content = IssueManager().generate_published_state_section(
+            release_tag="r4.1",
+            release_url="https://github.com/org/repo/releases/tag/r4.1",
+            reference_tag="src/r4.1",
+            repo="org/repo",
+            warnings="Failed to create pointer branch; Post-release sync PR creation failed — create manually",
+        )
+
         assert "Sync PR" not in content
-
-    def test_generate_published_state_section_with_sync_pr(self):
-        """Test published state with sync PR URL."""
-        manager = IssueManager()
-
-        content = manager.generate_published_state_section(
-            release_tag="r4.1",
-            release_url="https://github.com/test/releases/tag/r4.1",
-            reference_tag="source/r4.1",
-            sync_pr_url="https://github.com/test/pull/123"
+        assert content.endswith(
+            "\n⚠️ **Warnings:** Failed to create pointer branch; "
+            "Post-release sync PR creation failed — create manually"
         )
 
-        assert "**Sync PR:** https://github.com/test/pull/123" in content
-
-    def test_generate_published_state_section_has_timestamp(self):
-        """Test that published state includes timestamp."""
-        manager = IssueManager()
-
-        content = manager.generate_published_state_section(
-            release_tag="r4.1",
-            release_url="https://github.com/test/releases/tag/r4.1",
-            reference_tag="source/r4.1"
+    def test_published_state_section_keeps_empty_reference_tag_link(self):
+        # Reference tag creation is non-critical; the line stays (as before) when it failed.
+        content = IssueManager().generate_published_state_section(
+            release_tag="r4.1", release_url="u", reference_tag="", repo="org/repo",
         )
 
-        # Should contain a timestamp in ISO format
-        assert "**Last Updated:**" in content
-        assert "202" in content  # Year starts with 202x
+        assert "📌 **Reference tag:** [``](https://github.com/org/repo/tree/)" in content
 
-    def test_generate_published_actions_section(self):
-        """Test generating published actions section."""
-        manager = IssueManager()
+    @pytest.mark.parametrize(
+        "sync_status,text",
+        [
+            ("created", "_No actions available - release is published._"),
+            (
+                "failed",
+                "**Manual action required:** Create post-release sync PR manually "
+                "(update README and CHANGELOG on main), then close this issue.",
+            ),
+            (
+                "no_changes",
+                "**Manual action required:** Verify README and CHANGELOG on main are correct, "
+                "then close this issue.",
+            ),
+            ("", "**Manual action required:** Verify post-release sync status, then close this issue."),
+            ("weird", "**Manual action required:** Verify post-release sync status, then close this issue."),
+        ],
+    )
+    def test_published_actions_section(self, sync_status, text):
+        assert IssueManager().generate_published_actions_section(sync_status) == text
 
-        content = manager.generate_published_actions_section()
-
-        assert "No further actions available" in content
-        assert "release is published" in content

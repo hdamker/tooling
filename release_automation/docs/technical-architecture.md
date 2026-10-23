@@ -103,9 +103,6 @@ tooling/
 │   ├── post-bot-comment/                # Create/update bot comments with templates
 │   │   └── action.yml
 │   │
-│   ├── sync-release-issue/              # Issue lifecycle sync
-│   │   └── action.yml
-│   │
 │   ├── update-issue-section/            # Update reserved sections in issue body
 │   │   └── action.yml
 │   │
@@ -689,13 +686,11 @@ Updates a reserved section in the issue description between `<!-- BEGIN:{section
 
 **Inputs:** `issue_number`, `section` (STATE, CONFIG, ACTIONS), `content`
 
-### 4.4 sync-release-issue
+### 4.4 Release Issue sync
 
-Synchronizes Release Issue with current derived state. Creates issues when none exists and state is PLANNED. Updates sections, labels, and title on state changes.
+No longer a composite action: the `finalize` job calls `issue_sync.sync_for_workflow()` ([finalize.py](../scripts/finalize.py)). It synchronizes the Release Issue with the derived state (or the state the run's command produced), creates the issue when none exists and the state is PLANNED, and updates sections, labels and title on state changes.
 
-**Inputs:** `owner`, `repo`, `release_tag`, `state`, `snapshot_branch`, `release_pr_number`, `trigger_type`, `command_result`, `github_token`
-
-**Outputs:** `issue_number`, `issue_action`, `issue_url`
+**Returns:** `issue_number`, `issue_action` (`created`, `updated`, `unchanged`, `skipped`, `error`), `issue_url`
 
 ### 4.5 create-snapshot
 

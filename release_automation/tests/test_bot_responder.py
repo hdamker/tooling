@@ -12,6 +12,7 @@ from release_automation.scripts.bot_responder import (
     BotResponder,
     BotResponderError,
     TemplateNotFoundError,
+    merge_comment_context,
 )
 
 
@@ -643,3 +644,33 @@ class TestPublicationTemplates:
         assert "View logs" not in result  # New template uses "View workflow logs"
         assert "workflow logs" in result
         assert "actions/runs/12345" in result
+
+
+class TestRenderComment:
+    """render_comment(): base context + delta, as the post-bot-comment action merges them."""
+
+    BASE = {"release_tag": "r4.1", "state": "planned", "user": "base-user", "apis": []}
+
+    def test_delta_overrides_base_and_marker_is_prepended(self, bot_responder):
+        result = bot_responder.render_comment(
+            "interim_processing", self.BASE, {"command": "sync-issue", "user": "alice"}, "r4.1"
+        )
+
+        assert result.startswith("<!-- release-bot:r4.1 -->\n")
+        assert "@alice" in result
+
+    @pytest.mark.parametrize(
+        "apis_json,expected",
+        [
+            ('[{"api_name": "QoD", "api_version": "1.0.0"}]', [{"api_name": "QoD", "api_version": "1.0.0"}]),
+            ([{"api_name": "QoD", "api_version": "1.0.0"}], [{"api_name": "QoD", "api_version": "1.0.0"}]),
+            ("not json", []),
+            (42, []),
+        ],
+    )
+    def test_apis_json_becomes_apis(self, bot_responder, apis_json, expected):
+        assert merge_comment_context(self.BASE, {"apis_json": apis_json})["apis"] == expected
+
+    @pytest.mark.parametrize("base", [None, [], "x"])
+    def test_non_dict_base_is_ignored(self, base):
+        assert merge_comment_context(base, {"release_tag": "r4.2"})["release_tag"] == "r4.2"

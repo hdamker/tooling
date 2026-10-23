@@ -281,6 +281,21 @@ class TestGitHubClient(unittest.TestCase):
         ])
 
     @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_create_comment_returns_id(self, mock_run_gh):
+        mock_run_gh.return_value = json.dumps({"id": 991, "body": "x"})
+        self.assertEqual(self.client.create_comment(42, "hello"), 991)
+        self.assertEqual(mock_run_gh.call_args[0][0], [
+            "api", "repos/owner/repo/issues/42/comments", "-X", "POST", "-f", "body=hello",
+        ])
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_update_comment(self, mock_run_gh):
+        self.client.update_comment(991, "@user ok")
+        self.assertEqual(mock_run_gh.call_args[0][0], [
+            "api", "repos/owner/repo/issues/comments/991", "-X", "PATCH", "-f", "body=@user ok",
+        ])
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
     def test_get_collaborator_permission(self, mock_run_gh):
         mock_run_gh.return_value = "maintain\n"
         self.assertEqual(self.client.get_collaborator_permission("alice"), "maintain")

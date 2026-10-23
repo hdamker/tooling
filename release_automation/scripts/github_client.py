@@ -930,6 +930,38 @@ class GitHubClient:
             "-f", f"body={body}",
         ])
 
+    def create_comment(self, issue_number: int, body: str) -> int:
+        """
+        Add a comment to an issue or PR.
+
+        Returns:
+            ID of the new comment
+
+        Raises:
+            GitHubClientError: If the operation fails
+        """
+        output = self._run_gh([
+            "api",
+            f"repos/{self.repo}/issues/{issue_number}/comments",
+            "-X", "POST",
+            "-f", f"body={body}",
+        ])
+        return json.loads(output)["id"]
+
+    def update_comment(self, comment_id: int, body: str) -> None:
+        """
+        Replace the body of an issue comment.
+
+        Raises:
+            GitHubClientError: If the operation fails
+        """
+        self._run_gh([
+            "api",
+            f"repos/{self.repo}/issues/comments/{comment_id}",
+            "-X", "PATCH",
+            "-f", f"body={body}",
+        ])
+
     def set_labels(self, issue_number: int, labels: List[str]) -> None:
         """
         Replace all labels on an issue with the specified labels.
