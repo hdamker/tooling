@@ -77,7 +77,7 @@ jobs:
       meta_release: ${{ steps.state.outputs.meta_release }}
       common_cache_status: ${{ steps.cache-sync.outputs.common_cache_status }}
       common_cache_details: ${{ steps.cache-sync.outputs.common_cache_details }}
-      common_sync_pr_url: ${{ steps.find-sync-pr.outputs.common_sync_pr_url }}
+      common_sync_pr_url: ${{ steps.cache-sync.outputs.common_sync_pr_url }}
       allowed: ${{ steps.policy.outputs.allowed }}
       error_message: ${{ steps.policy.outputs.error_message }}
       base_context: ${{ steps.assemble.outputs.base_context }}
@@ -199,23 +199,9 @@ jobs:
         env:
           API_REPO_PATH: ${{ github.workspace }}/_api_repo
           COMMONALITIES_RELEASE: ${{ steps.state.outputs.commonalities_release }}
+          ICM_RELEASE: ${{ steps.state.outputs.identity_consent_management_release }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: python -m release_automation.scripts.common_sync
-
-      - name: Find existing sync PR
-        id: find-sync-pr
-        if: steps.cache-sync.outputs.common_cache_status == 'stale'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          SYNC_PR_URL=$(gh pr list --state open --json headRefName,url \
-            --jq '.[] | select(.headRefName | startswith("sync-common/")) | .url' 2>/dev/null | head -1 || true)
-          echo "common_sync_pr_url=$SYNC_PR_URL" >> "$GITHUB_OUTPUT"
-          if [ -n "$SYNC_PR_URL" ]; then
-            echo "Found existing sync PR: $SYNC_PR_URL"
-          else
-            echo "No existing sync PR found"
-          fi
 
       # ── Command policy: Plan or Rejection, and the response to post ──
       - name: Apply Command Policy
@@ -232,7 +218,7 @@ jobs:
           CONFIG_ERROR_TYPE: ${{ steps.state.outputs.config_error_type }}
           COMMON_CACHE_STATUS: ${{ steps.cache-sync.outputs.common_cache_status }}
           COMMON_CACHE_DETAILS: ${{ steps.cache-sync.outputs.common_cache_details }}
-          COMMON_SYNC_PR_URL: ${{ steps.find-sync-pr.outputs.common_sync_pr_url }}
+          COMMON_SYNC_PR_URL: ${{ steps.cache-sync.outputs.common_sync_pr_url }}
           GITHUB_TOKEN: ${{ github.token }}
         run: python -m release_automation.scripts.command_policy
 

@@ -57,7 +57,13 @@ class GitOperations:
     changes using local git commands and gh CLI for PR creation.
     """
 
-    def __init__(self, repo: str, work_dir: str, token: Optional[str] = None):
+    def __init__(
+        self,
+        repo: str,
+        work_dir: str,
+        token: Optional[str] = None,
+        remote_url: Optional[str] = None,
+    ):
         """
         Initialize git operations.
 
@@ -65,11 +71,13 @@ class GitOperations:
             repo: Repository in format "owner/name" (e.g., "camaraproject/QualityOnDemand")
             work_dir: Local directory path for git operations
             token: Optional GitHub token for authentication
+            remote_url: Clone URL instead of the github.com one (tests, local mirrors)
         """
         self.repo = repo
         self.work_dir = work_dir
         self.token = token
-        self._repo_url = f"https://github.com/{repo}.git"
+        self._remote_url = remote_url
+        self._repo_url = remote_url or f"https://github.com/{repo}.git"
 
     def _run_git(
         self,
@@ -145,12 +153,13 @@ class GitOperations:
         except subprocess.CalledProcessError as e:
             raise GitOperationsError(f"gh {' '.join(args)} failed: {e.stderr}")
 
-    def clone(self, branch: str = "main") -> None:
+    def clone(self, branch: str = "main", depth: Optional[int] = None) -> None:
         """
         Clone repository to work_dir.
 
         Args:
-            branch: Branch to checkout after cloning
+            branch: Branch or tag to checkout after cloning
+            depth: Shallow-clone depth (full history when None)
 
         Raises:
             CloneError: If cloning fails
@@ -161,13 +170,14 @@ class GitOperations:
             repo_name = os.path.basename(self.work_dir)
 
             # Build clone URL with token if available
-            if self.token:
+            if self.token and not self._remote_url:
                 clone_url = f"https://x-access-token:{self.token}@github.com/{self.repo}.git"
             else:
                 clone_url = self._repo_url
 
+            depth_args = ["--depth", str(depth)] if depth else []
             subprocess.run(
-                ["git", "clone", "--branch", branch, clone_url, repo_name],
+                ["git", "clone", *depth_args, "--branch", branch, clone_url, repo_name],
                 capture_output=True,
                 text=True,
                 check=True,
@@ -191,19 +201,21 @@ class GitOperations:
         """
         return self._run_git(["rev-parse", ref])
 
-    def create_branch(self, name: str, from_ref: str = "HEAD") -> None:
+    def create_branch(self, name: str, from_ref: str = "HEAD", reset: bool = False) -> None:
         """
         Create and checkout a new branch.
 
         Args:
             name: Name of the new branch
             from_ref: Reference to branch from
+            reset: Reset the branch to from_ref if it already exists
+                (checkout -B; working-tree changes are kept)
 
         Raises:
             BranchError: If branch creation fails
         """
         try:
-            self._run_git(["checkout", "-b", name, from_ref])
+            self._run_git(["checkout", "-B" if reset else "-b", name, from_ref])
         except GitOperationsError as e:
             raise BranchError(str(e))
 
@@ -257,19 +269,35 @@ class GitOperations:
         except GitOperationsError as e:
             raise CommitError(str(e))
 
-    def push(self, branch: str, set_upstream: bool = True) -> None:
+    def has_changes(self, path: Optional[str] = None) -> bool:
+        """
+        Check for uncommitted changes, including untracked files.
+
+        Args:
+            path: Limit the check to this path
+
+        Returns:
+            True if the working tree differs from HEAD
+        """
+        args = ["status", "--porcelain"]
+        if path:
+            args.extend(["--", path])
+        return bool(self._run_git(args))
+
+    def push(self, branch: str, set_upstream: bool = True, force: bool = False) -> None:
         """
         Push branch to remote origin.
 
         Args:
             branch: Branch name to push
             set_upstream: Whether to set upstream tracking
+            force: Overwrite the remote branch (for branches owned by automation)
 
         Raises:
             PushError: If push fails
         """
         try:
-            args = ["push"]
+            args = ["push", "--force"] if force else ["push"]
             if set_upstream:
                 args.extend(["-u", "origin", branch])
             else:

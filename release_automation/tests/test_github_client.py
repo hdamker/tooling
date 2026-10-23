@@ -229,6 +229,58 @@ class TestGitHubClient(unittest.TestCase):
             self.client.create_branch_at_sha("release/r4.1", "abc123")
 
     @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_find_open_pr(self, mock_run_gh):
+        mock_run_gh.return_value = json.dumps([{"number": 7, "url": "https://github.com/owner/repo/pull/7"}])
+        self.assertEqual(self.client.find_open_pr("sync-common/r4.3"), (7, "https://github.com/owner/repo/pull/7"))
+        args = mock_run_gh.call_args[0][0]
+        self.assertEqual(args[:2], ["pr", "list"])
+        self.assertIn("--head", args)
+        self.assertEqual(args[args.index("--head") + 1], "sync-common/r4.3")
+        self.assertEqual(args[args.index("--state") + 1], "open")
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_find_open_pr_none(self, mock_run_gh):
+        mock_run_gh.return_value = "[]"
+        self.assertIsNone(self.client.find_open_pr("sync-common/r4.3"))
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_find_open_pr_api_error(self, mock_run_gh):
+        mock_run_gh.side_effect = GitHubClientError("500")
+        self.assertIsNone(self.client.find_open_pr("sync-common/r4.3"))
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_list_open_prs(self, mock_run_gh):
+        mock_run_gh.return_value = json.dumps([
+            {"number": 3, "headRefName": "sync-common/r4.2", "url": "u3"},
+        ])
+        self.assertEqual(self.client.list_open_prs(), [{"number": 3, "head": "sync-common/r4.2", "url": "u3"}])
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_create_pr(self, mock_run_gh):
+        mock_run_gh.return_value = "https://github.com/owner/repo/pull/12\n"
+        result = self.client.create_pr("T", "B", head="pr-to-main/r1.3", base="main")
+        self.assertEqual(result, (12, "https://github.com/owner/repo/pull/12"))
+        self.assertEqual(mock_run_gh.call_args[0][0], [
+            "pr", "create", "--repo", "owner/repo", "--title", "T", "--body", "B",
+            "--head", "pr-to-main/r1.3", "--base", "main",
+        ])
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_add_pr_labels(self, mock_run_gh):
+        self.client.add_pr_labels(12, ["post-release", "automated"])
+        self.assertEqual(mock_run_gh.call_args[0][0], [
+            "pr", "edit", "12", "--repo", "owner/repo",
+            "--add-label", "post-release", "--add-label", "automated",
+        ])
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_close_pr_with_comment(self, mock_run_gh):
+        self.client.close_pr(3, comment="Superseded")
+        self.assertEqual(mock_run_gh.call_args[0][0], [
+            "pr", "close", "3", "--repo", "owner/repo", "--comment", "Superseded",
+        ])
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
     def test_get_collaborator_permission(self, mock_run_gh):
         mock_run_gh.return_value = "maintain\n"
         self.assertEqual(self.client.get_collaborator_permission("alice"), "maintain")
