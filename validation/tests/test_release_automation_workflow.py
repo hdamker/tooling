@@ -118,3 +118,19 @@ def test_ack_command_list_matches_trigger_module():
     assert match.group(1).split("|") == [name for name, _ in SLASH_COMMANDS]
     # The ack reads the payload directly; it must not depend on later steps.
     assert "steps." not in script
+
+
+def test_validate_command_runs_command_policy_module():
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    assert workflow["jobs"]["check-trigger"]["outputs"]["trigger"] == (
+        "${{ steps.detect.outputs.trigger }}"
+    )
+
+    validate = _step_by_name(_job_steps("derive-state"), "Validate Command")
+    assert validate["working-directory"] == "_tooling"
+    assert validate["run"].strip() == "python -m release_automation.scripts.command_policy"
+    assert validate["env"]["TRIGGER_JSON"] == "${{ needs.check-trigger.outputs.trigger }}"
+    assert validate["env"]["COMMON_CACHE_STATUS"] == (
+        "${{ steps.cache-sync.outputs.common_cache_status }}"
+    )
+    assert "uses" not in validate

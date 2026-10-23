@@ -53,6 +53,7 @@ jobs:
       trigger_pr_number: ${{ steps.detect.outputs.trigger_pr_number }}
       trigger_pr_url: ${{ steps.detect.outputs.trigger_pr_url }}
       comment_id: ${{ steps.ack.outputs.comment_id }}
+      trigger: ${{ steps.detect.outputs.trigger }}
     steps:
       - name: Fork Guard - Check Issues Enabled
         id: fork-guard
@@ -307,177 +308,17 @@ jobs:
         if: |
           needs.check-trigger.outputs.trigger_type == 'slash_command' &&
           steps.state.outputs.config_error == ''
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const user = '${{ needs.check-trigger.outputs.user }}';
-            const command = '${{ needs.check-trigger.outputs.command }}';
-            const currentState = '${{ steps.state.outputs.state }}';
-
-            console.log(`Validating command: /${command}`);
-            console.log(`Current state: ${currentState}`);
-            console.log(`User: ${user}`);
-
-            // Define allowed commands per state
-            const allowedCommands = {
-              'planned': ['create-snapshot', 'sync-issue'],
-              'snapshot-active': ['discard-snapshot', 'sync-issue'],
-              'draft-ready': ['delete-draft', 'publish-release', 'sync-issue'],
-              'published': ['sync-issue'],
-              'not-planned': ['sync-issue']
-            };
-
-            // Check if command is allowed in current state
-            const allowed = allowedCommands[currentState] || [];
-            if (!allowed.includes(command)) {
-              const validCommands = allowed.length > 0
-                ? `Valid commands: ${allowed.map(c => '/' + c).join(', ')}`
-                : 'No commands available in this state';
-
-              core.setOutput('allowed', 'false');
-              core.setOutput('error_message', `Command /${command} is not allowed in state '${currentState}'. ${validCommands}`);
-              return;
-            }
-
-            // Block /create-snapshot when common file cache is stale
-            if (command === 'create-snapshot') {
-              const cacheStatus = '${{ steps.cache-sync.outputs.common_cache_status }}';
-              const cacheDetails = '${{ steps.cache-sync.outputs.common_cache_details }}';
-              const syncPrUrl = '${{ steps.find-sync-pr.outputs.common_sync_pr_url }}';
-              if (cacheStatus === 'stale') {
-                const prHint = syncPrUrl
-                  ? ` Merge the sync PR: ${syncPrUrl}`
-                  : ' Run workflow_dispatch to trigger sync, or close and reopen the Release Issue.';
-                core.setOutput('allowed', 'false');
-                core.setOutput('error_message',
-                  `Common file cache is stale: ${cacheDetails}.${prHint}`);
-                return;
-              }
-            }
-
-            // Check user permission (must be write or higher)
-            console.log('Checking user permission...');
-            let userPermission;
-
-            // Trusted CI bot identities. App bots don't register as collaborators,
-            // so getCollaboratorPermissionLevel returns 'none' for them; the write
-            // intent is established by the App installation on the target repo.
-            // Currently used by the Release Automation Regression canary in
-            // camaraproject/tooling, which posts slash commands as
-            // camara-validation[bot].
-            const TRUSTED_BOT_USERS = new Set(['camara-validation[bot]']);
-
-            if (TRUSTED_BOT_USERS.has(user)) {
-              userPermission = 'write';
-              console.log(`User ${user} is a trusted CI bot; treating as write`);
-            } else {
-              try {
-                const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  username: user
-                });
-
-                userPermission = permission.permission;
-                console.log(`User permission: ${userPermission}`);
-              } catch (error) {
-                console.log(`Permission check failed: ${error.message}`);
-                // If we can't check permission, deny by default
-                core.setOutput('allowed', 'false');
-                core.setOutput('error_message', `Failed to verify permissions: ${error.message}`);
-                return;
-              }
-            }
-
-            const hasPermission = ['admin', 'maintain', 'write'].includes(userPermission);
-
-            if (!hasPermission) {
-              core.setOutput('allowed', 'false');
-              core.setOutput('error_message', `You must have write access or higher to run release commands. Your current permission: ${userPermission}`);
-              return;
-            }
-
-            // For /publish-release, additionally check CODEOWNERS membership
-            // Break glass: maintain and admin users bypass CODEOWNERS check
-            if (command === 'publish-release' && userPermission === 'write') {
-              console.log('Checking CODEOWNERS membership for publish-release (write-level user)...');
-
-              try {
-                // Fetch CODEOWNERS file from main branch
-                const { data: codeownersFile } = await github.rest.repos.getContent({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  path: 'CODEOWNERS',
-                  ref: 'main'
-                });
-
-                const codeownersContent = Buffer.from(codeownersFile.content, 'base64').toString('utf-8');
-                console.log('CODEOWNERS content fetched');
-
-                // Parse * pattern line to get codeowners
-                // Example: "* @hdamker @rartych"
-                const lines = codeownersContent.split('\n');
-                const codeowners = [];
-                for (const line of lines) {
-                  const trimmed = line.trim();
-                  // Skip comments and empty lines
-                  if (trimmed.startsWith('#') || !trimmed) continue;
-                  // Look for * pattern (applies to all files)
-                  if (trimmed.startsWith('* ') || trimmed === '*') {
-                    // Extract usernames (@user1 @user2)
-                    const matches = trimmed.match(/@(\S+)/g);
-                    if (matches) {
-                      for (const match of matches) {
-                        codeowners.push(match.substring(1).toLowerCase()); // Remove @ prefix
-                      }
-                    }
-                    break; // Only use first * pattern found
-                  }
-                }
-
-                console.log(`Codeowners: ${codeowners.join(', ')}`);
-
-                // Check if user is in codeowners list
-                if (codeowners.length > 0 && !codeowners.includes(user.toLowerCase())) {
-                  core.setOutput('allowed', 'false');
-                  core.setOutput('error_message', `Only codeowners or admins can publish releases. @${user} is not listed in CODEOWNERS.`);
-                  return;
-                }
-
-                console.log(`User ${user} is a codeowner`);
-              } catch (error) {
-                // CODEOWNERS file not found or other error
-                console.log(`Could not check CODEOWNERS: ${error.message}`);
-                if (error.status === 404) {
-                  // No CODEOWNERS file - fall back to permission-only check (already passed)
-                  console.log('No CODEOWNERS file found, skipping codeowner check');
-                } else {
-                  // For other errors, deny by default
-                  core.setOutput('allowed', 'false');
-                  core.setOutput('error_message', `Failed to verify codeowner status: ${error.message}`);
-                  return;
-                }
-              }
-            } else if (command === 'publish-release') {
-              // Maintain/admin user - bypass CODEOWNERS check (break glass)
-              console.log(`User ${user} has ${userPermission} permission - bypassing CODEOWNERS check`);
-            }
-
-            // For publish-release with --confirm, validate the tag matches
-            const confirmTag = '${{ needs.check-trigger.outputs.confirm_tag }}';
-            const releaseTag = '${{ steps.state.outputs.release_tag }}';
-            if (command === 'publish-release' && confirmTag) {
-              if (confirmTag !== releaseTag) {
-                core.setOutput('allowed', 'false');
-                core.setOutput('error_message', `Confirm tag \`${confirmTag}\` does not match expected release tag \`${releaseTag}\`. Use: /publish-release --confirm ${releaseTag}`);
-                return;
-              }
-            }
-
-            // All checks passed
-            console.log('Command validated successfully');
-            core.setOutput('allowed', 'true');
-            core.setOutput('error_message', '');
+        working-directory: _tooling
+        env:
+          TRIGGER_JSON: ${{ needs.check-trigger.outputs.trigger }}
+          STATE: ${{ steps.state.outputs.state }}
+          RELEASE_TAG: ${{ steps.state.outputs.release_tag }}
+          RELEASE_TYPE: ${{ steps.state.outputs.release_type }}
+          COMMON_CACHE_STATUS: ${{ steps.cache-sync.outputs.common_cache_status }}
+          COMMON_CACHE_DETAILS: ${{ steps.cache-sync.outputs.common_cache_details }}
+          COMMON_SYNC_PR_URL: ${{ steps.find-sync-pr.outputs.common_sync_pr_url }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -m release_automation.scripts.command_policy
 
       # ── Assemble Context (skipped on config error) ──
       - name: Assemble Context

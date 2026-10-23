@@ -205,9 +205,10 @@ def write_outputs(path: str, outputs: Dict[str, str]) -> None:
 
 
 def to_outputs(trigger: Trigger, merged_pr: Optional[Tuple[int, str]]) -> Dict[str, str]:
-    """String outputs under the check-trigger job's output names."""
+    """String outputs under the check-trigger job's output names, plus the Trigger as JSON."""
     outputs = asdict(trigger)
     del outputs["head_sha"]
+    outputs["trigger"] = json.dumps(asdict(trigger))
     outputs["should_continue"] = "true" if trigger.should_continue else "false"
     outputs["trigger_pr_number"] = str(merged_pr[0]) if merged_pr else ""
     outputs["trigger_pr_url"] = merged_pr[1] if merged_pr else ""
