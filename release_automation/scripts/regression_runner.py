@@ -3,8 +3,17 @@
 CAMARA Release Automation — Regression Runner
 
 Exercises the release-automation-reusable.yml workflow on a persistent
-test repository (default: camaraproject/ReleaseTest) via a round-trip
-/create-snapshot + /discard-snapshot pair. Catches the bug class that
+test repository (default: camaraproject/ReleaseTest) via publish-free paths:
+
+    planned:          sync-issue via workflow_dispatch, /sync-issue,
+                      /discard-snapshot (expected to be rejected)
+    round trip:       /create-snapshot, Release Issue close in
+                      snapshot-active (expected auto-reopen),
+                      /discard-snapshot
+    planned again:    Release Issue close (expected: a new Release
+                      Issue for the same plan, used by the next run)
+
+Catches the bug class that
 the validation regression canary cannot reach — runtime bugs in the RA
 workflow and its shared actions. See the sibling validation regression
 runner at validation/scripts/regression_runner.py.
@@ -30,8 +39,8 @@ Exit codes:
     1  verification failure (run concluded non-success or post-state mismatch)
     2  infrastructure failure (gh error, timeout, state unsafe to proceed)
 
-No real releases, tags, or draft builds are produced. The round-trip only
-covers commands that are reversible — merging the Release Review PR or
+No real releases, tags, or draft builds are produced. The runner only
+covers paths that are reversible — merging the Release Review PR or
 invoking /publish-release is explicitly out of scope.
 """
 
@@ -592,16 +601,64 @@ def post_issue_comment(repo: str, issue_number: int, body: str) -> None:
     )
 
 
+def close_issue(repo: str, issue_number: int) -> None:
+    """Close *issue_number* in *repo*."""
+    gh(["issue", "close", str(issue_number), "--repo", repo])
+
+
+def reopen_issue(repo: str, issue_number: int) -> None:
+    """Reopen *issue_number* in *repo*."""
+    gh(["issue", "reopen", str(issue_number), "--repo", repo])
+
+
+def get_issue_open_state(repo: str, issue_number: int) -> str:
+    """Return the issue's state ("open" or "closed")."""
+    return gh(
+        [
+            "api", f"repos/{repo}/issues/{issue_number}",
+            "--jq", ".state",
+        ]
+    ).strip()
+
+
+def dispatch_workflow(repo: str, workflow_file: str) -> None:
+    """Trigger *workflow_file* on *repo* via workflow_dispatch (default branch)."""
+    gh(["workflow", "run", workflow_file, "--repo", repo])
+
+
+def find_job_conclusion(repo: str, run_id: str, job_name: str) -> str | None:
+    """Return the conclusion of the job named *job_name* in *run_id*, or None.
+
+    Jobs of a called reusable workflow are listed as ``<caller job> / <job>``,
+    so a job matches on its full name or on that suffix.
+    """
+    data = gh(
+        [
+            "run", "view", run_id,
+            "--repo", repo,
+            "--json", "jobs",
+        ],
+        parse_json=True,
+    )
+    for job in data.get("jobs", []):
+        name = job.get("name", "")
+        if name == job_name or name.endswith(f" / {job_name}"):
+            return job.get("conclusion") or ""
+    return None
+
+
 def find_recent_caller_run(
     repo: str,
     *,
     workflow_file: str,
     since: datetime,
-    expected_display_title: str,
+    expected_display_title: str | None = None,
+    event: str = "issue_comment",
+    oldest: bool = False,
     attempts: int = 15,
     interval: float = 2.0,
 ) -> dict[str, Any]:
-    """Poll `gh run list` for an issue_comment-triggered run newer than *since*.
+    """Poll `gh run list` for an *event*-triggered run newer than *since*.
 
     Filters candidates by ``displayTitle == expected_display_title`` to
     disambiguate from unrelated ``issue_comment`` runs that fire on the same
@@ -611,7 +668,13 @@ def find_recent_caller_run(
     can pick that skipped run instead of the slash command's run. For
     ``issue_comment`` events GitHub sets ``display_title`` to the issue/PR
     title where the comment was posted, so this filter pinpoints runs
-    triggered by comments on the Release Issue.
+    triggered by comments on the Release Issue. ``issues`` events carry the
+    issue title as well; ``workflow_dispatch`` runs carry the workflow name,
+    so dispatch discovery passes no title.
+
+    The newest candidate is returned by default. ``oldest=True`` returns the
+    first run after *since* instead — an issue close is followed by a second
+    ``issues`` run when the workflow reopens the issue.
 
     Returns the run dict (with databaseId, createdAt, url, status, conclusion,
     displayTitle) once one is observed. Raises InfrastructureError on timeout.
@@ -623,7 +686,7 @@ def find_recent_caller_run(
                 "run", "list",
                 "--repo", repo,
                 "--workflow", workflow_file,
-                "--event", "issue_comment",
+                "--event", event,
                 "--json", "databaseId,createdAt,displayTitle,status,conclusion,url",
                 "--limit", "10",
             ],
@@ -637,12 +700,15 @@ def find_recent_caller_run(
                 continue
             if created < since:
                 continue
-            if run.get("displayTitle") != expected_display_title:
+            if (
+                expected_display_title is not None
+                and run.get("displayTitle") != expected_display_title
+            ):
                 continue
             candidates.append(run)
         if candidates:
-            # Newest first — take the one with the latest createdAt.
-            candidates.sort(key=lambda r: r["createdAt"], reverse=True)
+            # Newest first by default; oldest first when asked.
+            candidates.sort(key=lambda r: r["createdAt"], reverse=not oldest)
             run = candidates[0]
             logger.info(
                 "found caller run id=%s (%s)",
@@ -650,7 +716,7 @@ def find_recent_caller_run(
             )
             return run
     raise InfrastructureError(
-        f"{repo}: no {workflow_file} issue_comment run with "
+        f"{repo}: no {workflow_file} {event} run with "
         f"displayTitle={expected_display_title!r} appeared within "
         f"{attempts * interval:.0f}s since {since.isoformat()}"
     )
@@ -719,6 +785,8 @@ def _fire_command_phase(
     expected_title: str,
     poll_timeout: int,
     dry_run: bool,
+    name: str | None = None,
+    require_sync_job: bool = False,
 ) -> tuple[PhaseReport, str | None]:
     """Post a slash command, poll the triggered run, check the final bot reply.
 
@@ -726,7 +794,8 @@ def _fire_command_phase(
     1. The comment was posted + a caller run was discovered;
     2. The caller run reached `completed` with `conclusion == 'success'`;
     3. A bot comment appeared on the Release Issue after we posted, and its
-       first non-blank line starts with `expected_title`.
+       first non-blank line starts with `expected_title`;
+    4. With *require_sync_job*, the run's sync-issue job concluded success.
 
     Rejection (e.g. cache-stale, permission-denied) surfaces as the caller
     bot posting `command_rejected` as its final reply — case (3) fails with
@@ -735,7 +804,7 @@ def _fire_command_phase(
 
     Returns (report, run_id). run_id is None on dry-run or early fail.
     """
-    report = PhaseReport(name=f"fire {command}")
+    report = PhaseReport(name=name or f"fire {command}")
     if dry_run:
         report.passed = True
         report.detail = (
@@ -801,6 +870,8 @@ def _fire_command_phase(
 
     actual_title = _first_visible_line(last_comment.get("body") or "")
     if _match_comment_title(last_comment.get("body") or "", expected_title):
+        if require_sync_job and not _check_sync_job(report, repo, run_id):
+            return report, run_id
         report.passed = True
         report.detail = f"bot reply matches expected — `{actual_title}`"
     else:
@@ -812,6 +883,134 @@ def _fire_command_phase(
             f"comment: {last_comment.get('html_url', '<no url>')}"
         )
     return report, run_id
+
+
+# Job name of the reusable workflow's update-issue job, which runs the
+# Release Issue sync. Source of truth: .github/workflows/release-automation-reusable.yml
+_SYNC_ISSUE_JOB = "sync-issue"
+
+
+def _check_sync_job(report: PhaseReport, repo: str, run_id: str) -> bool:
+    """True iff the run's sync-issue job concluded success; detail set otherwise.
+
+    A run can conclude success with the sync job skipped (e.g. a condition
+    regression), so the run conclusion alone does not prove the sync ran.
+    """
+    try:
+        conclusion = find_job_conclusion(repo, run_id, _SYNC_ISSUE_JOB)
+    except InfrastructureError as exc:
+        report.detail = f"could not read jobs of run {run_id}: {exc}"
+        return False
+    if conclusion != "success":
+        report.detail = (
+            f"{_SYNC_ISSUE_JOB} job concluded {conclusion!r}, expected 'success'"
+        )
+        return False
+    return True
+
+
+def phase_dispatch_sync_issue(
+    repo: str,
+    *,
+    poll_timeout: int,
+    dry_run: bool,
+) -> PhaseReport:
+    """Dispatch the caller workflow (sync-issue) and check its sync job.
+
+    workflow_dispatch posts no bot comment, so the assertions are the run
+    conclusion and the sync-issue job conclusion.
+    """
+    report = PhaseReport(name="dispatch sync-issue")
+    if dry_run:
+        report.passed = True
+        report.detail = f"DRY-RUN: would dispatch {_RA_CALLER_WORKFLOW} on {repo}"
+        return report
+
+    marker = datetime.now(timezone.utc).replace(microsecond=0)
+    try:
+        dispatch_workflow(repo, _RA_CALLER_WORKFLOW)
+        logger.info("dispatched %s on %s; polling for caller run", _RA_CALLER_WORKFLOW, repo)
+        run = find_recent_caller_run(
+            repo,
+            workflow_file=_RA_CALLER_WORKFLOW,
+            since=marker,
+            event="workflow_dispatch",
+        )
+    except InfrastructureError as exc:
+        report.detail = f"could not dispatch {_RA_CALLER_WORKFLOW}: {exc}"
+        return report
+
+    run_id = str(run["databaseId"])
+    report.run_url = run.get("url")
+    try:
+        conclusion = poll_run(repo, run_id, interval=15, timeout=poll_timeout)
+    except InfrastructureError as exc:
+        report.detail = f"run {run_id} polling error: {exc}"
+        return report
+
+    report.run_conclusion = conclusion
+    if conclusion != "success":
+        report.detail = f"caller run concluded {conclusion!r} — RA workflow failed"
+        return report
+    if not _check_sync_job(report, repo, run_id):
+        return report
+
+    report.passed = True
+    report.detail = f"caller run and {_SYNC_ISSUE_JOB} job succeeded"
+    return report
+
+
+_SYNC_ISSUE_PURPOSE = (
+    "This is an automated CI smoke test of the Release Issue sync; "
+    "no state change is expected."
+)
+
+_REJECTED_DISCARD_PURPOSE = (
+    "This is an automated CI smoke test: the command is expected to be "
+    "rejected in state `planned`."
+)
+
+
+def phase_fire_sync_issue(
+    repo: str,
+    issue_number: int,
+    *,
+    poll_timeout: int,
+    dry_run: bool,
+    expected_titles: dict[str, str] | None = None,
+) -> tuple[PhaseReport, str | None]:
+    """Post /sync-issue; check the final bot reply and the sync-issue job."""
+    titles = expected_titles or load_expected_comment_titles()
+    return _fire_command_phase(
+        repo, issue_number,
+        command="/sync-issue",
+        purpose=_SYNC_ISSUE_PURPOSE,
+        expected_title=titles.get("sync-issue", ""),
+        poll_timeout=poll_timeout,
+        dry_run=dry_run,
+        require_sync_job=True,
+    )
+
+
+def phase_fire_rejected_discard(
+    repo: str,
+    issue_number: int,
+    *,
+    poll_timeout: int,
+    dry_run: bool,
+    expected_titles: dict[str, str] | None = None,
+) -> tuple[PhaseReport, str | None]:
+    """Post /discard-snapshot in `planned`; expect the rejection reply."""
+    titles = expected_titles or load_expected_comment_titles()
+    return _fire_command_phase(
+        repo, issue_number,
+        command="/discard-snapshot",
+        purpose=_REJECTED_DISCARD_PURPOSE,
+        expected_title=titles.get("rejected-discard-snapshot", ""),
+        poll_timeout=poll_timeout,
+        dry_run=dry_run,
+        name="fire /discard-snapshot in planned (rejected)",
+    )
 
 
 def phase_fire_create_snapshot(
@@ -962,6 +1161,263 @@ def phase_verify_post_discard(
     return report
 
 
+def phase_verify_planned_unchanged(repo: str, issue_number: int) -> PhaseReport:
+    """Confirm the publish-free phases left the issue in `planned`.
+
+    Requirements:
+    - issue state label == planned
+    - no release-snapshot/* branch exists
+
+    Gates /create-snapshot: a state change here must not be followed by
+    further commands.
+    """
+    report = PhaseReport(name="verify planned unchanged")
+    try:
+        state = get_release_issue_state(repo, issue_number)
+        snapshot_branch = find_snapshot_branch(repo)
+    except InfrastructureError as exc:
+        report.detail = f"could not read state: {exc}"
+        return report
+
+    checks: list[tuple[bool, str]] = []
+    state_ok = state == STATE_PLANNED
+    checks.append(
+        (state_ok, f"state={state!r} {'==' if state_ok else '!='} planned")
+    )
+    checks.append(
+        (snapshot_branch is None, f"snapshot branch={snapshot_branch!r}")
+    )
+    report.extras = [msg for _, msg in checks]
+    report.passed = all(ok for ok, _ in checks)
+    report.detail = "; ".join(msg for _, msg in checks)
+    return report
+
+
+def _ensure_issue_open(report: PhaseReport, repo: str, issue_number: int) -> None:
+    """Reopen the Release Issue if it is closed, so /discard-snapshot can restore state."""
+    try:
+        if get_issue_open_state(repo, issue_number) == "open":
+            return
+        reopen_issue(repo, issue_number)
+        report.extras.append(f"{repo}#{issue_number} reopened by the canary")
+    except InfrastructureError as exc:
+        report.extras.append(f"could not reopen {repo}#{issue_number}: {exc}")
+
+
+def phase_close_auto_reopen(
+    repo: str,
+    issue_number: int,
+    *,
+    poll_timeout: int,
+    dry_run: bool,
+    expected_titles: dict[str, str] | None = None,
+) -> PhaseReport:
+    """Close the Release Issue in `snapshot-active`; expect the workflow to reopen it.
+
+    Passes iff the close-triggered run concludes success, the issue is open
+    again with state snapshot-active, and the bot reply starts with the
+    expected title. On any failure the canary reopens the issue itself so
+    the round trip can still end with /discard-snapshot.
+    """
+    report = PhaseReport(name="close issue in snapshot-active (auto-reopen)")
+    if dry_run:
+        report.passed = True
+        report.detail = f"DRY-RUN: would close {repo}#{issue_number}"
+        return report
+
+    titles = expected_titles or load_expected_comment_titles()
+    expected = titles.get("issue-close", "")
+    marker = datetime.now(timezone.utc).replace(microsecond=0)
+    try:
+        issue_title = get_issue_title(repo, issue_number)
+        close_issue(repo, issue_number)
+        logger.info("closed %s#%s; polling for caller run", repo, issue_number)
+        # The workflow's reopen triggers a second `issues` run on the same
+        # title; the close run is the oldest one after the marker.
+        run = find_recent_caller_run(
+            repo,
+            workflow_file=_RA_CALLER_WORKFLOW,
+            since=marker,
+            event="issues",
+            expected_display_title=issue_title,
+            oldest=True,
+        )
+    except InfrastructureError as exc:
+        report.detail = f"could not close {repo}#{issue_number}: {exc}"
+        _ensure_issue_open(report, repo, issue_number)
+        return report
+
+    run_id = str(run["databaseId"])
+    report.run_url = run.get("url")
+    try:
+        conclusion = poll_run(repo, run_id, interval=15, timeout=poll_timeout)
+    except InfrastructureError as exc:
+        report.detail = f"run {run_id} polling error: {exc}"
+        _ensure_issue_open(report, repo, issue_number)
+        return report
+
+    report.run_conclusion = conclusion
+    if conclusion != "success":
+        report.detail = f"caller run concluded {conclusion!r} — RA workflow failed"
+        _ensure_issue_open(report, repo, issue_number)
+        return report
+
+    try:
+        issue_state = get_issue_open_state(repo, issue_number)
+        if issue_state != "open":
+            report.detail = (
+                f"{repo}#{issue_number} still closed after the run — "
+                f"auto-reopen missing"
+            )
+            reopen_issue(repo, issue_number)
+            report.extras.append(f"{repo}#{issue_number} reopened by the canary")
+            return report
+        state = get_release_issue_state(repo, issue_number)
+        last_comment = fetch_last_bot_comment(repo, issue_number, marker)
+    except InfrastructureError as exc:
+        report.detail = f"could not verify auto-reopen: {exc}"
+        return report
+
+    if state != STATE_SNAPSHOT_ACTIVE:
+        report.detail = f"state={state!r} after auto-reopen, expected snapshot-active"
+        return report
+    if last_comment is None:
+        report.detail = "no bot reply received on the Release Issue since closing it"
+        return report
+
+    actual_title = _first_visible_line(last_comment.get("body") or "")
+    if _match_comment_title(last_comment.get("body") or "", expected):
+        report.passed = True
+        report.detail = f"issue reopened; bot reply matches expected — `{actual_title}`"
+    else:
+        report.detail = (
+            f"bot reply does not match expected: got `{actual_title}`, "
+            f"expected prefix `{expected}`"
+        )
+        report.extras.append(
+            f"comment: {last_comment.get('html_url', '<no url>')}"
+        )
+    return report
+
+
+def _restore_release_issue(report: PhaseReport, repo: str, issue_number: int) -> None:
+    """Reopen the closed Release Issue if no open one exists, so the next run finds one."""
+    try:
+        find_release_issue(repo)
+        return
+    except InfrastructureError:
+        pass
+    _ensure_issue_open(report, repo, issue_number)
+
+
+def phase_close_recreate(
+    repo: str,
+    issue_number: int,
+    *,
+    poll_timeout: int,
+    dry_run: bool,
+    expected_titles: dict[str, str] | None = None,
+) -> PhaseReport:
+    """Close the Release Issue in `planned`; expect a fresh one for the same plan.
+
+    Passes iff the close-triggered run concludes success, the closed issue
+    stays closed, exactly one new Release Issue is open in `planned`, and its
+    bot reply starts with the expected title. Leaves each canary run a fresh
+    Release Issue. If no open Release Issue exists afterwards, the canary
+    reopens the closed one.
+    """
+    report = PhaseReport(name="close issue in planned (recreate)")
+    if dry_run:
+        report.passed = True
+        report.detail = f"DRY-RUN: would close {repo}#{issue_number}"
+        return report
+
+    titles = expected_titles or load_expected_comment_titles()
+    expected = titles.get("issue-close-planned", "")
+    marker = datetime.now(timezone.utc).replace(microsecond=0)
+    try:
+        issue_title = get_issue_title(repo, issue_number)
+        close_issue(repo, issue_number)
+        logger.info("closed %s#%s; polling for caller run", repo, issue_number)
+        run = find_recent_caller_run(
+            repo,
+            workflow_file=_RA_CALLER_WORKFLOW,
+            since=marker,
+            event="issues",
+            expected_display_title=issue_title,
+            oldest=True,
+        )
+    except InfrastructureError as exc:
+        report.detail = f"could not close {repo}#{issue_number}: {exc}"
+        _restore_release_issue(report, repo, issue_number)
+        return report
+
+    run_id = str(run["databaseId"])
+    report.run_url = run.get("url")
+    try:
+        conclusion = poll_run(repo, run_id, interval=15, timeout=poll_timeout)
+    except InfrastructureError as exc:
+        report.detail = f"run {run_id} polling error: {exc}"
+        _restore_release_issue(report, repo, issue_number)
+        return report
+
+    report.run_conclusion = conclusion
+    if conclusion != "success":
+        report.detail = f"caller run concluded {conclusion!r} — RA workflow failed"
+        _restore_release_issue(report, repo, issue_number)
+        return report
+
+    try:
+        old_state = get_issue_open_state(repo, issue_number)
+    except InfrastructureError as exc:
+        report.detail = f"could not verify recreate: {exc}"
+        return report
+    if old_state != "closed":
+        report.detail = f"{repo}#{issue_number} is {old_state!r} after the run, expected closed"
+        return report
+
+    try:
+        new_number = find_release_issue(repo)
+    except InfrastructureError as exc:
+        report.detail = f"no new Release Issue after closing #{issue_number}: {exc}"
+        _restore_release_issue(report, repo, issue_number)
+        return report
+
+    try:
+        state = get_release_issue_state(repo, new_number)
+        last_comment = fetch_last_bot_comment(repo, new_number, marker)
+    except InfrastructureError as exc:
+        report.detail = f"could not verify recreate: {exc}"
+        return report
+
+    if new_number == issue_number:
+        report.detail = f"Release Issue is still #{issue_number}, expected a new one"
+        return report
+    if state != STATE_PLANNED:
+        report.detail = f"state={state!r} on #{new_number}, expected planned"
+        return report
+    if last_comment is None:
+        report.detail = f"no bot reply received on #{new_number}"
+        return report
+
+    actual_title = _first_visible_line(last_comment.get("body") or "")
+    if _match_comment_title(last_comment.get("body") or "", expected):
+        report.passed = True
+        report.detail = (
+            f"#{issue_number} closed, new Release Issue #{new_number}; "
+            f"bot reply matches expected — `{actual_title}`"
+        )
+    else:
+        report.detail = (
+            f"bot reply on #{new_number} does not match expected: got "
+            f"`{actual_title}`, expected prefix `{expected}`"
+        )
+        report.extras.append(
+            f"comment: {last_comment.get('html_url', '<no url>')}"
+        )
+    return report
+
+
 # ---------------------------------------------------------------------------
 # Reporting
 # ---------------------------------------------------------------------------
@@ -1073,13 +1529,38 @@ def run_phases(
     if not pre.passed:
         return reports
 
+    # Publish-free phases in `planned`. None of them should change state,
+    # so a failure here does not stop the round trip; the planned check
+    # below gates /create-snapshot.
+    reports.append(
+        phase_dispatch_sync_issue(repo, poll_timeout=poll_timeout, dry_run=dry_run)
+    )
+    sync_report, _sync_run_id = phase_fire_sync_issue(
+        repo, issue_number,
+        poll_timeout=poll_timeout, dry_run=dry_run,
+    )
+    reports.append(sync_report)
+    rejected_report, _rejected_run_id = phase_fire_rejected_discard(
+        repo, issue_number,
+        poll_timeout=poll_timeout, dry_run=dry_run,
+    )
+    reports.append(rejected_report)
+
+    if not dry_run:
+        planned = phase_verify_planned_unchanged(repo, issue_number)
+        reports.append(planned)
+        if not planned.passed:
+            return reports
+
     create_report, _create_run_id = phase_fire_create_snapshot(
         repo, issue_number,
         poll_timeout=poll_timeout, dry_run=dry_run,
     )
     reports.append(create_report)
     if dry_run:
-        logger.info("dry-run: skipping post-create verify, discard, post-discard verify")
+        logger.info(
+            "dry-run: skipping post-create verify, close, discard, post-discard verify"
+        )
         return reports
     if not create_report.passed:
         # A failed /create-snapshot should not be followed by /discard-snapshot:
@@ -1091,6 +1572,14 @@ def run_phases(
     verify_create, snapshot_id = phase_verify_post_create(repo, issue_number)
     reports.append(verify_create)
 
+    # Leaves the issue open on failure, so /discard-snapshot still runs.
+    reports.append(
+        phase_close_auto_reopen(
+            repo, issue_number,
+            poll_timeout=poll_timeout, dry_run=dry_run,
+        )
+    )
+
     discard_report, _discard_run_id = phase_fire_discard_snapshot(
         repo, issue_number,
         poll_timeout=poll_timeout, dry_run=dry_run,
@@ -1101,6 +1590,16 @@ def run_phases(
 
     verify_discard = phase_verify_post_discard(repo, issue_number, snapshot_id)
     reports.append(verify_discard)
+    if not verify_discard.passed:
+        return reports
+
+    # Last phase: leaves the next run a fresh Release Issue.
+    reports.append(
+        phase_close_recreate(
+            repo, issue_number,
+            poll_timeout=poll_timeout, dry_run=dry_run,
+        )
+    )
     return reports
 
 

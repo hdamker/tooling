@@ -1,20 +1,25 @@
 # CAMARA Release Automation — Regression (canary)
 #
 # Sibling to validation-regression.yml. Exercises the release-automation-reusable.yml
-# workflow on camaraproject/ReleaseTest via a /create-snapshot + /discard-snapshot
-# round-trip, catching runtime bugs in the RA workflow and shared actions
-# that the Validation Regression canary cannot reach.
+# workflow on camaraproject/ReleaseTest via publish-free paths — sync-issue
+# (workflow_dispatch and /sync-issue), a rejected /discard-snapshot in
+# `planned`, then a /create-snapshot + /discard-snapshot round-trip with an
+# issue close (auto-reopen) in `snapshot-active`, and a final issue close in
+# `planned` that leaves a fresh Release Issue for the next run — catching
+# runtime bugs in the RA workflow and shared actions that the Validation
+# Regression canary cannot reach.
 #
-# Round-trip only — never merges the Release Review PR, never creates a
+# Publish-free only — never merges the Release Review PR, never creates a
 # draft build, never calls /publish-release. No real tags or releases
 # are produced. Full manual E2E remains the gate for publish-side changes
 # before @v1-rc moves.
 #
 # Cross-repo access is provided by a short-lived camara-validation
 # GitHub App installation token scoped to camaraproject/ReleaseTest.
-# Permissions used: issues:write (post slash-command comment),
-# actions:write (poll caller runs), pull_requests:write (verify Release
-# Review PR presence). The App has no contents:write — and none is needed.
+# Permissions used: issues:write (post slash-command comment, close and
+# reopen the Release Issue), actions:write (dispatch and poll caller runs),
+# pull_requests:write (verify Release Review PR presence). The App has no
+# contents:write — and none is needed.
 # The default GITHUB_TOKEN is only used for the initial checkout.
 
 name: Release Automation Regression

@@ -23,13 +23,13 @@ Two canaries verify the framework on every push to `main` that touches their dec
 | Workflow | Scope |
 |---|---|
 | [`validation-regression.yml`](../../.github/workflows/validation-regression.yml) | Diffs validation findings against committed expected fixtures on each `regression/*` branch of [`camaraproject/ReleaseTest`](https://github.com/camaraproject/ReleaseTest) |
-| [`release-automation-regression.yml`](../../.github/workflows/release-automation-regression.yml) | `/create-snapshot` + `/discard-snapshot` round-trip on ReleaseTest, matched against expected bot replies |
+| [`release-automation-regression.yml`](../../.github/workflows/release-automation-regression.yml) | sync-issue (dispatch and slash), a rejected command, and a `/create-snapshot` + `/discard-snapshot` round-trip with issue-close auto-reopen, and a closing issue close that recreates the Release Issue on ReleaseTest, matched against expected bot replies |
 
 Both use a short-lived `camara-validation` GitHub App installation token for cross-repo access to ReleaseTest.
 
 ### Mandatory E2E for release-automation changes
 
-The Release Automation Regression canary is round-trip only — it does not exercise publish, draft build, or release artifact creation. Any change touching `release-automation-reusable.yml`, `release_automation/`, `shared-actions/create-snapshot/`, or related publish-side code requires a full manual E2E on ReleaseTest before `v1-rc` advances.
+The Release Automation Regression canary is publish-free — it does not exercise publish, draft build, or release artifact creation. Any change touching `release-automation-reusable.yml`, `release_automation/`, `shared-actions/create-snapshot/`, or related publish-side code requires a full manual E2E on ReleaseTest before `v1-rc` advances.
 
 ## 2. v1 — GA (planned)
 
