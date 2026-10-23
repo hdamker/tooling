@@ -1,5 +1,5 @@
 # Expected leading title of the final bot comment on the Release Issue
-# when each slash command completes on the green path.
+# when each canary phase completes on the green path.
 #
 # This is a test assertion, not a captured artifact. When the RA workflow
 # changes the template used for a given command, edit this file alongside
@@ -13,6 +13,15 @@
 # Source templates:
 #   snapshot_created.md   -> "**✅ Snapshot created — State: `snapshot-active`**"
 #   snapshot_discarded.md -> "**🗑️ Snapshot discarded — State: `planned`**"
+#   interim_processing.md -> "**⏳ Processing: `/{{command}}`**"
+#     (/sync-issue has no result template; post-result renders this one)
+#   command_rejected.md   -> "**❌ Command rejected: `/{{command}}` — State: `{{state}}`**"
+#   issue_reopened.md     -> "**🔄 Issue reopened — State: `{{state}}`**"
 
 create-snapshot: "**✅ Snapshot created"
 discard-snapshot: "**🗑️ Snapshot discarded"
+sync-issue: "**⏳ Processing: `/sync-issue`"
+# /discard-snapshot posted in `planned`
+rejected-discard-snapshot: "**❌ Command rejected: `/discard-snapshot`"
+# Release Issue closed in `snapshot-active` (issue_close auto-reopen)
+issue-close: "**🔄 Issue reopened"
