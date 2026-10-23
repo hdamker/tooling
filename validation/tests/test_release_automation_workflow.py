@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
+
+from release_automation.scripts.trigger import SLASH_COMMANDS
 
 
 WORKFLOW = (
@@ -66,7 +69,7 @@ def test_tooling_checkouts_resolve_through_job_context():
         and step.get("with", {}).get("path") == "_tooling"
     ]
 
-    assert len(checkouts) == 11
+    assert len(checkouts) == 12
     for step in checkouts:
         assert step["with"]["repository"] == "${{ job.workflow_repository }}"
         assert step["with"]["ref"] == "${{ job.workflow_sha }}"
@@ -85,3 +88,33 @@ def test_no_oidc_tooling_ref_resolution_or_override():
     ):
         assert token not in text
     assert "id-token" not in workflow["permissions"]
+
+
+def _job_steps(job: str) -> list[dict]:
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    return workflow["jobs"][job]["steps"]
+
+
+def test_check_trigger_acks_before_checkout_then_runs_trigger_module():
+    steps = _job_steps("check-trigger")
+    names = [step.get("name") for step in steps]
+
+    assert names.index("Post Acknowledgment") < names.index("Checkout tooling")
+    assert names.index("Checkout tooling") < names.index("Detect Trigger Type")
+
+    detect = _step_by_name(steps, "Detect Trigger Type")
+    assert detect["id"] == "detect"
+    assert detect["working-directory"] == "_tooling"
+    assert detect["run"].strip() == "python -m release_automation.scripts.trigger"
+    assert "uses" not in detect
+
+
+def test_ack_command_list_matches_trigger_module():
+    ack = _step_by_name(_job_steps("check-trigger"), "Post Acknowledgment")
+    script = ack["with"]["script"]
+
+    match = re.search(r"body\.match\(/\^\\/\(([a-z|-]+)\)", script)
+    assert match, "ack command regex not found"
+    assert match.group(1).split("|") == [name for name, _ in SLASH_COMMANDS]
+    # The ack reads the payload directly; it must not depend on later steps.
+    assert "steps." not in script

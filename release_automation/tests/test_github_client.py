@@ -228,5 +228,26 @@ class TestGitHubClient(unittest.TestCase):
         with self.assertRaises(GitHubClientError):
             self.client.create_branch_at_sha("release/r4.1", "abc123")
 
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_find_merged_pr_for_commit(self, mock_run_gh):
+        mock_run_gh.return_value = json.dumps([
+            {"number": 3, "merged_at": None, "html_url": "https://github.com/owner/repo/pull/3"},
+            {"number": 5, "merged_at": "2026-10-23T10:00:00Z", "html_url": "https://github.com/owner/repo/pull/5"},
+        ])
+        result = self.client.find_merged_pr_for_commit("abc123")
+        self.assertEqual(result, (5, "https://github.com/owner/repo/pull/5"))
+        args = mock_run_gh.call_args[0][0]
+        self.assertIn("repos/owner/repo/commits/abc123/pulls", args)
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_find_merged_pr_for_commit_none_merged(self, mock_run_gh):
+        mock_run_gh.return_value = json.dumps([{"number": 3, "merged_at": None, "html_url": "u"}])
+        self.assertIsNone(self.client.find_merged_pr_for_commit("abc123"))
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_find_merged_pr_for_commit_api_error(self, mock_run_gh):
+        mock_run_gh.side_effect = GitHubClientError("500: Internal server error")
+        self.assertIsNone(self.client.find_merged_pr_for_commit("abc123"))
+
 if __name__ == '__main__':
     unittest.main()

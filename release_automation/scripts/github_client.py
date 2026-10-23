@@ -11,7 +11,7 @@ import json
 import subprocess
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
@@ -533,6 +533,26 @@ class GitHubClient:
             return int(output.strip()) if output.strip() else None
         except (GitHubClientError, ValueError):
             return None
+
+    def find_merged_pr_for_commit(self, sha: str) -> Optional[Tuple[int, str]]:
+        """
+        Find the merged PR a commit belongs to (a push event carries no PR data).
+
+        Args:
+            sha: Commit SHA, usually the push head commit
+
+        Returns:
+            (PR number, PR URL) of the first merged PR, or None if there is
+            none or the lookup fails
+        """
+        try:
+            output = self._run_gh(["api", f"repos/{self.repo}/commits/{sha}/pulls"])
+            for pr in json.loads(output or "[]"):
+                if pr.get("merged_at"):
+                    return pr["number"], pr["html_url"]
+        except (GitHubClientError, ValueError) as e:
+            print(f"Warning: Could not look up PR: {e}")
+        return None
 
     # -------------------------------------------------------------------------
     # Retry helper for eventual consistency
