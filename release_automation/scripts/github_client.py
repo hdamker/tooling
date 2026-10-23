@@ -205,16 +205,42 @@ class GitHubClient:
         except (GitHubClientError, ValueError):
             return False
 
-    def get_file_content(self, path: str, ref: str = "main") -> Optional[str]:
+    def get_collaborator_permission(self, username: str) -> str:
+        """
+        Get a user's permission level on the repository.
+
+        Args:
+            username: GitHub login
+
+        Returns:
+            admin | maintain | write | triage | read | none
+
+        Raises:
+            GitHubClientError: If the lookup fails
+        """
+        output = self._run_gh([
+            "api",
+            f"repos/{self.repo}/collaborators/{username}/permission",
+            "--jq", ".permission",
+        ])
+        return output.strip()
+
+    def get_file_content(
+        self, path: str, ref: str = "main", strict: bool = False
+    ) -> Optional[str]:
         """
         Get the content of a file from the repository.
 
         Args:
             path: File path relative to repository root
             ref: Branch, tag, or commit SHA to read from
+            strict: Raise on errors other than 404 instead of returning None
 
         Returns:
             File content as string, or None if file doesn't exist
+
+        Raises:
+            GitHubClientError: On a non-404 error when strict is True
 
         Note:
             Returns None only for 404 (file not found).
@@ -236,6 +262,8 @@ class GitHubClient:
             # 404 is expected when file doesn't exist - return None silently
             if "404" in error_msg or "not found" in error_msg:
                 return None
+            if strict:
+                raise
             # Other errors (auth, server, rate limit) should be surfaced
             print(f"Warning: Failed to read {path} from {ref}: {e}")
             return None

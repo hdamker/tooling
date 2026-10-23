@@ -324,7 +324,7 @@ def run_main(tmp_path, monkeypatch, event_name, payload, client=None):
 
 OUTPUT_NAMES = {
     "trigger_type", "command", "command_args", "issue_number", "user",
-    "should_continue", "confirm_tag", "trigger_pr_number", "trigger_pr_url",
+    "should_continue", "confirm_tag", "trigger_pr_number", "trigger_pr_url", "trigger",
 }
 
 
@@ -334,6 +334,7 @@ def test_main_writes_check_trigger_outputs(tmp_path, monkeypatch):
     out = run_main(tmp_path, monkeypatch, "issue_comment", payload, client=FakeClient())
 
     assert set(out) == OUTPUT_NAMES
+    assert Trigger(**json.loads(out.pop("trigger"))) == parse("issue_comment", payload)
     assert out == {
         "trigger_type": "slash_command",
         "command": "publish-release",

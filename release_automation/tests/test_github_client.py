@@ -249,5 +249,34 @@ class TestGitHubClient(unittest.TestCase):
         mock_run_gh.side_effect = GitHubClientError("500: Internal server error")
         self.assertIsNone(self.client.find_merged_pr_for_commit("abc123"))
 
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_get_collaborator_permission(self, mock_run_gh):
+        mock_run_gh.return_value = "maintain\n"
+        self.assertEqual(self.client.get_collaborator_permission("alice"), "maintain")
+        args = mock_run_gh.call_args[0][0]
+        self.assertIn("repos/owner/repo/collaborators/alice/permission", args)
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_get_collaborator_permission_error_raises(self, mock_run_gh):
+        mock_run_gh.side_effect = GitHubClientError("gh command failed: HTTP 502")
+        with self.assertRaises(GitHubClientError):
+            self.client.get_collaborator_permission("alice")
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_get_file_content_strict_returns_none_on_404(self, mock_run_gh):
+        mock_run_gh.side_effect = GitHubClientError("gh command failed: HTTP 404: Not Found")
+        self.assertIsNone(self.client.get_file_content("CODEOWNERS", strict=True))
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_get_file_content_strict_raises_on_other_errors(self, mock_run_gh):
+        mock_run_gh.side_effect = GitHubClientError("gh command failed: HTTP 500")
+        with self.assertRaises(GitHubClientError):
+            self.client.get_file_content("CODEOWNERS", strict=True)
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_get_file_content_default_swallows_other_errors(self, mock_run_gh):
+        mock_run_gh.side_effect = GitHubClientError("gh command failed: HTTP 500")
+        self.assertIsNone(self.client.get_file_content("CODEOWNERS"))
+
 if __name__ == '__main__':
     unittest.main()
