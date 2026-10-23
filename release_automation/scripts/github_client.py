@@ -1250,6 +1250,83 @@ class GitHubClient:
                 return False
             raise
 
+    def get_branch_sha(self, branch_name: str) -> Optional[str]:
+        """Commit SHA a branch points to, or None if the branch doesn't exist."""
+        try:
+            output = self._run_gh([
+                "api",
+                f"repos/{self.repo}/git/ref/heads/{branch_name}",
+                "--jq", ".object.sha"
+            ])
+            return output.strip() or None
+        except GitHubClientError as e:
+            error_msg = str(e).lower()
+            if "404" in error_msg or "not found" in error_msg:
+                return None
+            raise
+
+    def create_release(
+        self,
+        tag: str,
+        target: str,
+        name: str,
+        body: str,
+        draft: bool,
+        prerelease: bool,
+        make_latest: Optional[str] = None
+    ) -> dict:
+        """Create a release; a published one creates its tag at the target's head.
+
+        Returns:
+            Release data ('id', 'html_url', ...)
+
+        Raises:
+            GitHubClientError: If creation fails
+        """
+        args = [
+            "api", f"repos/{self.repo}/releases", "-X", "POST",
+            "-f", f"tag_name={tag}",
+            "-f", f"target_commitish={target}",
+            "-f", f"name={name}",
+            "-f", f"body={body}",
+            "-F", f"draft={str(draft).lower()}",
+            "-F", f"prerelease={str(prerelease).lower()}",
+        ]
+        if make_latest is not None:
+            args.extend(["-f", f"make_latest={make_latest}"])
+        return json.loads(self._run_gh(args))
+
+    def delete_release(self, release_id: int) -> None:
+        """Delete a release (its tag, if any, stays).
+
+        Raises:
+            GitHubClientError: If deletion fails
+        """
+        self._run_gh(["api", f"repos/{self.repo}/releases/{release_id}", "-X", "DELETE"])
+
+    def delete_tag(self, tag: str) -> bool:
+        """Delete a tag; False if it didn't exist.
+
+        Raises:
+            GitHubClientError: If deletion fails for other reasons
+        """
+        try:
+            self._run_gh(["api", f"repos/{self.repo}/git/refs/tags/{tag}", "-X", "DELETE"])
+            return True
+        except GitHubClientError as e:
+            error_msg = str(e).lower()
+            if "422" in error_msg or "404" in error_msg or "not found" in error_msg:
+                return False
+            raise
+
+    def reopen_issue(self, issue_number: int) -> None:
+        """Reopen a closed issue.
+
+        Raises:
+            GitHubClientError: If the update fails
+        """
+        self._run_gh(["api", f"repos/{self.repo}/issues/{issue_number}", "-X", "PATCH", "-f", "state=open"])
+
     def close_issue(
         self,
         issue_number: int,

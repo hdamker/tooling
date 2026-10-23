@@ -264,20 +264,14 @@ class Report:
 
 
 def post_comment(clients: Clients, run: Run, template: str, issue: str, delta: Dict[str, Any], comment_id: str = "") -> None:
-    from .bot_responder import BotResponder
+    from .bot_responder import post_comment as post
 
     try:
         base_context = json.loads(run.plan("base_context") or "{}")
     except json.JSONDecodeError:
         print("::warning::Invalid base_context JSON, ignoring")
         base_context = {}
-    body = BotResponder().render_comment(template, base_context, delta, run.plan("release_tag"))
-    if comment_id:
-        clients.gh.update_comment(int(comment_id), body)
-        print(f"Updated comment {comment_id} ({template})")
-    else:
-        new_id = clients.gh.create_comment(int(issue), body)
-        print(f"Created comment {new_id} on #{issue} ({template})")
+    post(clients.gh, template, issue, base_context, delta, run.plan("release_tag"), comment_id=comment_id)
 
 
 def run_sync_pr(run: Run, clients: Clients) -> SyncPrOutcome:

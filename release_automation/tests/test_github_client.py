@@ -324,5 +324,58 @@ class TestGitHubClient(unittest.TestCase):
         mock_run_gh.side_effect = GitHubClientError("gh command failed: HTTP 500")
         self.assertIsNone(self.client.get_file_content("CODEOWNERS"))
 
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_create_release_draft(self, mock_run_gh):
+        mock_run_gh.return_value = json.dumps({"id": 7, "html_url": "https://github.com/owner/repo/releases/tag/untagged-1"})
+        result = self.client.create_release("r1.4", "release-snapshot/r1.4-abc1234", "r1.4", "## Release Notes", draft=True, prerelease=True)
+        self.assertEqual(result["id"], 7)
+        self.assertEqual(mock_run_gh.call_args[0][0], [
+            "api", "repos/owner/repo/releases", "-X", "POST",
+            "-f", "tag_name=r1.4", "-f", "target_commitish=release-snapshot/r1.4-abc1234",
+            "-f", "name=r1.4", "-f", "body=## Release Notes",
+            "-F", "draft=true", "-F", "prerelease=true",
+        ])
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_create_release_published_latest(self, mock_run_gh):
+        mock_run_gh.return_value = json.dumps({"id": 8, "html_url": "u"})
+        self.client.create_release("r2.1", "b", "r2.1", "x", draft=False, prerelease=False, make_latest="true")
+        self.assertEqual(mock_run_gh.call_args[0][0][-6:], [
+            "-F", "draft=false", "-F", "prerelease=false", "-f", "make_latest=true",
+        ])
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_delete_release(self, mock_run_gh):
+        self.client.delete_release(7)
+        self.assertEqual(mock_run_gh.call_args[0][0], ["api", "repos/owner/repo/releases/7", "-X", "DELETE"])
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_delete_tag(self, mock_run_gh):
+        self.assertTrue(self.client.delete_tag("r1.4"))
+        self.assertEqual(mock_run_gh.call_args[0][0], ["api", "repos/owner/repo/git/refs/tags/r1.4", "-X", "DELETE"])
+        mock_run_gh.side_effect = GitHubClientError("gh command failed: HTTP 422: Reference does not exist")
+        self.assertFalse(self.client.delete_tag("r1.4"))
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_delete_tag_raises_other_errors(self, mock_run_gh):
+        mock_run_gh.side_effect = GitHubClientError("gh command failed: HTTP 500")
+        with self.assertRaises(GitHubClientError):
+            self.client.delete_tag("r1.4")
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_reopen_issue(self, mock_run_gh):
+        self.client.reopen_issue(40)
+        self.assertEqual(mock_run_gh.call_args[0][0], ["api", "repos/owner/repo/issues/40", "-X", "PATCH", "-f", "state=open"])
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_get_branch_sha(self, mock_run_gh):
+        mock_run_gh.return_value = "abc123\n"
+        self.assertEqual(self.client.get_branch_sha("release-review/r1.4-abc1234"), "abc123")
+        self.assertEqual(mock_run_gh.call_args[0][0], [
+            "api", "repos/owner/repo/git/ref/heads/release-review/r1.4-abc1234", "--jq", ".object.sha",
+        ])
+        mock_run_gh.side_effect = GitHubClientError("gh command failed: HTTP 404: Not Found")
+        self.assertIsNone(self.client.get_branch_sha("gone"))
+
 if __name__ == '__main__':
     unittest.main()
