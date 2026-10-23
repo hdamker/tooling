@@ -17,9 +17,7 @@ class TestBotContext:
         assert ctx.command == ""
         assert ctx.command_args == ""
         assert ctx.user == ""
-        assert ctx.trigger_pr_number == ""
         assert ctx.trigger_type == ""
-        assert ctx.trigger_pr_url == ""
         assert ctx.closed_issue_number == ""
         assert ctx.closed_issue_url == ""
         assert ctx.release_plan_url == ""
@@ -64,7 +62,6 @@ class TestBotContext:
         assert ctx.state_published is False
         assert ctx.trigger_workflow_dispatch is False
         assert ctx.trigger_issue_close is False
-        assert ctx.trigger_release_plan_change is False
         assert ctx.has_meta_release is False
         assert ctx.has_reason is False
         assert ctx.has_sync_pr is False
@@ -190,8 +187,7 @@ class TestBotContext:
         d = ctx.to_dict()
 
         expected_keys = {
-            "command", "command_args", "user", "trigger_pr_number",
-            "trigger_type", "trigger_pr_url",
+            "command", "command_args", "user", "trigger_type",
             "closed_issue_number", "closed_issue_url", "release_plan_url",
             "release_tag", "state", "release_type", "meta_release", "short_type",
             "snapshot_id", "snapshot_branch", "snapshot_branch_url",
@@ -203,7 +199,6 @@ class TestBotContext:
             "is_missing_file", "is_malformed_yaml", "is_missing_field",
             "state_snapshot_active", "state_draft_ready", "state_published",
             "trigger_workflow_dispatch", "trigger_issue_close",
-            "trigger_release_plan_change",
             "has_meta_release", "has_reason",
             "workflow_run_url", "draft_release_url", "candidate_block_stripped", "reason",
             # Publication fields
@@ -272,8 +267,7 @@ class TestBuildContext:
         result = build_context()
 
         expected_keys = {
-            "command", "command_args", "user", "trigger_pr_number",
-            "trigger_type", "trigger_pr_url",
+            "command", "command_args", "user", "trigger_type",
             "closed_issue_number", "closed_issue_url", "release_plan_url",
             "release_tag", "state", "release_type", "meta_release", "short_type",
             "snapshot_id", "snapshot_branch", "snapshot_branch_url",
@@ -285,7 +279,6 @@ class TestBuildContext:
             "is_missing_file", "is_malformed_yaml", "is_missing_field",
             "state_snapshot_active", "state_draft_ready", "state_published",
             "trigger_workflow_dispatch", "trigger_issue_close",
-            "trigger_release_plan_change",
             "has_meta_release", "has_reason",
             "workflow_run_url", "draft_release_url", "candidate_block_stripped", "reason",
             # Publication fields
@@ -392,7 +385,6 @@ class TestWP49Fields:
         ctx.derive_flags()
         assert ctx.trigger_workflow_dispatch is True
         assert ctx.trigger_issue_close is False
-        assert ctx.trigger_release_plan_change is False
 
     def test_trigger_type_issue_close(self):
         """trigger_type 'issue_close' sets correct flag."""
@@ -400,15 +392,6 @@ class TestWP49Fields:
         ctx.derive_flags()
         assert ctx.trigger_workflow_dispatch is False
         assert ctx.trigger_issue_close is True
-        assert ctx.trigger_release_plan_change is False
-
-    def test_trigger_type_release_plan_change(self):
-        """trigger_type 'release_plan_change' sets correct flag."""
-        ctx = BotContext(trigger_type="release_plan_change")
-        ctx.derive_flags()
-        assert ctx.trigger_workflow_dispatch is False
-        assert ctx.trigger_issue_close is False
-        assert ctx.trigger_release_plan_change is True
 
     def test_has_meta_release_true(self):
         """has_meta_release is True when meta_release is non-empty."""

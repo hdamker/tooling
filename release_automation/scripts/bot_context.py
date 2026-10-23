@@ -25,9 +25,7 @@ class BotContext:
     command: str = ""
     command_args: str = ""
     user: str = ""
-    trigger_pr_number: str = ""
-    trigger_type: str = ""  # "workflow_dispatch", "issue_close", "release_plan_change"
-    trigger_pr_url: str = ""
+    trigger_type: str = ""  # "slash_command", "workflow_dispatch", "push", "issue_close", ...
 
     # Issue creation fields (for issue_created template)
     closed_issue_number: str = ""
@@ -72,7 +70,6 @@ class BotContext:
     state_published: bool = False
     trigger_workflow_dispatch: bool = False
     trigger_issue_close: bool = False
-    trigger_release_plan_change: bool = False
     has_meta_release: bool = False
     has_reason: bool = False
 
@@ -115,7 +112,6 @@ class BotContext:
         self.state_published = self.state == config.STATE_PUBLISHED
         self.trigger_workflow_dispatch = self.trigger_type == "workflow_dispatch"
         self.trigger_issue_close = self.trigger_type == "issue_close"
-        self.trigger_release_plan_change = self.trigger_type == "release_plan_change"
         self.has_meta_release = bool(self.meta_release)
         self.has_reason = bool(self.reason)
         self.has_sync_pr = bool(self.sync_pr_url)
@@ -142,9 +138,7 @@ class BotContext:
             "command": self.command,
             "command_args": self.command_args,
             "user": self.user,
-            "trigger_pr_number": self.trigger_pr_number,
             "trigger_type": self.trigger_type,
-            "trigger_pr_url": self.trigger_pr_url,
             # Issue creation fields
             "closed_issue_number": self.closed_issue_number,
             "closed_issue_url": self.closed_issue_url,
@@ -181,7 +175,6 @@ class BotContext:
             "state_published": self.state_published,
             "trigger_workflow_dispatch": self.trigger_workflow_dispatch,
             "trigger_issue_close": self.trigger_issue_close,
-            "trigger_release_plan_change": self.trigger_release_plan_change,
             "has_meta_release": self.has_meta_release,
             "has_reason": self.has_reason,
             # Display fields

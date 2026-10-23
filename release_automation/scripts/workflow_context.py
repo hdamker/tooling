@@ -62,8 +62,6 @@ def main():
         "src_commit_sha": os.environ.get("CTX_SRC_COMMIT_SHA", ""), # Not in BotContext directly? Check.
         
         # Trigger PR (for push events — PR that triggered the release-plan.yaml change)
-        "trigger_pr_number": os.environ.get("CTX_TRIGGER_PR_NUMBER", ""),
-        "trigger_pr_url": os.environ.get("CTX_TRIGGER_PR_URL", ""),
 
         # Dependencies
         "commonalities_release": os.environ.get("CTX_COMMONALITIES_RELEASE", ""),

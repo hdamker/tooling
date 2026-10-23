@@ -402,7 +402,6 @@ def test_slash_command_plan_responds_with_interim(command):
         Trigger(trigger_type="issue_reopen", issue_number="42", user="x", should_continue=True),
         Trigger(trigger_type="pr_merge", user="x", should_continue=True),
         Trigger(trigger_type="workflow_dispatch", command="sync-issue", user="x", should_continue=True),
-        Trigger(trigger_type="release_plan_change", command="sync-issue", user="x", should_continue=True),
         Trigger(trigger_type="push", command="sync-issue", user="x", should_continue=True),
     ],
 )

@@ -23,8 +23,8 @@ def issue_comment_payload(body, labels=RELEASE_ISSUE_LABELS, commenter="alice"):
     }
 
 
-def parse(event_name, payload, actor="dispatcher", sha="f" * 40):
-    return parse_trigger(event_name, payload, actor=actor, sha=sha)
+def parse(event_name, payload, actor="dispatcher"):
+    return parse_trigger(event_name, payload, actor=actor)
 
 
 # ── issue_comment ────────────────────────────────────────────────────────────
@@ -218,58 +218,32 @@ def test_workflow_dispatch_is_sync_issue():
 # ── push ─────────────────────────────────────────────────────────────────────
 
 
-def push_payload(*commits, head="a" * 40):
+def push_payload(*commits):
     return {
         "ref": "refs/heads/main",
-        "head_commit": {"id": head} if head else None,
+        "head_commit": {"id": "a" * 40},
         "commits": list(commits),
     }
-
-
-def test_push_changing_release_plan():
-    payload = push_payload(
-        {"added": [], "modified": ["README.md"], "removed": []},
-        {"added": [], "modified": ["release-plan.yaml"], "removed": []},
-    )
-
-    t = parse("push", payload, actor="erin")
-
-    assert t == Trigger(
-        trigger_type="release_plan_change",
-        command="sync-issue",
-        user="erin",
-        should_continue=True,
-        head_sha="a" * 40,
-    )
 
 
 @pytest.mark.parametrize(
     "commits",
     [
+        [{"added": [], "modified": ["release-plan.yaml"], "removed": []}],
+        [{"removed": ["release-plan.yaml"]}],
         [{"added": ["code/common/CAMARA_common.yaml"], "modified": [], "removed": []}],
-        [{"modified": [".github/workflows/release-automation.yml"]}],
-        [{"added": ["docs/release-plan.yaml"]}],
         [],
     ],
 )
-def test_push_without_release_plan_change(commits):
+def test_push_is_a_sync_issue_whatever_it_changed(commits):
     t = parse("push", push_payload(*commits), actor="erin")
 
-    assert t.trigger_type == "push"
-    assert t.command == "sync-issue"
-    assert t.should_continue is True
-
-
-def test_push_release_plan_removed_counts_as_change():
-    t = parse("push", push_payload({"removed": ["release-plan.yaml"]}))
-
-    assert t.trigger_type == "release_plan_change"
-
-
-def test_push_without_head_commit_uses_github_sha():
-    t = parse("push", push_payload(head=None), sha="b" * 40)
-
-    assert t.head_sha == "b" * 40
+    assert t == Trigger(
+        trigger_type="push",
+        command="sync-issue",
+        user="erin",
+        should_continue=True,
+    )
 
 
 # ── other events ─────────────────────────────────────────────────────────────
@@ -280,16 +254,6 @@ def test_unhandled_event():
 
 
 # ── main(): env → GITHUB_OUTPUT ──────────────────────────────────────────────
-
-
-class FakeClient:
-    def __init__(self, merged_pr=None):
-        self.merged_pr = merged_pr
-        self.looked_up = []
-
-    def find_merged_pr_for_commit(self, sha):
-        self.looked_up.append(sha)
-        return self.merged_pr
 
 
 def read_outputs(path):
@@ -307,7 +271,7 @@ def read_outputs(path):
     return outputs
 
 
-def run_main(tmp_path, monkeypatch, event_name, payload, client=None):
+def run_main(tmp_path, monkeypatch, event_name, payload):
     event_path = tmp_path / "event.json"
     event_path.write_text(json.dumps(payload))
     output_path = tmp_path / "output"
@@ -315,23 +279,21 @@ def run_main(tmp_path, monkeypatch, event_name, payload, client=None):
     monkeypatch.setenv("GITHUB_EVENT_NAME", event_name)
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
     monkeypatch.setenv("GITHUB_ACTOR", "erin")
-    monkeypatch.setenv("GITHUB_SHA", "c" * 40)
-    monkeypatch.setenv("GITHUB_REPOSITORY", "camaraproject/ReleaseTest2")
     monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
-    trigger_mod.main(client=client)
+    trigger_mod.main()
     return read_outputs(output_path)
 
 
 OUTPUT_NAMES = {
     "trigger_type", "command", "command_args", "issue_number", "user",
-    "should_continue", "confirm_tag", "trigger_pr_number", "trigger_pr_url", "trigger",
+    "should_continue", "confirm_tag", "trigger",
 }
 
 
 def test_main_writes_check_trigger_outputs(tmp_path, monkeypatch):
     payload = issue_comment_payload("/publish-release --confirm r1.2")
 
-    out = run_main(tmp_path, monkeypatch, "issue_comment", payload, client=FakeClient())
+    out = run_main(tmp_path, monkeypatch, "issue_comment", payload)
 
     assert set(out) == OUTPUT_NAMES
     assert Trigger(**json.loads(out.pop("trigger"))) == parse("issue_comment", payload)
@@ -343,43 +305,23 @@ def test_main_writes_check_trigger_outputs(tmp_path, monkeypatch):
         "user": "alice",
         "should_continue": "true",
         "confirm_tag": "r1.2",
-        "trigger_pr_number": "",
-        "trigger_pr_url": "",
     }
 
 
 def test_main_skipped_event(tmp_path, monkeypatch):
     payload = issue_comment_payload("/create-snapshot", labels=[])
 
-    out = run_main(tmp_path, monkeypatch, "issue_comment", payload, client=FakeClient())
+    out = run_main(tmp_path, monkeypatch, "issue_comment", payload)
 
     assert out["should_continue"] == "false"
     assert out["trigger_type"] == ""
 
 
-def test_main_push_looks_up_merged_pr(tmp_path, monkeypatch):
-    client = FakeClient(merged_pr=(17, "https://github.com/camaraproject/ReleaseTest2/pull/17"))
-    payload = push_payload({"modified": ["release-plan.yaml"]}, head="d" * 40)
+def test_main_push(tmp_path, monkeypatch):
+    payload = push_payload({"modified": ["release-plan.yaml"]})
 
-    out = run_main(tmp_path, monkeypatch, "push", payload, client=client)
+    out = run_main(tmp_path, monkeypatch, "push", payload)
 
-    assert client.looked_up == ["d" * 40]
-    assert out["trigger_type"] == "release_plan_change"
+    assert out["trigger_type"] == "push"
+    assert out["command"] == "sync-issue"
     assert out["user"] == "erin"
-    assert out["trigger_pr_number"] == "17"
-    assert out["trigger_pr_url"] == "https://github.com/camaraproject/ReleaseTest2/pull/17"
-
-
-def test_main_push_without_merged_pr(tmp_path, monkeypatch):
-    out = run_main(tmp_path, monkeypatch, "push", push_payload(), client=FakeClient())
-
-    assert out["trigger_pr_number"] == ""
-    assert out["trigger_pr_url"] == ""
-
-
-def test_main_non_push_does_not_look_up_pr(tmp_path, monkeypatch):
-    client = FakeClient(merged_pr=(1, "u"))
-
-    run_main(tmp_path, monkeypatch, "workflow_dispatch", {}, client=client)
-
-    assert client.looked_up == []

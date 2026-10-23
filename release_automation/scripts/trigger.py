@@ -4,8 +4,7 @@ Trigger classification for CAMARA release automation.
 Turns the event that started the workflow into a Trigger: which path the
 workflow takes (slash command, issue event, PR merge, dispatch, push) and the
 command it carries. parse_trigger() is a pure function of the event name and
-the payload at GITHUB_EVENT_PATH; the one network lookup the push path needs
-(the PR a commit was merged from) is done by main() through GitHubClient.
+the payload at GITHUB_EVENT_PATH.
 
 Usage (workflow step):
     python3 -m release_automation.scripts.trigger
@@ -17,9 +16,9 @@ import re
 import sys
 import uuid
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict
 
-from .config import RELEASE_PLAN_FILE, SNAPSHOT_BRANCH_PREFIX
+from .config import SNAPSHOT_BRANCH_PREFIX
 
 RELEASE_ISSUE_LABEL = "release-issue"
 
@@ -52,7 +51,7 @@ class Trigger:
 
     Attributes:
         trigger_type: slash_command | issue_close | issue_reopen | pr_merge |
-            workflow_dispatch | release_plan_change | push | unknown; empty
+            workflow_dispatch | push | unknown; empty
             when the event concerns no Release Issue
         command: Slash command name without the slash, or sync-issue for
             dispatch and push
@@ -62,7 +61,6 @@ class Trigger:
         user: Commenter, issue author, PR merger or actor, by event
         should_continue: Whether the workflow proceeds past check-trigger
         confirm_tag: Tag given with /publish-release --confirm
-        head_sha: Commit a push event points at (for the merged-PR lookup)
     """
     trigger_type: str = ""
     command: str = ""
@@ -71,7 +69,6 @@ class Trigger:
     user: str = ""
     should_continue: bool = False
     confirm_tag: str = ""
-    head_sha: str = ""
 
 
 def _is_release_issue(issue: Dict[str, Any]) -> bool:
@@ -142,28 +139,10 @@ def _parse_pull_request(payload: Dict[str, Any]) -> Trigger:
     return Trigger(trigger_type=TRIGGER_UNKNOWN)
 
 
-def _parse_push(payload: Dict[str, Any], actor: str, sha: str) -> Trigger:
-    changed = {
-        path
-        for commit in payload.get("commits") or []
-        for key in ("added", "modified", "removed")
-        for path in commit.get(key) or []
-    }
-    head_commit = payload.get("head_commit") or {}
-    return Trigger(
-        trigger_type="release_plan_change" if RELEASE_PLAN_FILE in changed else "push",
-        command="sync-issue",
-        user=actor,
-        should_continue=True,
-        head_sha=head_commit.get("id") or sha,
-    )
-
-
 def parse_trigger(
     event_name: str,
     payload: Dict[str, Any],
     actor: str = "",
-    sha: str = "",
 ) -> Trigger:
     """
     Classify an event.
@@ -172,7 +151,6 @@ def parse_trigger(
         event_name: GITHUB_EVENT_NAME (the caller's event in a reusable workflow)
         payload: Parsed JSON at GITHUB_EVENT_PATH
         actor: GITHUB_ACTOR, used as user for dispatch and push
-        sha: GITHUB_SHA, fallback head commit for push
 
     Returns:
         Trigger; should_continue is False for events the workflow ignores
@@ -183,16 +161,14 @@ def parse_trigger(
         return _parse_issue_event(payload)
     if event_name == "pull_request":
         return _parse_pull_request(payload)
-    if event_name == "workflow_dispatch":
-        # Dispatch only ever syncs the Release Issue; the command input is ignored.
+    if event_name in ("workflow_dispatch", "push"):
+        # Both only ever sync the Release Issue; the dispatch command input is ignored.
         return Trigger(
-            trigger_type="workflow_dispatch",
+            trigger_type=event_name,
             command="sync-issue",
             user=actor,
             should_continue=True,
         )
-    if event_name == "push":
-        return _parse_push(payload, actor, sha)
     return Trigger(trigger_type=TRIGGER_UNKNOWN)
 
 
@@ -204,18 +180,15 @@ def write_outputs(path: str, outputs: Dict[str, str]) -> None:
             f.write(f"{name}<<{delimiter}\n{value}\n{delimiter}\n")
 
 
-def to_outputs(trigger: Trigger, merged_pr: Optional[Tuple[int, str]]) -> Dict[str, str]:
+def to_outputs(trigger: Trigger) -> Dict[str, str]:
     """String outputs under the check-trigger job's output names, plus the Trigger as JSON."""
     outputs = asdict(trigger)
-    del outputs["head_sha"]
     outputs["trigger"] = json.dumps(asdict(trigger))
     outputs["should_continue"] = "true" if trigger.should_continue else "false"
-    outputs["trigger_pr_number"] = str(merged_pr[0]) if merged_pr else ""
-    outputs["trigger_pr_url"] = merged_pr[1] if merged_pr else ""
     return outputs
 
 
-def main(client=None) -> int:
+def main() -> int:
     event_name = os.environ["GITHUB_EVENT_NAME"]
     with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as f:
         payload = json.load(f)
@@ -224,21 +197,9 @@ def main(client=None) -> int:
         event_name,
         payload,
         actor=os.environ.get("GITHUB_ACTOR", ""),
-        sha=os.environ.get("GITHUB_SHA", ""),
     )
 
-    merged_pr = None
-    if event_name == "push":
-        if client is None:
-            from .github_client import GitHubClient
-            client = GitHubClient(
-                repo=os.environ["GITHUB_REPOSITORY"], token=os.environ.get("GITHUB_TOKEN")
-            )
-        merged_pr = client.find_merged_pr_for_commit(trigger.head_sha)
-        if merged_pr:
-            print(f"Found merged PR: #{merged_pr[0]}")
-
-    outputs = to_outputs(trigger, merged_pr)
+    outputs = to_outputs(trigger)
     print(f"Event: {event_name}")
     print(f"Action: {payload.get('action') or 'N/A'}")
     for name, value in outputs.items():
