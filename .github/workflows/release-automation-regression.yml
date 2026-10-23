@@ -1,7 +1,7 @@
 # CAMARA Release Automation — Regression (canary)
 #
 # Sibling to validation-regression.yml. Exercises the release-automation-reusable.yml
-# workflow on camaraproject/ReleaseTest via publish-free paths — sync-issue
+# workflow on camaraproject/ReleaseTest2 via publish-free paths — sync-issue
 # (workflow_dispatch and /sync-issue), a rejected /discard-snapshot in
 # `planned`, then a /create-snapshot + /discard-snapshot round-trip with an
 # issue close (auto-reopen) in `snapshot-active`, and a final issue close in
@@ -15,18 +15,22 @@
 # before @v1-rc moves.
 #
 # Cross-repo access is provided by a short-lived camara-validation
-# GitHub App installation token scoped to camaraproject/ReleaseTest.
+# GitHub App installation token scoped to camaraproject/ReleaseTest2.
 # Permissions used: issues:write (post slash-command comment, close and
 # reopen the Release Issue), actions:write (dispatch and poll caller runs),
 # pull_requests:write (verify Release Review PR presence). The App has no
 # contents:write — and none is needed.
 # The default GITHUB_TOKEN is only used for the initial checkout.
+#
+# Branch copy for release-automation-refactor: runs on pushes to the branch
+# against ReleaseTest2, whose caller follows the branch head. main's copy
+# keeps ReleaseTest.
 
 name: Release Automation Regression
 
 on:
   push:
-    branches: [main]
+    branches: [release-automation-refactor]
     paths:
       - '.github/workflows/release-automation-reusable.yml'
       - '.github/workflows/release-automation-regression.yml'
@@ -73,14 +77,14 @@ jobs:
           client-id: ${{ vars.VALIDATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.VALIDATION_APP_PRIVATE_KEY }}
           owner: camaraproject
-          repositories: ReleaseTest
+          repositories: ReleaseTest2
 
       - name: Run RA regression runner
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           python3 release_automation/scripts/regression_runner.py \
-            --repo camaraproject/ReleaseTest \
+            --repo camaraproject/ReleaseTest2 \
             --summary-file release-automation-regression-summary.md
 
       - name: Publish summary

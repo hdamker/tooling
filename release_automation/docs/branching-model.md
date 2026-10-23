@@ -47,6 +47,8 @@ Standard CAMARA contribution flow:
 
 Long-lived feature branches in the upstream repository are not the default. They may be appropriate for cross-cutting initiatives whose scope justifies the additional coordination overhead (sync PRs, configuration parallelism, regression-canary pinning), and are decided case-by-case.
 
+Current long-lived branch: `release-automation-refactor` — restructures `release-automation-reusable.yml` into Python-backed phase jobs; its RA canary runs on pushes to the branch against [`camaraproject/ReleaseTest2`](https://github.com/camaraproject/ReleaseTest2), and pilot repositories use it through the tag `ra-v1-rc2`.
+
 ## 4. Hotfixes
 
 When a critical fix cannot wait for a regular feature cycle:
