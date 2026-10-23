@@ -25,18 +25,8 @@ on:
         type: string
         required: false
         default: ""
-      tooling_ref_override:
-        description: >-
-          Optional tooling checkout ref override. Accepts a 40-char SHA or one
-          of the refs listed in env.ALLOWED_TOOLING_REFS (workflow-level).
-        type: string
-        required: false
-        default: ""
 
 env:
-  # Allowlist for tooling_ref_override beyond a 40-char SHA. Comma-separated.
-  # Each consuming caller's override input must match a SHA or one of these.
-  ALLOWED_TOOLING_REFS: "main,v1-rc,hotfix"
   # Keep release automation runtime pins explicit and aligned with validation.
   PYTHON_VERSION: "3.14"
   NODE_VERSION: "24"
@@ -45,7 +35,6 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
-  id-token: write
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
@@ -63,11 +52,6 @@ jobs:
       confirm_tag: ${{ steps.detect.outputs.confirm_tag }}
       trigger_pr_number: ${{ steps.detect.outputs.trigger_pr_number }}
       trigger_pr_url: ${{ steps.detect.outputs.trigger_pr_url }}
-      tooling_checkout_repo: ${{ steps.resolve-tooling-ref.outputs.tooling_checkout_repo }}
-      tooling_checkout_ref: ${{ steps.resolve-tooling-ref.outputs.tooling_checkout_ref }}
-      tooling_checkout_ref_source: ${{ steps.resolve-tooling-ref.outputs.tooling_checkout_ref_source }}
-      tooling_workflow_ref: ${{ steps.resolve-tooling-ref.outputs.tooling_workflow_ref }}
-      tooling_workflow_sha: ${{ steps.resolve-tooling-ref.outputs.tooling_workflow_sha }}
       comment_id: ${{ steps.ack.outputs.comment_id }}
       # Note: release_tag is NOT output here - it comes from derive-state job
       # which reads from authoritative sources (release-plan.yaml or release-metadata.yaml)
@@ -292,83 +276,6 @@ jobs:
             core.setOutput('should_continue', shouldContinue);
             core.setOutput('confirm_tag', confirmTag);
 
-      - name: Resolve Tooling Checkout Ref
-        id: resolve-tooling-ref
-        if: steps.detect.outputs.should_continue == 'true'
-        uses: actions/github-script@v9
-        env:
-          TOOLING_REF_OVERRIDE: ${{ inputs.tooling_ref_override }}
-          ALLOWED_TOOLING_REFS: ${{ env.ALLOWED_TOOLING_REFS }}
-        with:
-          script: |
-            const overrideRef = (process.env.TOOLING_REF_OVERRIDE || '').trim();
-            const shaPattern = /^[0-9a-f]{40}$/i;
-            const allowedRefs = new Set(
-              (process.env.ALLOWED_TOOLING_REFS || '')
-                .split(',').map(s => s.trim()).filter(Boolean)
-            );
-            const workflowRefPattern =
-              /^([^/]+\/[^/]+)\/\.github\/workflows\/release-automation-reusable\.yml@.+$/;
-
-            function decodeJwtPayload(jwt) {
-              const parts = jwt.split('.');
-              if (parts.length !== 3) {
-                throw new Error('OIDC token is not a valid JWT');
-              }
-
-              const payload = parts[1]
-                .replace(/-/g, '+')
-                .replace(/_/g, '/');
-              const padLength = (4 - (payload.length % 4)) % 4;
-              const padded = payload + '='.repeat(padLength);
-              return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
-            }
-
-            const oidcToken = await core.getIDToken('release-automation-tooling-ref');
-            const claims = decodeJwtPayload(oidcToken);
-            const workflowRef = claims.job_workflow_ref || '';
-            const workflowSha = claims.job_workflow_sha || '';
-            const workflowRefMatch = workflowRef.match(workflowRefPattern);
-
-            if (!workflowRefMatch) {
-              core.setFailed(`Unexpected job_workflow_ref claim: ${workflowRef}`);
-              return;
-            }
-
-            if (!shaPattern.test(workflowSha)) {
-              core.setFailed(`Invalid job_workflow_sha claim: ${workflowSha}`);
-              return;
-            }
-
-            const checkoutRepo = workflowRefMatch[1];
-            let checkoutRef = workflowSha.toLowerCase();
-            let checkoutRefSource = 'oidc_job_workflow_sha';
-
-            if (overrideRef !== '') {
-              const isSha = shaPattern.test(overrideRef);
-              const isAllowedRef = allowedRefs.has(overrideRef);
-              if (!isSha && !isAllowedRef) {
-                const allowedList = [...allowedRefs].join(', ');
-                core.setFailed(
-                  `tooling_ref_override must be a 40-character SHA or one of: ${allowedList}`
-                );
-                return;
-              }
-              checkoutRef = isSha ? overrideRef.toLowerCase() : overrideRef;
-              checkoutRefSource = 'override';
-            }
-
-            core.info(`tooling_checkout_repo=${checkoutRepo}`);
-            core.info(`tooling_checkout_ref=${checkoutRef} source=${checkoutRefSource}`);
-            core.info(`job_workflow_ref=${workflowRef}`);
-            core.info(`job_workflow_sha=${workflowSha}`);
-
-            core.setOutput('tooling_checkout_repo', checkoutRepo);
-            core.setOutput('tooling_checkout_ref', checkoutRef);
-            core.setOutput('tooling_checkout_ref_source', checkoutRefSource);
-            core.setOutput('tooling_workflow_ref', workflowRef);
-            core.setOutput('tooling_workflow_sha', workflowSha);
-
       # Post early acknowledgment for slash commands (within check-trigger to avoid runner cold-start)
       # This comment is later updated by post-interim (valid) or post-rejection (rejected).
       # Uses GITHUB_TOKEN (not App token) to avoid triggering extra workflow runs.
@@ -443,14 +350,15 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v7
         with:
-          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
-          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: _tooling
           sparse-checkout: |
-            release_automation/scripts
-            release_automation/templates
-            shared-actions/derive-release-state
+            release_automation
+            shared-actions
             tooling_lib
+            validation
+            linting/config
 
       - name: Derive Release State
         id: state
@@ -805,13 +713,15 @@ jobs:
         if: steps.decide.outputs.action == 'post_comment'
         uses: actions/checkout@v7
         with:
-          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
-          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: _tooling
           sparse-checkout: |
-            release_automation/scripts
-            release_automation/templates
-            shared-actions/post-bot-comment
+            release_automation
+            shared-actions
+            tooling_lib
+            validation
+            linting/config
 
       - name: Post Config Error Comment
         if: steps.decide.outputs.action == 'post_comment'
@@ -883,13 +793,15 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v7
         with:
-          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
-          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: _tooling
           sparse-checkout: |
-            release_automation/scripts
-            release_automation/templates
-            shared-actions/post-bot-comment
+            release_automation
+            shared-actions
+            tooling_lib
+            validation
+            linting/config
 
       - name: Post Processing Comment
         id: post
@@ -927,13 +839,15 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v7
         with:
-          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
-          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: _tooling
           sparse-checkout: |
-            release_automation/scripts
-            release_automation/templates
-            shared-actions/post-bot-comment
+            release_automation
+            shared-actions
+            tooling_lib
+            validation
+            linting/config
 
       - name: Post Rejection Comment
         uses: ./_tooling/shared-actions/post-bot-comment
@@ -980,18 +894,15 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v7
         with:
-          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
-          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: _tooling
           sparse-checkout: |
-            release_automation/scripts
-            release_automation/templates
-            release_automation/config
-            shared-actions/create-snapshot
-            shared-actions/run-validation
+            release_automation
+            shared-actions
+            tooling_lib
             validation
             linting/config
-            tooling_lib
 
       # ── Pre-snapshot validation ────────────────────────────────────
       #
@@ -1108,7 +1019,7 @@ jobs:
           repo_path: ${{ github.workspace }}/_repo
           tooling_path: ${{ github.workspace }}/_tooling
           mode: pre-snapshot
-          tooling_ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          tooling_ref: ${{ job.workflow_sha }}
           config_path: ${{ github.workspace }}/_tooling-config/config/validation-settings.yaml
           release_history_path: ${{ steps.release-history.outputs.release_history_path || '' }}
 
@@ -1433,12 +1344,15 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v7
         with:
-          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
-          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: _tooling
           sparse-checkout: |
             release_automation
             shared-actions
+            tooling_lib
+            validation
+            linting/config
 
       - name: Derive context values
         id: context
@@ -1486,12 +1400,15 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v7
         with:
-          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
-          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: _tooling
           sparse-checkout: |
             release_automation
             shared-actions
+            tooling_lib
+            validation
+            linting/config
 
       - name: Setup Python
         uses: actions/setup-python@v7
@@ -2071,13 +1988,15 @@ jobs:
         if: steps.create-draft.outputs.success == 'true' && needs.derive-state.outputs.release_issue_number != ''
         uses: actions/checkout@v7
         with:
-          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
-          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: _tooling
           sparse-checkout: |
-            release_automation/scripts
-            release_automation/templates
-            shared-actions/post-bot-comment
+            release_automation
+            shared-actions
+            tooling_lib
+            validation
+            linting/config
 
       - name: Post draft_created comment
         if: steps.create-draft.outputs.success == 'true' && needs.derive-state.outputs.release_issue_number != ''
@@ -2123,13 +2042,15 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v7
         with:
-          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
-          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: _tooling
           sparse-checkout: |
-            release_automation/scripts
-            release_automation/templates
-            shared-actions/post-bot-comment
+            release_automation
+            shared-actions
+            tooling_lib
+            validation
+            linting/config
 
       - name: Handle Issue Event
         id: handle
@@ -2231,15 +2152,15 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v7
         with:
-          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
-          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: _tooling
           sparse-checkout: |
-            release_automation/scripts
-            release_automation/templates
-            shared-actions/sync-release-issue
-            shared-actions/post-bot-comment
+            release_automation
+            shared-actions
             tooling_lib
+            validation
+            linting/config
 
       # ── Common file cache sync ─────────────────────────────────────────
       # When cache is stale, fetch Commonalities files and create/update a
@@ -2651,13 +2572,15 @@ jobs:
       - name: Checkout tooling
         uses: actions/checkout@v7
         with:
-          repository: ${{ needs.check-trigger.outputs.tooling_checkout_repo }}
-          ref: ${{ needs.check-trigger.outputs.tooling_checkout_ref }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: _tooling
           sparse-checkout: |
-            release_automation/scripts
-            release_automation/templates
-            shared-actions/post-bot-comment
+            release_automation
+            shared-actions
+            tooling_lib
+            validation
+            linting/config
 
       - name: Determine Result Template
         id: template
