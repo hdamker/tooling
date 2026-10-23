@@ -674,3 +674,16 @@ class TestRenderComment:
     @pytest.mark.parametrize("base", [None, [], "x"])
     def test_non_dict_base_is_ignored(self, base):
         assert merge_comment_context(base, {"release_tag": "r4.2"})["release_tag"] == "r4.2"
+
+
+def test_post_comment_creates_or_updates():
+    from release_automation.scripts.bot_responder import post_comment
+    from release_automation.tests.fake_github import FakeGitHub
+
+    gh = FakeGitHub()
+    new_id = post_comment(gh, "issue_reopened", 40, {"state": "draft-ready"}, {"reason": "x"}, "r1.4")
+    assert gh.comments[0]["id"] == new_id and gh.comments[0]["issue"] == 40
+    assert gh.comments[0]["body"].startswith("<!-- release-bot:r1.4 -->\n**🔄 Issue reopened — State: `draft-ready`**")
+
+    assert post_comment(gh, "issue_reopened", 40, {}, {}, "r1.4", comment_id="991") == 991
+    assert gh.calls[-1] == "update_comment"

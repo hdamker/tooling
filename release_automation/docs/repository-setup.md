@@ -256,7 +256,7 @@ The README must contain release information section delimiters:
 <!-- CAMARA:RELEASE-INFO:END -->
 ```
 
-These delimiters are used by the release automation to update the Release Information section during snapshot creation and post-release sync. If missing, the README update step will fail.
+These delimiters are used by the release automation to update the Release Information section during snapshot creation and post-release sync. If they are missing, the README update is skipped with a warning in the workflow log and the snapshot and the sync PR are created without it; to get the section into the release, add the delimiters on `main`, then `/discard-snapshot` and `/create-snapshot` again.
 
 The delimiters are distributed by the `campaign-release-info` campaign in `project-administration`.
 

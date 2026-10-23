@@ -186,3 +186,23 @@ def merge_comment_context(base_context: Any, delta: Dict[str, Any]) -> Dict[str,
                 apis = []
         raw["apis"] = apis if isinstance(apis, list) else []
     return build_context(**raw)
+
+
+def post_comment(
+    gh,
+    template_name: str,
+    issue_number: Any,
+    base_context: Any,
+    delta: Dict[str, Any],
+    release_tag: str,
+    comment_id: str = "",
+) -> int:
+    """Render a bot comment and post it, or replace comment_id's body; returns the comment id."""
+    body = BotResponder().render_comment(template_name, base_context, delta, release_tag)
+    if comment_id:
+        gh.update_comment(int(comment_id), body)
+        print(f"Updated comment {comment_id} ({template_name})")
+        return int(comment_id)
+    new_id = gh.create_comment(int(issue_number), body)
+    print(f"Created comment {new_id} on #{issue_number} ({template_name})")
+    return new_id

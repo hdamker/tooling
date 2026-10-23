@@ -1,7 +1,9 @@
-"""Release publisher module for publishing draft releases.
+"""Release publisher module for publishing releases.
 
-This module handles the publication of draft GitHub releases as part
-of the CAMARA release automation workflow.
+This module handles the publication of GitHub releases as part of the CAMARA
+release automation workflow: a draft on /publish-release (publish_draft), or a
+new release on the Release PR merge (draft_release.publish_on_merge). Both end
+in complete_publication(): reference tag, pointer branch, branch cleanup.
 """
 
 import logging
@@ -26,6 +28,20 @@ class PublishResult:
     pointer_branch: Optional[str] = None
     is_prerelease: bool = False
     error_message: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class PublishOutcome:
+    """Result of a publication for the act outcome.
+
+    error_message is the failure reason, or after a successful publication the
+    warnings of the post-publication steps joined by '; '.
+    """
+    success: bool
+    release_url: str = ""
+    reference_tag: str = ""
+    pointer_branch: str = ""
+    error_message: str = ""
 
 
 class ReleasePublisher:
@@ -200,6 +216,47 @@ class ReleasePublisher:
             is_prerelease=is_prerelease
         )
 
+    def publish_new_release(
+        self,
+        release_tag: str,
+        snapshot_branch: str,
+        body: str,
+        is_prerelease: bool
+    ) -> PublishResult:
+        """Publish a release without a draft (publish_mode on_merge).
+
+        Steps:
+        1. Finalize release-metadata.yaml (set release_date)
+        2. Create the published release on the snapshot branch (creates tag)
+
+        Returns:
+            PublishResult with success status and details
+        """
+        commit_sha = self.finalize_metadata(snapshot_branch, release_tag)
+        if not commit_sha:
+            return PublishResult(
+                success=False,
+                error_message="Failed to finalize release-metadata.yaml"
+            )
+        try:
+            created = self.gh.create_release(
+                release_tag, snapshot_branch, release_tag, body,
+                draft=False,
+                prerelease=is_prerelease,
+                make_latest=None if is_prerelease else "true",
+            )
+        except GitHubClientError as e:
+            return PublishResult(
+                success=False,
+                error_message=f"Failed to publish release: {e}"
+            )
+        return PublishResult(
+            success=True,
+            release_url=created.get("html_url"),
+            release_id=created.get("id"),
+            is_prerelease=is_prerelease
+        )
+
     def create_reference_tag(
         self,
         release_tag: str,
@@ -329,3 +386,70 @@ class ReleasePublisher:
             result["review_deleted"] = "error"
 
         return result
+
+
+def complete_publication(
+    publisher: ReleasePublisher,
+    result: PublishResult,
+    release_tag: str,
+    src_commit_sha: str,
+    snapshot_branch: str,
+    release_review_branch: str,
+) -> PublishOutcome:
+    """After the publish step: reference tag, pointer branch, branch cleanup (all non-critical)."""
+    if not result.success:
+        message = result.error_message or "Unknown error"
+        print(f"::error::Publication failed: {message}")
+        return PublishOutcome(success=False, error_message=message)
+
+    release_url = result.release_url or ""
+    print(f"Release published: {release_url}")
+    warnings = []
+
+    print("Step 2: Creating reference tag...")
+    reference_tag = publisher.create_reference_tag(release_tag, src_commit_sha) or ""
+    if reference_tag:
+        print(f"Reference tag created: {reference_tag}")
+    else:
+        warnings.append("Failed to create reference tag")
+        print("::warning::Failed to create reference tag")
+
+    print("Step 3: Creating pointer branch...")
+    pointer_branch = publisher.create_pointer_branch(release_tag, result.is_prerelease) or ""
+    if pointer_branch:
+        print(f"Pointer branch created: {pointer_branch}")
+    else:
+        warnings.append("Failed to create pointer branch")
+        print("::warning::Failed to create pointer branch")
+
+    print("Step 4: Cleaning up branches...")
+    for op, status in publisher.cleanup_branches(snapshot_branch, release_review_branch).items():
+        if status == "error":
+            warnings.append(f"Branch cleanup issue: {op}")
+        print(f"  {op}: {status}")
+
+    print("Publish flow completed successfully")
+    return PublishOutcome(
+        success=True,
+        release_url=release_url,
+        reference_tag=reference_tag,
+        pointer_branch=pointer_branch,
+        error_message="; ".join(warnings),
+    )
+
+
+def publish_draft(
+    gh: GitHubClient,
+    release_tag: str,
+    snapshot_branch: str,
+    release_review_branch: str,
+    src_commit_sha: str,
+) -> PublishOutcome:
+    """/publish-release --confirm: publish the draft, then complete the publication.
+
+    The post-release sync PR and the Release Issue close follow in finalize.
+    """
+    publisher = ReleasePublisher(gh)
+    print("Step 1: Publishing release...")
+    result = publisher.publish_release(release_tag, snapshot_branch)
+    return complete_publication(publisher, result, release_tag, src_commit_sha, snapshot_branch, release_review_branch)

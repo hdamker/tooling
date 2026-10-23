@@ -528,3 +528,78 @@ class TestPublishResultDataclass:
         """pointer_branch can be set."""
         result = PublishResult(success=True, pointer_branch="release/r4.1")
         assert result.pointer_branch == "release/r4.1"
+
+
+# ── publish entry point (former Execute Publish Flow heredoc) ────────────────
+
+from release_automation.scripts.release_publisher import PublishOutcome, publish_draft
+from release_automation.tests.fake_github import REPO_URL, FakeGitHub, gh_error
+
+SNAPSHOT = "release-snapshot/r1.4-abc1234"
+REVIEW = "release-review/r1.4-abc1234"
+
+
+def draft_repo(prerelease=True, **kw):
+    return FakeGitHub(
+        files={(SNAPSHOT, "release-metadata.yaml"): "repository:\n  release_tag: r1.4\n  release_date: null\n"},
+        branches={SNAPSHOT: "s1", REVIEW: "v1"},
+        releases=[{"id": 7, "tag": "r1.4", "target": SNAPSHOT, "draft": True, "prerelease": prerelease,
+                   "html_url": f"{REPO_URL}/releases/untagged-7"}],
+        **kw,
+    )
+
+
+def test_publish_draft_runs_the_whole_flow(capsys):
+    gh = draft_repo()
+
+    outcome = publish_draft(gh, "r1.4", SNAPSHOT, REVIEW, "abc1234def")
+
+    assert outcome == PublishOutcome(
+        success=True,
+        release_url=f"{REPO_URL}/releases/tag/r1.4",
+        reference_tag="source/r1.4",
+        pointer_branch="pre-release/r1.4",
+    )
+    assert gh.tags["r1.4"] == gh.commits[0]["sha"]
+    assert gh.commits[0]["message"] == "chore: finalize release-metadata.yaml for r1.4"
+    assert gh.branches["pre-release/r1.4"] == gh.tags["r1.4"]
+    assert SNAPSHOT not in gh.branches and REVIEW not in gh.branches
+    out = capsys.readouterr().out
+    for line in ("Step 1: Publishing release...", "Step 2: Creating reference tag...",
+                 "Step 3: Creating pointer branch...", "Step 4: Cleaning up branches...",
+                 "Publish flow completed successfully"):
+        assert line in out
+
+
+def test_publish_draft_public_release_is_marked_latest():
+    gh = draft_repo(prerelease=False)
+
+    outcome = publish_draft(gh, "r1.4", SNAPSHOT, REVIEW, "abc1234def")
+
+    assert outcome.pointer_branch == "release/r1.4"
+    assert gh.releases[0]["make_latest"] == "true"
+
+
+def test_publish_draft_without_draft_fails(capsys):
+    gh = draft_repo()
+    gh.releases = []
+
+    outcome = publish_draft(gh, "r1.4", SNAPSHOT, REVIEW, "abc1234def")
+
+    assert outcome == PublishOutcome(success=False, error_message="No draft release found for tag `r1.4`")
+    assert "::error::Publication failed: No draft release found for tag `r1.4`" in capsys.readouterr().out
+    assert SNAPSHOT in gh.branches
+
+
+def test_post_publication_failures_are_warnings(capsys):
+    gh = draft_repo(fail={"create_tag": [gh_error("HTTP 403")], "delete_branch": [gh_error("HTTP 500")]})
+
+    outcome = publish_draft(gh, "r1.4", SNAPSHOT, REVIEW, "abc1234def")
+
+    assert outcome.success and outcome.reference_tag == ""
+    assert outcome.error_message == (
+        "Failed to create reference tag; Branch cleanup issue: snapshot_deleted"
+    )
+    out = capsys.readouterr().out
+    assert "::warning::Failed to create reference tag" in out
+    assert "  snapshot_deleted: error" in out
