@@ -1,6 +1,6 @@
 # Release Creation Workflow — Technical Architecture
 
-**Last Updated**: 2026-02-10
+**Last Updated**: 2026-10-24
 
 ## Executive Summary
 
@@ -493,11 +493,11 @@ Handles publication of draft releases via the `/publish-release` command.
 
 ### 2.12 Common Cache Sync
 
-Keeps `code/common/` in sync with the Commonalities release declared under `dependencies.commonalities_release` in `release-plan.yaml`. The handler runs on every `update-issue` pass. For repositories declaring `commonalities_release >= r4.2` it checks the cache and acts on drift; for earlier releases (which don't consume common files via `$ref`) it reports `common_cache_status = ""` (unchecked) and exits without action.
+Keeps `code/common/` in sync with the Commonalities release declared under `dependencies.commonalities_release` in `release-plan.yaml`. Detection runs in the `plan` job and the common sync in the `finalize` job. For repositories declaring `commonalities_release >= r4.2` it checks the cache and acts on drift; for earlier releases (which don't consume common files via `$ref`) it reports `common_cache_status = ""` (unchecked) and exits without action.
 
-**Handler location:** Embedded in the `update-issue` job of [release-automation-reusable.yml](../../.github/workflows/release-automation-reusable.yml) rather than a standalone job, so the cache converges on every RA invocation that reaches update-issue (push, `workflow_dispatch`, slash commands ending in a state update).
+**Location:** [`common_sync.py`](../scripts/common_sync.py), called from two phase jobs of [release-automation-reusable.yml](../../.github/workflows/release-automation-reusable.yml). The `plan` job runs detection (step *Check common cache sync*) and carries the result in the plan; it blocks `/create-snapshot` while the cache is stale. The `finalize` job runs the common sync when the plan reports `stale`, before the Release Issue sync, so the cache converges on every RA invocation that reaches `finalize` (push, `workflow_dispatch`, slash commands ending in a state update). The module takes a git client and a GitHub client and uses no release-automation types, so it can move to a repository reconcile workflow; the release-state gate stays with the calling job.
 
-**Signal model:** The `derive-state` job outputs `common_cache_status` with three values:
+**Signal model:** Detection yields `common_cache_status` with three values:
 
 | Value | Meaning |
 |-------|---------|
@@ -520,7 +520,7 @@ Keeps `code/common/` in sync with the Commonalities release declared under `depe
 - Standard CODEOWNERS review applies (one codeowner approval is sufficient; bot is author)
 
 **Data contracts:**
-- [`code/common/.sync-manifest.yaml`](../../validation/schemas/sync-manifest-schema.yaml) — records source repository (Commonalities), declared release tag, and per-file git blob SHA-1. Written by the RA sync handler; read by both RA (`derive-state` drift detection) and the validation framework (`P-021 check-common-cache-sync`).
+- [`code/common/.sync-manifest.yaml`](../../validation/schemas/sync-manifest-schema.yaml) — records source repository (Commonalities), declared release tag, and per-file git blob SHA-1. Written by the common sync; read by both RA (drift detection in `plan`) and the validation framework (`P-021 check-common-cache-sync`).
 - [`tooling_lib/cache_sync.py`](../../tooling_lib/cache_sync.py) — shared drift-detection logic (`SyncStatus`, `SourceStatus`, `check_sync_status`, `git_blob_sha`). Imported by both RA and VF so they produce identical verdicts.
 
 **Notifications:**
@@ -529,7 +529,7 @@ Keeps `code/common/` in sync with the Commonalities release declared under `depe
 - The Release Issue config section shows the `stale` warning on every sync-issue update until the cache converges
 
 **Boundary with validation framework:**
-- RA owns detection and repair (writes common files, creates/updates sync PR, writes manifest)
+- RA owns detection and the common sync (writes common files, creates/updates sync PR, writes manifest)
 - VF's `P-021 check-common-cache-sync` is a read-only safety net. It fires only when codeowners bypass the sync process (e.g., direct edits to `code/common/`) — the design expects it to be silent in normal operation
 - The `camara-release-automation` App has `contents: write`; the `camara-validation` App deliberately does not
 
@@ -610,55 +610,49 @@ Each API repository has a minimal caller workflow that forwards events to the re
 
 ### 3.3 Reusable Workflow (Tooling Repository)
 
-The reusable workflow (`release-automation-reusable.yml`) orchestrates all release operations. Jobs execute in phases with conditional branching based on trigger type and command validation.
+The reusable workflow (`release-automation-reusable.yml`) has four jobs. `plan` decides, `snapshot` or `act` executes the plan's action, `finalize` reports and syncs. The logic lives in Python modules under `release_automation/scripts/`; the workflow holds the job boundaries, checkouts, tokens and toolchain setup. Jobs pass data as JSON: one `plan` output from `plan`, one `outcome` output from `snapshot` or `act`.
 
-**Workflow/script ref consistency:** Every tooling checkout reads the `job` context of the called reusable workflow: `repository: ${{ job.workflow_repository }}` and `ref: ${{ job.workflow_sha }}`. This binds checkout content to the exact repository and commit of the workflow file that defines the job, whether the caller references a branch, a tag or a SHA, and also when caller and tooling are both forks. There is no caller-side override.
+**Workflow/script ref consistency:** Every tooling checkout reads the `job` context of the called reusable workflow: `repository: ${{ job.workflow_repository }}` and `ref: ${{ job.workflow_sha }}`. This binds checkout content to the exact repository and commit of the workflow file that defines the job, whether the caller references a branch, a tag or a SHA, and also when caller and tooling are both forks. There is no caller-side override. Each of the four jobs performs this checkout (path `_tooling`); `snapshot` adds a checkout of the API repository for validation and of the central validation settings.
+
+**Jobs:**
+
+| Job | Runs when | Does |
+|-----|-----------|------|
+| `plan` | Always | Acknowledges the command, classifies the trigger (`trigger.py`), derives the release state, checks the common cache, assembles the context, applies the command policy (`command_policy.py`), posts the one response (interim status, rejection, configuration error or publish confirmation) |
+| `snapshot` | Plan action is `create-snapshot` | Pre-snapshot validation, snapshot branch, release-review branch and Release PR; own job because it needs the validation toolchain (Node) |
+| `act` | Any other plan action | `act.py` dispatches `discard-snapshot`, `delete-draft`, `publish-release`, `create-draft`, `publish-on-merge` or `reopen-issue` to the matching module |
+| `finalize` | Plan asks for it; also after a failed `snapshot` or `act` | Post-release sync PR, common sync, Release Issue sync and notifications, result comment, published Release Issue (`finalize.py`) |
 
 **Job execution order:**
 
 ```mermaid
 flowchart TD
-    CT[check-trigger] --> DS[derive-state]
-    DS --> AC[assemble-context]
-    DS -->|slash command| VC[validate-command]
-    DS -->|config error| HCE[handle-config-error]
+    PLAN["plan<br><i>trigger, state, common cache,<br>context, command policy, response</i>"]
+    SNAP["snapshot<br><i>/create-snapshot</i>"]
+    ACT["act<br><i>discard, delete-draft, publish,<br>draft on merge, auto-reopen</i>"]
+    FIN["finalize<br><i>sync PR, common sync, Release Issue,<br>result comment</i>"]
 
-    VC -->|rejected| REJ[post-rejection]
-    VC -->|allowed| CMD
-
-    subgraph CMD [Command Handlers]
-        direction LR
-        CS[create-snapshot]
-        DSN[discard-snapshot]
-        DD[delete-draft]
-        PUB[publish-release]
-    end
-
-    AC -->|pr_merge| HPM[handle-pr-merge<br><i>creates draft release</i>]
-    AC -->|issue event| HIE[handle-issue-event<br><i>auto-reopen / transitions</i>]
-
-    CMD --> UI[update-issue<br><i>sections, labels, title</i>]
-    HPM --> UI
-    HIE --> UI
-
-    CMD --> PR2[post-result<br><i>slash commands only</i>]
-    PUB -->|publish only| CSP[create-sync-pr]
-    CSP --> PR2
+    PLAN -->|action: create-snapshot| SNAP
+    PLAN -->|other action| ACT
+    PLAN -->|no action: push, dispatch,<br>sync-issue, close| FIN
+    PLAN -->|rejected, config error,<br>publish confirmation| STOP([responds and stops])
+    SNAP --> FIN
+    ACT --> FIN
 ```
 
 **3-stage feedback model** (slash commands only):
 
 | Stage | Job | Timing | Content |
 |-------|-----|--------|---------|
-| 1. Ack | check-trigger (ack step) | ~8 seconds | Brief acknowledgment that command was received |
-| 2. Interim | post-interim | After validate-command passes | Processing status with workflow run link |
-| 3. Result | post-result | After command completes | Final outcome (success/failure details) |
+| 1. Ack | `plan` (*Post Acknowledgment*) | ~8 seconds | Brief acknowledgment that command was received |
+| 2. Interim | `plan` (*Post Response*, `interim_processing`) | After the command policy allows the command | Processing status with workflow run link |
+| 3. Result | `finalize` | After `snapshot` or `act` completes | Final outcome (success/failure details) |
 
-All three stages edit the same comment (using `comment_id`). For rejected commands, the ack comment is directly updated with the rejection message (skipping interim). The interim stage is gated on `validate-command.allowed == 'true'`.
+All three stages edit the same comment: `plan` passes the acknowledgment's comment ID to `finalize` as `result_comment_id`. For rejected commands, the acknowledgment is updated directly with the rejection message (skipping interim) and `finalize` does not run.
 
-**Central context assembly** (`assemble-context` job):
+**Context assembly** (`plan` job):
 
-The `assemble-context` job runs early — right after `derive-state` — and constructs the base BotContext from `check-trigger` and `derive-state` outputs using `build_context()`. All downstream jobs (command handlers, `update-issue`, `post-result`) depend on it and consume context from this single source. Command handler outputs (e.g., `release_pr_url`) are passed as delta context to `post-result` for the final message.
+The *Assemble Context* step of `plan` runs after state derivation and the common cache check. It builds the base BotContext with `build_context()` from the trigger outputs and the derived state, and the command policy stores it in the plan as `base_context`. `snapshot`, `act` and `finalize` take the context from the plan, so there is a single source. A command's outcome fields (for example `release_pr_url`) are passed to `finalize` as delta context for the result comment.
 
 ---
 
@@ -821,9 +815,9 @@ release-metadata.yaml (snapshot branch, if exists)
               │
               ▼
     ┌──────────────────────┐
-    │  assemble-context    │◄── check-trigger outputs (command, user, trigger_type)
+    │  Assemble Context    │◄── trigger outputs (command, user, trigger_type)
     │  └─ build_context()  │◄── derive-state outputs (all above)
-    │                      │◄── command action outputs (release_pr_url, draft_release_url, ...)
+    │  (plan job)          │◄── command action outcome (release_pr_url, draft_release_url, ...)
     │                      │◄── workflow env (workflow_run_url)
     └────────┬─────────────┘
              │
@@ -924,10 +918,12 @@ Rule P-033 (`check-release-plan-active-release-state`) blocks the PR with an err
 
 | Operation | Target | Approach |
 |-----------|--------|----------|
-| Ack comment | < 5 seconds | Lightweight job, no checkout, no Python |
+| Ack comment | < 5 seconds | First steps of `plan`, before any checkout or Python setup |
 | State derivation | < 10 seconds | Direct GitHub API calls |
-| Full `/create-snapshot` | < 3 minutes | Sequential but optimized |
-| Result comment | < 5 seconds | Template rendering + API call |
+| Full `/create-snapshot` | < 3 minutes | Three runners (`plan`, `snapshot`, `finalize`); only `snapshot` sets up Node and the validation toolchain |
+| Result comment | < 5 seconds | Template rendering + API call in `finalize` |
+
+Indicative timings from single runs on a test repository, measured from the command to the result comment and including the caller run: `/create-snapshot` about 110 seconds, `/discard-snapshot` about 85 seconds (`plan` 25, `act` 15, `finalize` 22). Differences of about 15 seconds between runs are noise.
 
 ---
 
