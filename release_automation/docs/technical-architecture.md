@@ -31,28 +31,43 @@ tooling/
 │   │
 │   ├── scripts/
 │   │   ├── __init__.py
-│   │   ├── bot_context.py               # BotContext dataclass
-│   │   ├── bot_responder.py             # Message formatting + template rendering
-│   │   ├── changelog_generator.py       # CHANGELOG draft generation
-│   │   ├── config.py                    # Shared constants and configuration
-│   │   ├── context_builder.py           # build_context() for unified context
-│   │   ├── git_operations.py            # Git operations for snapshot/review branches
-│   │   ├── github_client.py             # GitHub API wrapper
-│   │   ├── issue_manager.py             # Issue description/title updates
-│   │   ├── issue_sync.py                # Release Issue lifecycle management
-│   │   ├── mechanical_transformer.py    # Placeholder replacement
-│   │   ├── metadata_generator.py        # release-metadata.yaml generation
-│   │   ├── readme_updater.py            # README Release Information updater
-│   │   ├── release_publisher.py         # Draft release publication
-│   │   ├── snapshot_creator.py          # Snapshot + release-review branch creation
-│   │   ├── state_manager.py             # State derivation logic
-│   │   ├── template_loader.py           # Shared template loading utilities
-│   │   ├── version_calculator.py        # API version extension calculation
-│   │   └── workflow_context.py          # Workflow context assembly helpers
+│   │   ├── act.py                    # Act job: dispatches the plan's action, writes the JSON outcome
+│   │   ├── bot_context.py            # BotContext dataclass
+│   │   ├── bot_identity.py           # Commit identity (App bot or github-actions[bot])
+│   │   ├── bot_responder.py          # Message formatting + template rendering
+│   │   ├── changelog_generator.py    # CHANGELOG draft generation
+│   │   ├── command_policy.py         # Plan job: Trigger x State -> Plan or Rejection, the response
+│   │   ├── common_sync.py            # Common cache detection and common sync
+│   │   ├── config.py                 # Shared constants and configuration
+│   │   ├── context_builder.py        # build_context() for unified context
+│   │   ├── draft_release.py          # Draft release create/delete, snapshot discard
+│   │   ├── finalize.py               # Finalize job: sync PR, common sync, Release Issue, result
+│   │   ├── git_operations.py         # Git operations for snapshot/review branches
+│   │   ├── github_client.py          # GitHub API wrapper
+│   │   ├── issue_events.py           # Release Issue auto-reopen
+│   │   ├── issue_manager.py          # Issue description/title updates
+│   │   ├── issue_sync.py             # Release Issue lifecycle management
+│   │   ├── labels.py                 # Labels applied by release automation
+│   │   ├── mechanical_transformer.py # Placeholder replacement
+│   │   ├── metadata_generator.py     # release-metadata.yaml generation
+│   │   ├── readme_updater.py         # README Release Information updater
+│   │   ├── regression_runner.py      # RA regression canary runner
+│   │   ├── release_publisher.py      # Draft release publication
+│   │   ├── snapshot_creator.py       # Snapshot + release-review branch creation
+│   │   ├── snapshot_prep.py          # Snapshot job glue: settings check, validation gate, bot identity
+│   │   ├── state_manager.py          # State derivation logic
+│   │   ├── sync_pr.py                # Post-release sync PR
+│   │   ├── template_loader.py        # Shared template loading utilities
+│   │   ├── trigger.py                # Plan job: payload -> Trigger
+│   │   ├── version_calculator.py     # API version extension calculation
+│   │   ├── wip_checker.py            # wip version check before a snapshot
+│   │   └── workflow_context.py       # Workflow context assembly helpers
 │   │
 │   ├── templates/
 │   │   ├── bot_messages/
 │   │   │   ├── command_rejected.md
+│   │   │   ├── common_sync_failed.md
+│   │   │   ├── common_sync_pr_created.md
 │   │   │   ├── config_error.md
 │   │   │   ├── draft_created.md
 │   │   │   ├── draft_revoked.md
@@ -355,9 +370,9 @@ All context variables are defined in a single `BotContext` dataclass (`bot_conte
 | Field | Type | Default | Source |
 |-------|------|---------|--------|
 | **Trigger fields** | | | |
-| `command` | str | `""` | check-trigger |
-| `command_args` | str | `""` | check-trigger |
-| `user` | str | `""` | check-trigger |
+| `command` | str | `""` | trigger |
+| `command_args` | str | `""` | trigger |
+| `user` | str | `""` | trigger |
 | **State fields** | | | |
 | `release_tag` | str | `""` | derive-state |
 | `state` | str | `""` | derive-state |
@@ -391,7 +406,7 @@ All context variables are defined in a single `BotContext` dataclass (`bot_conte
 | `state_draft_ready` | bool | `False` | derived: `state == "draft-ready"` |
 | **Display fields** | | | |
 | `workflow_run_url` | str | `""` | constructed in workflow |
-| `draft_release_url` | str | `""` | handle-pr-merge output |
+| `draft_release_url` | str | `""` | `create-draft` outcome |
 | `reason` | str | `""` | command_args (discard/delete) |
 
 **APIs list — two data sources:**
