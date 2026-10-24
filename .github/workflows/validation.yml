@@ -545,6 +545,7 @@ jobs:
             name=$(basename "$spec")
             # Skip specs with no external $ref — bundling would only
             # normalize formatting, producing a misleading diff artifact.
+            # shellcheck disable=SC2016  # \$ref is a regex, not an expansion
             if ! grep -qE '\$ref:\s*["'"'"'][^#]' "$spec"; then
               echo "Skipped (no external \$ref): $name"
               continue
@@ -585,8 +586,10 @@ jobs:
       - name: Report orchestrator failure
         if: always() && steps.validation.outcome == 'failure'
         run: |
-          echo "## CAMARA Validation" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Error**: The validation orchestrator failed with an infrastructure error." >> "$GITHUB_STEP_SUMMARY"
-          echo "Check the workflow logs for details." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## CAMARA Validation"
+            echo ""
+            echo "**Error**: The validation orchestrator failed with an infrastructure error."
+            echo "Check the workflow logs for details."
+          } >> "$GITHUB_STEP_SUMMARY"
           exit 1
