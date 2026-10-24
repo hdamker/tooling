@@ -329,6 +329,9 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      - name: Install dependencies
+        run: pip install --quiet -r _tooling/requirements.txt
+
       # Deliberately no `cache: npm` here, unlike the validation reusable
       # workflow.  Snapshot creation is slash-command driven, so this job
       # always runs on an `issue_comment` event, and the Actions cache
@@ -363,62 +366,22 @@ jobs:
           path: _tooling-config
 
       - name: Validate central settings against schema
-        shell: bash
-        run: |
-          pip install --quiet -r _tooling/requirements.txt
-          python3 - <<'PY'
-          import sys
-          from pathlib import Path
-
-          import yaml
-          from jsonschema import Draft202012Validator
-
-          config_path = Path("_tooling-config/config/validation-settings.yaml")
-          schema_path = Path("_tooling/validation/schemas/validation-settings-schema.yaml")
-
-          if not config_path.exists():
-              print(
-                  f"::error title=Validation settings missing::"
-                  f"{config_path} not present on tooling/main; "
-                  f"aborting before snapshot creation"
-              )
-              sys.exit(1)
-          if not schema_path.exists():
-              print(
-                  f"::error title=Validation settings schema missing::"
-                  f"{schema_path} not present on the pinned tooling ref"
-              )
-              sys.exit(1)
-
-          config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-          schema = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
-
-          errors = list(Draft202012Validator(schema).iter_errors(config))
-          if errors:
-              for err in errors:
-                  loc = ".".join(str(p) for p in err.absolute_path) or "(root)"
-                  print(
-                      f"::error title=Validation settings invalid::"
-                      f"{loc}: {err.message}"
-                  )
-              print(
-                  "::error::Aborting before snapshot creation — "
-                  "validation settings on tooling/main fail schema validation"
-              )
-              sys.exit(1)
-
-          print(f"Validation settings: {config_path} (main) — schema-valid")
-          PY
+        working-directory: _tooling
+        env:
+          SETTINGS_PATH: ${{ github.workspace }}/_tooling-config/config/validation-settings.yaml
+          SCHEMA_PATH: ${{ github.workspace }}/_tooling/validation/schemas/validation-settings-schema.yaml
+        run: python -m release_automation.scripts.snapshot_prep settings
 
       - name: Resolve published release history
         id: release-history
         if: hashFiles('_repo/release-plan.yaml') != ''
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          BASE_REF: ${{ github.event.repository.default_branch || github.ref_name || 'main' }}
         run: |
           python3 _tooling/validation/scripts/resolve-release-history.py \
-            --repo "${{ github.repository }}" \
-            --base-ref "${{ github.event.repository.default_branch || github.ref_name || 'main' }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --base-ref "$BASE_REF" \
             --output "${RUNNER_TEMP}/release-history.json"
 
       - name: Run pre-snapshot validation
@@ -435,32 +398,21 @@ jobs:
       - name: Gate on validation result
         id: validation-gate
         if: always() && steps.validation.outputs.should_fail == 'true'
-        run: |
-          echo "::error::Pre-snapshot validation failed — fix issues on main before re-running /create-snapshot"
-          echo "success=false" >> "$GITHUB_OUTPUT"
-          SUMMARY="${{ steps.validation.outputs.summary }}"
-          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo "error_message=Pre-snapshot validation failed: ${SUMMARY}. [View workflow logs](${RUN_URL})" >> "$GITHUB_OUTPUT"
-          exit 1
+        working-directory: _tooling
+        env:
+          VALIDATION_SUMMARY: ${{ steps.validation.outputs.summary }}
+        run: python -m release_automation.scripts.snapshot_prep gate
 
       # ── Snapshot creation ─────────────────────────────────────────
 
       - name: Resolve Bot Identity
         id: bot-identity
+        working-directory: _tooling
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
-        run: |
-          if [ -n "${{ vars.RELEASE_APP_SLUG }}" ] && [ -n "${{ steps.app-token.outputs.token }}" ]; then
-            BOT_LOGIN="${{ vars.RELEASE_APP_SLUG }}[bot]"
-          else
-            BOT_LOGIN="github-actions[bot]"
-          fi
-          BOT_INFO=$(gh api "/users/$BOT_LOGIN" --jq '{id: .id, login: .login}')
-          BOT_NAME=$(echo "$BOT_INFO" | jq -r '.login')
-          BOT_ID=$(echo "$BOT_INFO" | jq -r '.id')
-          echo "Committing as: $BOT_NAME <${BOT_ID}+${BOT_NAME}@users.noreply.github.com>"
-          echo "bot_name=$BOT_NAME" >> $GITHUB_OUTPUT
-          echo "bot_email=${BOT_ID}+${BOT_NAME}@users.noreply.github.com" >> $GITHUB_OUTPUT
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          APP_TOKEN_USED: ${{ steps.app-token.outputs.token != '' }}
+          RELEASE_APP_SLUG: ${{ vars.RELEASE_APP_SLUG }}
+        run: python -m release_automation.scripts.snapshot_prep bot-identity
 
       - name: Create Snapshot
         id: create
@@ -489,7 +441,6 @@ jobs:
   # by release_automation/scripts/act.py.
   # ─────────────────────────────────────────────────────────────────────────────
   act:
-    name: act (${{ needs.plan.outputs.action }})
     needs: [plan]
     if: needs.plan.outputs.action != '' && needs.plan.outputs.action != 'create-snapshot'
     runs-on: ubuntu-latest
@@ -525,7 +476,9 @@ jobs:
       - name: Install dependencies
         run: pip install --quiet -r _tooling/requirements.txt
 
-      - name: Act
+      # The action is in the step name: a skipped job's name expression is not
+      # evaluated.
+      - name: Act (${{ needs.plan.outputs.action }})
         id: act
         working-directory: _tooling
         env:
