@@ -135,7 +135,6 @@ jobs:
           )
 
           actionlint_args=(
-            -shellcheck=
             -pyflakes=
             -ignore 'missing input "app-id" which is required by action "actions/create-github-app-token@v3"'
             -ignore 'input "client-id" is not defined in action "actions/create-github-app-token@v3"'
@@ -174,12 +173,12 @@ jobs:
             echo "| Check | Result | Artifact |"
             echo "| --- | --- | --- |"
             if [[ "$status" -eq 0 ]]; then
-              echo "| Core workflow semantics | pass | tooling-ci-actionlint-json: artifacts/actionlint/actionlint.json |"
+              echo "| Workflow semantics and ShellCheck | pass | tooling-ci-actionlint-json: artifacts/actionlint/actionlint.json |"
             else
-              echo "| Core workflow semantics | fail | tooling-ci-actionlint-json: artifacts/actionlint/actionlint.json |"
+              echo "| Workflow semantics and ShellCheck | fail | tooling-ci-actionlint-json: artifacts/actionlint/actionlint.json |"
             fi
             echo
-            echo "ShellCheck and pyflakes integrations are disabled for the first rollout; the current blocking check is core actionlint semantics."
+            echo "ShellCheck is blocking; the pyflakes integration stays disabled."
           } >> "$GITHUB_STEP_SUMMARY"
 
           exit "$status"
