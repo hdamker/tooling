@@ -41,7 +41,6 @@ def plan_for_changed_files(changed_files: Iterable[str]) -> ToolingCiPlan:
         "shared-actions/run-validation/**",
         "shared-actions/validate-release-plan/**",
         "validation/workflows/**",
-        "linting/workflows/**",
         ".github/workflows/validation.yml",
         ".github/workflows/validation-regression.yml",
         ".github/workflows/validation-settings-ci.yml",
