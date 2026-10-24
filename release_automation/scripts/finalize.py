@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .bot_identity import resolve_bot_identity
 from .common_sync import CommonSyncOutcome
 from .issue_sync import WorkflowSync, post_publish_warnings
 from .sync_pr import SyncPrOutcome
@@ -275,10 +276,7 @@ class Clients:
     def bot_identity(self) -> Tuple[str, str]:
         """Commit identity: the App bot when an App token is in use, else github-actions[bot]."""
         if self._bot is None:
-            login = f"{self.app_slug}[bot]" if self.app_slug and self.app_token_used else "github-actions[bot]"
-            user = self.gh.get_user(login)
-            name = user["login"]
-            self._bot = (name, f"{user['id']}+{name}@users.noreply.github.com")
+            self._bot = resolve_bot_identity(self.gh, self.app_slug, self.app_token_used)
         return self._bot
 
 

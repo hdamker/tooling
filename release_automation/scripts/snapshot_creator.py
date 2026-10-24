@@ -58,6 +58,7 @@ class SnapshotResult:
     transformation_summary: Dict[str, Any] = field(default_factory=dict)
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    notes: List[str] = field(default_factory=list)  # informational, logged as plain lines
 
     def to_bot_context(self) -> Dict[str, Any]:
         """
@@ -247,7 +248,7 @@ class SnapshotCreator:
             # Step 7c: Bundle API specs (resolve external $ref)
             bundled_count = self._bundle_specs(temp_dir)
             if bundled_count > 0:
-                result.warnings.append(
+                result.notes.append(
                     f"Bundled {bundled_count} API spec(s) — external $ref resolved"
                 )
 

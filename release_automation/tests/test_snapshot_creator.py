@@ -432,6 +432,36 @@ class TestCreateSnapshot:
         assert result.release_pr_number == 42
         assert "quality-on-demand" in result.api_versions
 
+    @patch("release_automation.scripts.snapshot_creator.tempfile.mkdtemp")
+    @patch("release_automation.scripts.snapshot_creator.shutil.rmtree")
+    @patch("release_automation.scripts.snapshot_creator.GitOperations")
+    @patch("builtins.open", create=True)
+    def test_bundling_is_a_note_not_a_warning(
+        self,
+        mock_open,
+        mock_git_ops_class,
+        mock_rmtree,
+        mock_mkdtemp,
+        snapshot_creator,
+        sample_release_plan,
+    ):
+        """Bundling is informational: it lands in notes, warnings stay for real problems."""
+        mock_mkdtemp.return_value = "/tmp/test-snapshot"
+        mock_git_ops = MagicMock()
+        mock_git_ops_class.return_value = mock_git_ops
+        mock_git_ops.create_pr.return_value = PullRequestInfo(
+            number=42, url="https://github.com/owner/repo/pull/42"
+        )
+
+        with patch.object(snapshot_creator, "_bundle_specs", return_value=2):
+            result = snapshot_creator.create_snapshot(
+                sample_release_plan, SnapshotConfig(release_tag="r4.1")
+            )
+
+        assert result.success is True
+        assert result.notes == ["Bundled 2 API spec(s) — external $ref resolved"]
+        assert not any("Bundled" in w for w in result.warnings)
+
     @patch("release_automation.scripts.snapshot_creator.ChangelogGenerator")
     @patch("release_automation.scripts.snapshot_creator.tempfile.mkdtemp")
     @patch("release_automation.scripts.snapshot_creator.shutil.rmtree")

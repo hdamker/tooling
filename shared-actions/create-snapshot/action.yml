@@ -231,6 +231,9 @@ runs:
             for api_name, version in result.api_versions.items():
                 print(f"  {api_name}: {version}")
 
+            for note in result.notes:
+                print(note)
+
             if result.warnings:
                 for warning in result.warnings:
                     print(f"::warning::{warning}")
@@ -255,6 +258,8 @@ runs:
             error_msg = '; '.join(result.errors) if result.errors else 'Unknown error'
             print(f"::error::Snapshot creation failed: {error_msg}")
 
+            for note in result.notes:
+                print(note)
             for warning in result.warnings:
                 print(f"::warning::{warning}")
 

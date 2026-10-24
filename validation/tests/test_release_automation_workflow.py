@@ -43,7 +43,8 @@ def test_create_snapshot_passes_release_history_to_pre_snapshot_validation():
     assert resolver["id"] == "release-history"
     assert "GH_TOKEN" in resolver["env"]
     assert "_tooling/validation/scripts/resolve-release-history.py" in resolver["run"]
-    assert '--repo "${{ github.repository }}"' in resolver["run"]
+    assert '--repo "$GITHUB_REPOSITORY"' in resolver["run"]
+    assert '--base-ref "$BASE_REF"' in resolver["run"]
     assert '--output "${RUNNER_TEMP}/release-history.json"' in resolver["run"]
 
     validation = _step_by_name(steps, "Run pre-snapshot validation")
@@ -171,7 +172,11 @@ def test_four_phase_jobs_and_three_job_conditions():
     assert [name for name, job in jobs.items() if "if" in job] == ["snapshot", "act", "finalize"]
     assert jobs["snapshot"]["if"] == "needs.plan.outputs.action == 'create-snapshot'"
     assert jobs["act"]["if"] == "needs.plan.outputs.action != '' && needs.plan.outputs.action != 'create-snapshot'"
-    assert jobs["act"]["name"] == "act (${{ needs.plan.outputs.action }})"
+    # Job names are not evaluated for a skipped job; the action is carried in the step name.
+    assert "name" not in jobs["act"]
+    assert [s["name"] for s in jobs["act"]["steps"] if s.get("id") == "act"] == [
+        "Act (${{ needs.plan.outputs.action }})"
+    ]
 
 
 def test_plan_has_one_json_plan_and_no_compatibility_outputs():
@@ -194,7 +199,7 @@ def test_snapshot_and_act_emit_one_outcome():
     assert outcome["if"] == "always()"
     assert outcome["run"].strip() == "python -m release_automation.scripts.act snapshot"
     assert jobs["act"]["outputs"] == {"outcome": "${{ steps.act.outputs.outcome }}"}
-    step = _step_by_name(jobs["act"]["steps"], "Act")
+    step = next(s for s in jobs["act"]["steps"] if s.get("id") == "act")
     assert step["run"].strip() == "python -m release_automation.scripts.act"
     assert step["env"]["PLAN_JSON"] == "${{ needs.plan.outputs.plan }}"
     # No inline scripts in the action phase
@@ -235,3 +240,28 @@ def test_finalize_and_act_read_only_plan_document_keys():
 
     assert finalize_reads and act_reads
     assert finalize_reads | act_reads <= set(document)
+
+
+def test_snapshot_glue_runs_in_python_with_inputs_in_env():
+    steps = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["snapshot"]["steps"]
+
+    settings = _step_by_name(steps, "Validate central settings against schema")
+    assert settings["run"].strip() == "python -m release_automation.scripts.snapshot_prep settings"
+    gate = _step_by_name(steps, "Gate on validation result")
+    assert gate["run"].strip() == "python -m release_automation.scripts.snapshot_prep gate"
+    assert gate["env"]["VALIDATION_SUMMARY"] == "${{ steps.validation.outputs.summary }}"
+    identity = _step_by_name(steps, "Resolve Bot Identity")
+    assert identity["run"].strip() == "python -m release_automation.scripts.snapshot_prep bot-identity"
+    assert identity["env"]["APP_TOKEN_USED"] == "${{ steps.app-token.outputs.token != '' }}"
+
+    names = [step.get("name") for step in steps]
+    assert names.index("Install dependencies") < names.index("Validate central settings against schema")
+    assert names.index("Validate central settings against schema") < names.index("Run pre-snapshot validation")
+
+
+def test_snapshot_run_bodies_hold_no_expressions():
+    """Expressions are pre-expanded into a run body; the snapshot job passes them through env."""
+    steps = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["snapshot"]["steps"]
+
+    for step in steps:
+        assert "${{" not in step.get("run", ""), step.get("name")
