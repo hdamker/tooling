@@ -1,6 +1,5 @@
 // CAMARA Validation v1 GPLint configuration.
-// GPLint's default config file name is .gplintrc. Keep this separate from the
-// legacy .gherkin-lintrc used by v0/MegaLinter's gherkin-lint integration.
+// GPLint's default config file name is .gplintrc.
 // Rule levels stay at warn; CAMARA severity is assigned by validation metadata.
 {
   "no-files-without-scenarios" : "warn",

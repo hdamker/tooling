@@ -83,10 +83,8 @@ tooling/
 ├── .github/
 │   ├── ISSUE_TEMPLATE/
 │   └── workflows/                    # Reusable workflows (public interface)
-│       ├── pr_validation.yml         # retired v0 linting
 │       ├── release-automation-regression.yml
 │       ├── release-automation-reusable.yml
-│       ├── spectral-oas.yml          # retired v0 linting
 │       ├── update-floating-tag.yml
 │       ├── validation-regression.yml
 │       ├── validation-settings-ci.yml

@@ -899,34 +899,23 @@ Repository rulesets enforce these protections. GitHub Actions is configured as a
 
 ---
 
-## 8. pr_validation Integration
+## 8. Release Plan Changes in Pull Requests
 
-When `release-plan.yaml` changes in a PR, the existing `pr_validation` workflow performs additional checks. After the PR merges and `release-plan.yaml` lands on main, the push trigger automatically runs the release automation workflow.
+When `release-plan.yaml` changes in a PR, CAMARA Validation (the validation workflow of the API repository) runs the release-plan checks. After the PR merges and `release-plan.yaml` lands on main, the push trigger runs the release automation workflow.
 
-### 8.1 Artifact State Check
+### 8.1 Active Release Check
 
-During PR validation, a simple check blocks the PR if a snapshot is active:
-
-```bash
-# Check for snapshot branch - blocks PR if active
-SNAPSHOT=$(gh api repos/$OWNER/$REPO/branches \
-  --jq ".[] | select(.name | startswith(\"release-snapshot/$TARGET_TAG-\"))")
-
-if [ -n "$SNAPSHOT" ]; then
-  echo "::error::Cannot modify release-plan.yaml while snapshot is active"
-  exit 1
-fi
-```
+Rule P-033 (`check-release-plan-active-release-state`) blocks the PR with an error while a release is active: a `release-snapshot/<release_tag>-*` branch exists, or the derived release state is `snapshot-active` or `draft-ready`. The release automation workflow derives the state; the validation check consumes it offline.
 
 ### 8.2 State Transition Cases
 
-| Current State | release-plan.yaml Change | pr_validation Action | release-automation Action |
-|---------------|--------------------------|---------------------|---------------------------|
+| Current State | release-plan.yaml Change | CAMARA Validation (PR) | release-automation Action |
+|---------------|--------------------------|------------------------|---------------------------|
 | No issue | Valid plan (type ≠ none) | Pass | Create issue (PLANNED) |
 | PLANNED | Plan updated | Pass | Update issue |
 | PLANNED | type → none | Pass | Set NOT_PLANNED, suggest close |
-| SNAPSHOT_ACTIVE | Any change | **Block (exit 1)** | — |
-| DRAFT_READY | Any change | **Block (exit 1)** | — |
+| SNAPSHOT_ACTIVE | Any change | **Block (P-033)** | — |
+| DRAFT_READY | Any change | **Block (P-033)** | — |
 | PUBLISHED | Any change | Pass (new release cycle) | Create new issue if type ≠ none |
 
 ---
