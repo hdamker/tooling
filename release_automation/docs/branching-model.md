@@ -1,6 +1,6 @@
 # Branching and Versioning Model
 
-**Last Updated**: 2026-05-05
+**Last Updated**: 2026-10-24
 
 `tooling/main` is the only long-lived branch. All development happens on fork branches that merge into `main` via pull request.
 
@@ -60,9 +60,10 @@ When a critical fix cannot wait for a regular feature cycle:
 
 ## Appendix: development history
 
-Two long-lived feature branches preceded the current single-branch model:
+Two long-lived feature branches preceded the current single-branch model, and a third is in progress:
 
 - **`release-automation`** — release-automation development. Merged into `main` 2026-03-27 ([#135](https://github.com/camaraproject/tooling/pull/135)); the `ra-v1-rc` tag was retired with the merge.
 - **`validation-framework`** — validation framework and release-automation integration. Merged into `main` 2026-05-05 ([#260](https://github.com/camaraproject/tooling/pull/260)). The unified `v1-rc` tag spanned the merge unchanged.
+- **`release-automation-refactor`** *(pending until the exit merge)* — `release-automation-reusable.yml` restructured into four Python-backed phase jobs (`plan`, `snapshot`, `act`, `finalize`). Consumed through the floating tag `ra-v1-rc2` and validated by the branch's own RA canary on [`camaraproject/ReleaseTest2`](https://github.com/camaraproject/ReleaseTest2). Merge date and pull request are recorded here when it merges into `main`; `v1-rc` then moves to the merge, and `ra-v1-rc2` and the branch are deleted.
 
-Both branches are retired.
+The first two branches are retired.
