@@ -134,6 +134,63 @@ def test_partial_history_without_release_entries_has_no_tag_coverage():
     assert snapshot.may_have_missing_terminal_metadata() is False
 
 
+def test_maintenance_branches_parsed_and_absent_means_unknown():
+    snapshot = parse_release_history(
+        _history_payload(maintenance_branches=["maintenance/r1", "feature/x", 3])
+    )
+    assert snapshot is not None
+    assert snapshot.maintenance_branches == ("maintenance/r1",)
+    assert snapshot.has_maintenance_branch(1) is True
+    assert snapshot.has_maintenance_branch(2) is False
+
+    legacy = parse_release_history(_history_payload())
+    assert legacy is not None
+    assert legacy.maintenance_branches is None
+    assert legacy.has_maintenance_branch(1) is None
+
+
+def test_maintenance_line_releases_and_patched_release():
+    snapshot = parse_release_history(
+        _history_payload(
+            published_releases=[
+                {"tag": "r1.5", "release_type": "pre-release-rc", "prerelease": True,
+                 "metadata_available": True, "apis": []},
+                {"tag": "r1.6", "release_type": "public-release",
+                 "metadata_available": True, "apis": []},
+                {"tag": "r1.7", "release_type": "pre-release-rc", "prerelease": True,
+                 "metadata_available": True, "apis": []},
+                {"tag": "r2.1", "release_type": "pre-release-alpha", "prerelease": True,
+                 "metadata_available": True, "apis": []},
+            ]
+        )
+    )
+    assert snapshot is not None
+    assert snapshot.is_maintenance_line(1) is True
+    assert snapshot.is_maintenance_line(2) is False
+    assert snapshot.latest_release(cycle=1).tag == "r1.7"
+    assert snapshot.latest_release().tag == "r2.1"
+    assert snapshot.patched_release(1).tag == "r1.6"
+    assert snapshot.patched_release(2) is None
+    assert [r.tag for r in snapshot.later_cycle_releases(1)] == ["r2.1"]
+
+
+def test_patched_release_unknown_when_newer_terminal_metadata_missing():
+    snapshot = parse_release_history(
+        _history_payload(
+            lookup_status="partial",
+            published_releases=[
+                {"tag": "r1.6", "release_type": "public-release",
+                 "metadata_available": True, "apis": []},
+                {"tag": "r1.7", "release_type": "", "prerelease": False,
+                 "metadata_available": False, "apis": []},
+            ],
+        )
+    )
+    assert snapshot is not None
+    assert snapshot.is_maintenance_line(1) is True
+    assert snapshot.patched_release(1) is None
+
+
 def test_load_release_history_missing_path_returns_none(tmp_path: Path):
     assert load_release_history(tmp_path / "missing.json") is None
 

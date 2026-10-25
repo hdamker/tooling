@@ -654,3 +654,37 @@
     Give the local component a distinct, API-specific name — the common
     definition isn't yours to rename. If it isn't actually needed locally,
     reference the common component directly instead.
+
+# P-041: check-release-plan-maintenance-line
+# A plan whose release cycle already has a public release belongs to that
+# cycle's maintenance line: only maintenance-release or pre-release-rc, the
+# next tag of the cycle, from main only while no later cycle has a release and
+# no maintenance/rX branch exists; on maintenance/rX only cycle X.  Evaluated
+# against the line of the PR base (or checked-out) branch.
+- id: P-041
+  engine: python
+  engine_rule: check-release-plan-maintenance-line
+  short_title: "release-plan must fit its maintenance line"
+  documentation_url: "https://github.com/camaraproject/tooling/blob/main/documentation/validation/faq.md#p-041-maintenance-line"
+  release_plan_check_only_safe: true
+  conditional_level:
+    default: error
+  suggestion: >-
+    Plan a maintenance-release or pre-release-rc with the next tag of the
+    release cycle, on the branch that maintains that cycle.
+
+# P-042: check-release-plan-maintenance-api-versions
+# API versions on a maintenance line are compared with the patched release
+# (newest public or maintenance release of the cycle): same API set, no major
+# change, patch versions only; a minor update is allowed for x >= 1 only when
+# a later cycle already published a higher major version of the API.
+- id: P-042
+  engine: python
+  engine_rule: check-release-plan-maintenance-api-versions
+  short_title: "maintenance release API versions must be patches"
+  documentation_url: "https://github.com/camaraproject/tooling/blob/main/documentation/validation/faq.md#p-042-maintenance-api-versions"
+  release_plan_check_only_safe: true
+  conditional_level:
+    default: error
+  suggestion: >-
+    Keep the API list of the patched release and raise only patch versions.

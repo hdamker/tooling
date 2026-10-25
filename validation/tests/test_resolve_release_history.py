@@ -38,6 +38,9 @@ def test_resolve_history_writes_complete_metadata(monkeypatch):
         def get_releases(self, include_drafts=False):
             return [_release("r4.2")]
 
+        def list_branches(self, pattern=None):
+            return []
+
         def get_release_metadata(self, tag):
             assert tag == "r4.2"
             return {
@@ -82,6 +85,9 @@ def test_resolve_history_marks_partial_when_metadata_lookup_fails(monkeypatch):
         def get_releases(self, include_drafts=False):
             return [_release("r4.2")]
 
+        def list_branches(self, pattern=None):
+            return []
+
         def get_release_metadata(self, tag):
             raise GitHubClientError("boom")
 
@@ -102,6 +108,9 @@ def test_resolve_history_marks_partial_when_metadata_is_absent(monkeypatch):
         def get_releases(self, include_drafts=False):
             return [_release("r4.2")]
 
+        def list_branches(self, pattern=None):
+            return []
+
         def get_release_metadata(self, tag):
             return None
 
@@ -111,6 +120,50 @@ def test_resolve_history_marks_partial_when_metadata_is_absent(monkeypatch):
 
     assert snapshot["lookup_status"] == "partial"
     assert snapshot["published_releases"][0]["metadata_available"] is False
+
+
+def test_resolve_history_lists_maintenance_branches(monkeypatch):
+    class FakeClient:
+        def __init__(self, repo, token=None):
+            pass
+
+        def get_releases(self, include_drafts=False):
+            return []
+
+        def list_branches(self, pattern=None):
+            assert pattern == "maintenance/*"
+            return [
+                SimpleNamespace(name="maintenance/r2", sha="b" * 40),
+                SimpleNamespace(name="maintenance/r1", sha="a" * 40),
+            ]
+
+    monkeypatch.setattr(resolve_release_history, "GitHubClient", FakeClient)
+
+    snapshot = resolve_history(repo="camaraproject/QualityOnDemand", base_ref="main")
+
+    assert snapshot["lookup_status"] == "complete"
+    assert snapshot["maintenance_branches"] == ["maintenance/r1", "maintenance/r2"]
+
+
+def test_resolve_history_marks_maintenance_branches_unknown_on_lookup_failure(
+    monkeypatch,
+):
+    class FakeClient:
+        def __init__(self, repo, token=None):
+            pass
+
+        def get_releases(self, include_drafts=False):
+            raise GitHubClientError("releases down")
+
+        def list_branches(self, pattern=None):
+            raise GitHubClientError("branches down")
+
+    monkeypatch.setattr(resolve_release_history, "GitHubClient", FakeClient)
+
+    snapshot = resolve_history(repo="camaraproject/QualityOnDemand", base_ref="main")
+
+    assert snapshot["lookup_status"] == "partial"
+    assert snapshot["maintenance_branches"] is None
 
 
 def test_write_outputs_appends_github_output(tmp_path: Path):
