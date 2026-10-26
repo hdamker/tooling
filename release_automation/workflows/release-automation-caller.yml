@@ -71,16 +71,6 @@ on:
         required: false
         default: ""
 
-# Serialize release automation runs per repository.
-# Prevents race conditions from concurrent slash commands, issue events, PR merges,
-# and workflow_dispatch triggers. With cancel-in-progress: false, queued runs wait
-# for the current run to complete before starting.
-# Note: GitHub allows at most 1 running + 1 pending per concurrency group.
-# A third arrival replaces the pending run (acceptable — codeowners act carefully).
-concurrency:
-  group: release-automation-${{ github.repository }}
-  cancel-in-progress: false
-
 permissions:
   contents: write
   issues: write
@@ -89,7 +79,7 @@ permissions:
 jobs:
   release-automation:
     # Skip if:
-    # - issue_comment from the RA bot itself (its own replies, to prevent self-triggering)
+    # - issue_comment or issues event from the RA bot itself (to prevent self-triggering)
     # - issue_comment but not a release command or not on a release issue
     # - issues event but not a release issue
     # - pull_request but not merged or not to a snapshot branch
@@ -105,10 +95,21 @@ jobs:
         startsWith(github.event.comment.body, '/publish-release') ||
         startsWith(github.event.comment.body, '/sync-issue'))) ||
       (github.event_name == 'issues' &&
+       github.event.sender.login != 'camara-release-automation[bot]' &&
        contains(github.event.issue.labels.*.name, 'release-issue')) ||
       (github.event_name == 'pull_request' &&
        github.event.pull_request.merged == true &&
        startsWith(github.event.pull_request.base.ref, 'release-snapshot/'))
+
+    # Serialize release automation runs per repository. Job level, so runs
+    # skipped by the if: above never join the group. With cancel-in-progress:
+    # false, queued runs wait for the current run to complete.
+    # Note: GitHub allows at most 1 running + 1 pending per concurrency group.
+    # A third arrival replaces the pending run; a replaced push, merge or
+    # dispatch run shows as cancelled and can be re-run from its run page.
+    concurrency:
+      group: release-automation-${{ github.repository }}
+      cancel-in-progress: false
 
     uses: camaraproject/tooling/.github/workflows/release-automation-reusable.yml@v1-rc
     secrets: inherit

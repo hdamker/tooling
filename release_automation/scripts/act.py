@@ -15,6 +15,10 @@ The plan decides (command_policy); this module dispatches:
 create-snapshot runs in the snapshot job (it needs the validation toolchain);
 snapshot_outcome() turns that job's step outputs into the same outcome form.
 
+Two clients: the repository client (App token: branches, commits, PRs,
+releases) and the issue client (GITHUB_TOKEN) for every Release Issue write,
+so no write to the issue triggers a caller run.
+
 Outcome values are strings, under the output names of the former command jobs.
 
 Usage (workflow steps):
@@ -26,7 +30,7 @@ import json
 import os
 import sys
 from dataclasses import asdict
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from .bot_responder import post_comment
 from .github_client import GitHubClientError
@@ -49,12 +53,13 @@ def _outcome(action: str, result) -> Dict[str, str]:
     return {"action": action, **values}
 
 
-def act(plan: Dict[str, Any], gh, event: Dict[str, Any]) -> Dict[str, str]:
+def act(plan: Dict[str, Any], gh, event: Dict[str, Any], issues=None) -> Dict[str, str]:
     from .draft_release import create_draft, delete_draft, discard_snapshot, publish_on_merge
     from .issue_events import reopen_release_issue
     from .maintenance_branch import BranchPlan, create
     from .release_publisher import publish_draft
 
+    issues = issues or gh
     action = plan["action"]
     tag = plan["release_tag"]
     snapshot = plan["snapshot_branch"]
@@ -74,7 +79,7 @@ def act(plan: Dict[str, Any], gh, event: Dict[str, Any]) -> Dict[str, str]:
             if result.success and plan["release_issue_number"]:
                 pr = event.get("pull_request") or {}
                 try:
-                    post_comment(gh, "draft_created", plan["release_issue_number"], plan["base_context"], {
+                    post_comment(issues, "draft_created", plan["release_issue_number"], plan["base_context"], {
                         "draft_release_url": result.draft_release_url,
                         "release_pr_number": str(pr.get("number", "")),
                         "release_pr_url": pr.get("html_url", ""),
@@ -89,7 +94,7 @@ def act(plan: Dict[str, Any], gh, event: Dict[str, Any]) -> Dict[str, str]:
                 gh, tag, snapshot, review, plan["release_type"], plan["src_commit_sha"]
             ))
         case "reopen-issue":
-            return _outcome(action, reopen_release_issue(gh, int(plan["issue_number"]), tag, plan["base_context"]))
+            return _outcome(action, reopen_release_issue(issues, int(plan["issue_number"]), tag, plan["base_context"]))
         case "create-maintenance-branch":
             return _outcome(action, create(gh, BranchPlan(**plan["branch_plan"])))
         case _:
@@ -104,7 +109,19 @@ def snapshot_outcome(create: Dict[str, str], gate: Dict[str, str]) -> Dict[str, 
     return outcome
 
 
-def main(argv: List[str], gh=None) -> int:
+def clients_from_env() -> Tuple[Any, Any]:
+    """The repository client (GITHUB_TOKEN) and the issue client (ISSUE_TOKEN, else the same token)."""
+    from .github_client import GitHubClient
+
+    env = os.environ
+    token = env.get("GITHUB_TOKEN") or None
+    return (
+        GitHubClient(repo=env["GITHUB_REPOSITORY"], token=token),
+        GitHubClient(repo=env["GITHUB_REPOSITORY"], token=env.get("ISSUE_TOKEN") or token),
+    )
+
+
+def main(argv: List[str], gh=None, issues=None) -> int:
     from .trigger import write_outputs
 
     env = os.environ
@@ -120,10 +137,9 @@ def main(argv: List[str], gh=None) -> int:
     with open(env["GITHUB_EVENT_PATH"], encoding="utf-8") as f:
         event = json.load(f)
     if gh is None:
-        from .github_client import GitHubClient
-        gh = GitHubClient(repo=env["GITHUB_REPOSITORY"], token=env.get("GITHUB_TOKEN") or None)
+        gh, issues = clients_from_env()
 
-    outcome = act(plan, gh, event)
+    outcome = act(plan, gh, event, issues)
     write_outputs(env["GITHUB_OUTPUT"], {"outcome": json.dumps(outcome)})
     print(f"Outcome: {json.dumps(outcome)}")
     # A failed action fails the job; finalize runs regardless and reports it.

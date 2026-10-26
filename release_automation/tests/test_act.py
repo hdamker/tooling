@@ -156,6 +156,38 @@ def test_reopen_issue():
     assert gh.reopened == [40]
 
 
+def test_release_issue_writes_use_the_issue_client():
+    # spec 5.7: the repository client (App token) never writes to the Release Issue
+    gh, issues = repo(), FakeGitHub()
+
+    act(plan("create-draft", trigger_type="pr_merge"), gh, MERGE_EVENT, issues)
+    act(plan("reopen-issue", trigger_type="issue_close", command=""), gh, {}, issues)
+
+    assert gh.releases and gh.comments == [] and gh.reopened == []
+    assert [c["issue"] for c in issues.comments] == [40, 40] and issues.reopened == [40]
+
+
+def test_clients_from_env(monkeypatch):
+    monkeypatch.setenv("GITHUB_REPOSITORY", "camaraproject/Example")
+    monkeypatch.setenv("GITHUB_TOKEN", "app-token")
+    monkeypatch.setenv("ISSUE_TOKEN", "github-token")
+
+    gh, issues = act_mod.clients_from_env()
+
+    assert (gh.repo, gh.token, issues.repo, issues.token) == (
+        "camaraproject/Example", "app-token", "camaraproject/Example", "github-token")
+
+
+def test_clients_from_env_without_issue_token(monkeypatch):
+    monkeypatch.setenv("GITHUB_REPOSITORY", "camaraproject/Example")
+    monkeypatch.setenv("GITHUB_TOKEN", "github-token")
+    monkeypatch.delenv("ISSUE_TOKEN", raising=False)
+
+    gh, issues = act_mod.clients_from_env()
+
+    assert gh.token == issues.token == "github-token"
+
+
 def test_create_maintenance_branch():
     from release_automation.tests.test_maintenance_branch import PLAN, repo as cycle_one
 
