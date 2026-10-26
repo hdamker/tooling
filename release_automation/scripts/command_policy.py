@@ -26,9 +26,11 @@ from typing import Optional, Union
 
 from . import config
 from .github_client import GitHubClient, GitHubClientError
+from .maintenance_branch import BranchPlan
+from .maintenance_branch import check as check_maintenance_branch
 from .release_line import MAIN_BRANCH
 from .state_manager import ConfigurationError, ReleaseInfoResult, ReleaseState
-from .trigger import TRIGGER_SLASH_COMMAND, Trigger
+from .trigger import DISPATCH_CREATE_MAINTENANCE_BRANCH, TRIGGER_SLASH_COMMAND, Trigger
 
 # Commands a slash command may name, per release state (display order).
 ALLOWED_COMMANDS = {
@@ -72,6 +74,7 @@ ACTION_CREATE_SNAPSHOT = "create-snapshot"
 ACTION_CREATE_DRAFT = "create-draft"
 ACTION_PUBLISH_ON_MERGE = "publish-on-merge"
 ACTION_REOPEN_ISSUE = "reopen-issue"
+ACTION_CREATE_MAINTENANCE_BRANCH = "create-maintenance-branch"
 COMMAND_ACTIONS = ("create-snapshot", "discard-snapshot", "delete-draft", "publish-release")
 
 # App bots don't register as collaborators, so the permission API returns
@@ -106,6 +109,7 @@ class Plan:
             tag (release_line.line_of), whose release-plan.yaml was read
         publish_mode: draft | on_merge, per release type (PUBLISH_MODES)
         action: What the snapshot/act job executes ("" for none; action_for)
+        branch_plan: What create-maintenance-branch creates (that action only)
     """
     trigger_type: str
     command: str
@@ -117,6 +121,7 @@ class Plan:
     publish_mode: str = PUBLISH_MODE_DRAFT
     response: str = ""
     action: str = ""
+    branch_plan: Optional[BranchPlan] = None
 
     allowed = True
 
@@ -218,6 +223,8 @@ def action_for(plan: Plan) -> str:
             return ACTION_PUBLISH_ON_MERGE if plan.publish_mode == PUBLISH_MODE_ON_MERGE else ACTION_CREATE_DRAFT
         case "issue_close":
             return ACTION_REOPEN_ISSUE if plan.state in BLOCK_CLOSURE_STATES else ""
+        case "workflow_dispatch":
+            return ACTION_CREATE_MAINTENANCE_BRANCH if plan.branch_plan else ""
         case _:
             return ""
 
@@ -272,6 +279,8 @@ def _evaluate(
         base_branch=release_info.base_branch,
         publish_mode=publish_mode_for(release_type),
     )
+    if trigger.command == DISPATCH_CREATE_MAINTENANCE_BRANCH:
+        return _evaluate_create_maintenance_branch(trigger, plan, client)
     if not is_slash:
         return plan
 
@@ -285,21 +294,9 @@ def _evaluate(
     if message:
         return reject(message)
 
-    if user in TRUSTED_BOT_USERS:
-        permission = "write"
-        print(f"User {user} is a trusted CI bot; treating as write")
-    else:
-        try:
-            permission = client.get_collaborator_permission(user)
-        except GitHubClientError as e:
-            return reject(f"Failed to verify permissions: {e}")
-    print(f"User permission: {permission}")
-
-    if permission not in WRITE_PERMISSIONS:
-        return reject(
-            "You must have write access or higher to run release commands. "
-            f"Your current permission: {permission}"
-        )
+    message, permission = _check_permission(user, client)
+    if message:
+        return reject(message)
 
     if command == "publish-release":
         message = _check_publisher(user, permission, release_type, client)
@@ -314,6 +311,46 @@ def _evaluate(
             return replace(plan, response=RESPONSE_PUBLISH_CONFIRMATION)
 
     return replace(plan, response=RESPONSE_INTERIM)
+
+
+def _check_permission(user: str, client) -> tuple:
+    """(rejection message or None, permission): write access or higher."""
+    if user in TRUSTED_BOT_USERS:
+        permission = "write"
+        print(f"User {user} is a trusted CI bot; treating as write")
+    else:
+        try:
+            permission = client.get_collaborator_permission(user)
+        except GitHubClientError as e:
+            return f"Failed to verify permissions: {e}", ""
+    print(f"User permission: {permission}")
+
+    if permission not in WRITE_PERMISSIONS:
+        return (
+            "You must have write access or higher to run release commands. "
+            f"Your current permission: {permission}"
+        ), permission
+    return None, permission
+
+
+def _evaluate_create_maintenance_branch(trigger: Trigger, plan: Plan, client) -> Union[Plan, Rejection]:
+    """The dispatch action create-maintenance-branch: a Plan with its branch plan, or why not."""
+    def refuse(message: str) -> Rejection:
+        # No comment to update: the plan job's step summary and failure report it
+        return Rejection(error_message=message, response="")
+
+    message, _ = _check_permission(trigger.user, client)
+    if message:
+        return refuse(message)
+    if plan.base_branch != MAIN_BRANCH:
+        return refuse(f"Dispatch create-maintenance-branch from main, not from {plan.base_branch}.")
+    try:
+        branch_plan = check_maintenance_branch(client, trigger.command_args, plan.release_tag)
+    except GitHubClientError as e:
+        return refuse(f"Failed to check the release history: {e}")
+    if isinstance(branch_plan, str):
+        return refuse(branch_plan)
+    return replace(plan, branch_plan=branch_plan)
 
 
 def finalize_due(result: Union[Plan, Rejection]) -> bool:
@@ -404,6 +441,70 @@ def response_context(result: Union[Plan, Rejection], trigger: Trigger, env, stat
     return {}
 
 
+def _describe_trigger(trigger: Trigger) -> str:
+    text = trigger.trigger_type
+    if trigger.trigger_type == TRIGGER_SLASH_COMMAND:
+        text += f" `/{trigger.command}`"
+    elif trigger.trigger_type == "workflow_dispatch":
+        text += f" `{' '.join(filter(None, (trigger.command, trigger.command_args)))}`"
+    text += f" by @{trigger.user}"
+    if trigger.ref:
+        text += f", ref {trigger.ref}"
+    if trigger.issue_number:
+        text += f" on #{trigger.issue_number}"
+    if trigger.trigger_type == "pr_merge":
+        text += f" (Release PR of {trigger.release_tag})"
+    return text
+
+
+def _describe_plan(result: Union[Plan, Rejection]) -> str:
+    if not result.allowed:
+        if result.error_type:
+            return f"configuration error ({result.error_type}): {result.error_message}"
+        return f"{'rejected' if result.response else 'refused'}: {result.error_message}"
+    if result.response == RESPONSE_PUBLISH_CONFIRMATION:
+        return f"confirmation requested: /publish-release --confirm {result.release_tag}"
+    jobs = []
+    if result.action:
+        jobs.append("snapshot" if result.action == ACTION_CREATE_SNAPSHOT else "act")
+    if finalize_due(result):
+        jobs.append("finalize")
+    runs = f"runs {', '.join(jobs)}" if jobs else "nothing else runs"
+    if result.action == ACTION_CREATE_MAINTENANCE_BRANCH:
+        bp = result.branch_plan
+        return (
+            f"{result.action}: {bp.branch} at {bp.patched_release} ({bp.patched_sha[:7]}), "
+            f"plan PR for {bp.next_tag}; {runs}"
+        )
+    if result.action:
+        return f"{result.action}, publish mode {result.publish_mode}; {runs}"
+    return f"no action; {runs}"
+
+
+def _cell(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ")
+
+
+def plan_summary(result: Union[Plan, Rejection], trigger: Trigger, release_info: ReleaseInfoResult,
+                 cache: CommonCache) -> str:
+    """Step summary of the plan job: the trigger, the context it derived, the plan (tooling#154)."""
+    rows = [("Trigger", _describe_trigger(trigger))]
+    if release_info.success:
+        release = release_info.release_tag or "no tag"
+        if release_info.release_type:
+            release += f" ({release_info.release_type})"
+        rows.append(("Release", f"{release}, state {_state_value(release_info) or 'unknown'}"))
+        rows.append(("Base branch", release_info.base_branch))
+        cache_text = cache.status or "not checked"
+        if cache.status == "stale" and cache.details:
+            cache_text += f": {cache.details}"
+        rows.append(("Common cache", cache_text))
+    rows.append(("Plan", _describe_plan(result)))
+    lines = ["## Release Automation: plan", "", "| | |", "|---|---|"]
+    lines += [f"| {name} | {_cell(value)} |" for name, value in rows]
+    return "\n".join(lines) + "\n"
+
+
 def main(client=None) -> int:
     from .trigger import write_outputs
 
@@ -434,6 +535,10 @@ def main(client=None) -> int:
     else:
         print(f"Rejected: {result.error_message}")
 
+    if env.get("GITHUB_STEP_SUMMARY"):
+        with open(env["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+            f.write(plan_summary(result, trigger, release_info, cache))
+
     write_outputs(env["GITHUB_OUTPUT"], {
         "plan": json.dumps(plan_document(result, trigger, state_outputs, cache, base_context)),
         "action": result.action if result.allowed else "",
@@ -443,6 +548,12 @@ def main(client=None) -> int:
             "unknown" if result.response == RESPONSE_CONFIG_ERROR else (release_info.release_tag or "")
         ),
         "response_context": json.dumps(response_context(result, trigger, env, state_outputs)),
+        # A refused dispatch action fails the plan job
+        "refusal": (
+            result.error_message
+            if not result.allowed and not result.response and not result.error_type
+            else ""
+        ),
     })
     return 0
 

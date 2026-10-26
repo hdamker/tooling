@@ -432,6 +432,20 @@ def finalize(run: Run, clients: Clients, summary_path: str = "") -> Report:
     return report
 
 
+def maintenance_branch_rows(run: Run) -> List[Tuple[str, str]]:
+    """create-maintenance-branch: the branch, the plan PR, or what failed (no Release Issue exists yet)."""
+    if run.succeeded("create-maintenance-branch"):
+        rows = [
+            ("Maintenance branch", f"{run.out('branch')} created, set-up commit {run.out('setup_commit_sha')}"),
+            ("Plan PR", run.out("plan_pr_url")),
+        ]
+    else:
+        rows = [("Maintenance branch", f"failed: {run.out('error_message') or run.result or 'no outcome'}")]
+    if run.out("warning"):
+        rows.append(("Warning", run.out("warning")))
+    return rows
+
+
 def write_summary(run: Run, report: Report, summary_path: str) -> None:
     """Step summary of the finalize job: what it changed and where."""
     if not summary_path:
@@ -446,6 +460,8 @@ def write_summary(run: Run, report: Report, summary_path: str) -> None:
         rows.append(("Common sync", f"{report.common_sync.status} {report.common_sync.pr_url}".strip()))
     if report.issue_sync:
         rows.append(("Release Issue", f"{report.issue_sync.issue_action} {report.issue_sync.issue_url}".strip()))
+    if run.action == "create-maintenance-branch":
+        rows.extend(maintenance_branch_rows(run))
     if report.result_template:
         rows.append(("Result comment", report.result_template))
     if report.issue_finalized is not None:

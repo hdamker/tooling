@@ -8,6 +8,8 @@ import fnmatch
 import itertools
 from typing import Any, Dict, List, Optional
 
+import yaml
+
 from release_automation.scripts.github_client import Branch, GitHubClientError, Release
 
 REPO_URL = "https://github.com/camaraproject/Example"
@@ -24,6 +26,9 @@ class FakeGitHub:
         self.issues: List[Dict[str, Any]] = list(issues or [])  # open issues
         self.permissions: Dict[str, str] = dict(permissions or {})
         self.commits: List[Dict[str, str]] = []
+        self.prs: List[Dict[str, Any]] = []
+        self.labels: set = set()
+        self.labelled: List[tuple] = []
         self.closed_prs: List[int] = []
         self.reopened: List[int] = []
         self.comments: List[Dict[str, Any]] = []
@@ -48,6 +53,16 @@ class FakeGitHub:
         self.branches[branch] = sha
         self.commits.append({"branch": branch, "path": path, "message": message, "sha": sha})
         return {"commit": {"sha": sha}}
+
+    def commit_files(self, branch, files, message):
+        self._call("commit_files")
+        parent = self.branches[branch]
+        sha = f"c{next(self._ids)}"
+        for path, content in files.items():
+            self.files[(branch, path)] = content
+        self.branches[branch] = sha
+        self.commits.append({"branch": branch, "paths": sorted(files), "message": message, "sha": sha, "parent": parent})
+        return sha
 
     # ── branches and tags ──
     def get_branch_sha(self, branch_name):
@@ -100,6 +115,11 @@ class FakeGitHub:
             return None
         return Release(tag_name=r["tag"], name=r["tag"], draft=True, prerelease=r["prerelease"], html_url=r["html_url"])
 
+    def get_release_metadata(self, tag):
+        self._call("get_release_metadata")
+        content = self.files.get((tag, "release-metadata.yaml"))
+        return yaml.safe_load(content) if content else None
+
     def get_releases(self, include_drafts=False) -> List[Release]:
         self._call("get_releases")
         return [
@@ -149,6 +169,22 @@ class FakeGitHub:
     def get_collaborator_permission(self, username):
         self._call("get_collaborator_permission")
         return self.permissions.get(username, "none")
+
+    def create_pr(self, title, body, head, base):
+        self._call("create_pr")
+        number = next(self._ids)
+        self.prs.append({"number": number, "title": title, "body": body, "head": head, "base": base})
+        return number, f"{REPO_URL}/pull/{number}"
+
+    def get_label(self, name):
+        return {"name": name} if name in self.labels else None
+
+    def create_label(self, name, color, description=""):
+        self.labels.add(name)
+
+    def add_pr_labels(self, pr_number, labels):
+        self._call("add_pr_labels")
+        self.labelled.append((pr_number, list(labels)))
 
     def close_pr(self, pr_number, comment=""):
         self._call("close_pr")

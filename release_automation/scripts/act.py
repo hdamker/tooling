@@ -10,6 +10,7 @@ The plan decides (command_policy); this module dispatches:
     create-draft       draft_release.create_draft, then the draft_created comment
     publish-on-merge   draft_release.publish_on_merge
     reopen-issue       issue_events.reopen_release_issue
+    create-maintenance-branch  maintenance_branch.create
 
 create-snapshot runs in the snapshot job (it needs the validation toolchain);
 snapshot_outcome() turns that job's step outputs into the same outcome form.
@@ -51,6 +52,7 @@ def _outcome(action: str, result) -> Dict[str, str]:
 def act(plan: Dict[str, Any], gh, event: Dict[str, Any]) -> Dict[str, str]:
     from .draft_release import create_draft, delete_draft, discard_snapshot, publish_on_merge
     from .issue_events import reopen_release_issue
+    from .maintenance_branch import BranchPlan, create
     from .release_publisher import publish_draft
 
     action = plan["action"]
@@ -88,6 +90,8 @@ def act(plan: Dict[str, Any], gh, event: Dict[str, Any]) -> Dict[str, str]:
             ))
         case "reopen-issue":
             return _outcome(action, reopen_release_issue(gh, int(plan["issue_number"]), tag, plan["base_context"]))
+        case "create-maintenance-branch":
+            return _outcome(action, create(gh, BranchPlan(**plan["branch_plan"])))
         case _:
             raise ValueError(f"unknown action: {action}")
 

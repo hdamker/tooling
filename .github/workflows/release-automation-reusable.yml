@@ -6,7 +6,9 @@
 #   /publish-release, /sync-issue
 # - Issue events: close (with auto-reopen if needed), reopen
 # - PR merge events: on release-snapshot branches (draft creation)
-# - Manual dispatch and push: Release Issue sync
+# - Push: Release Issue sync of the pushed line (main or maintenance/rX)
+# - Manual dispatch: action input sync-issue (default) or
+#   create-maintenance-branch with a cycle input
 #
 # Four jobs: plan decides (one JSON plan), snapshot or act executes the
 # plan's action (one JSON outcome), finalize reports and syncs.
@@ -262,6 +264,15 @@ jobs:
           context: ${{ steps.policy.outputs.response_context }}
           comment_id: ${{ steps.ack.outputs.comment_id }}
 
+      # create-maintenance-branch refused: the step summary says why
+      - name: Fail workflow (dispatch action refused)
+        if: steps.policy.outputs.refusal != ''
+        env:
+          REFUSAL: ${{ steps.policy.outputs.refusal }}
+        run: |
+          echo "::error title=Refused::$REFUSAL"
+          exit 1
+
       - name: Fail workflow (config error on a non-slash-command trigger)
         if: |
           steps.state.outputs.config_error != '' &&
@@ -456,8 +467,10 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Act — the plan's other actions (discard-snapshot, delete-draft,
-  # publish-release, create-draft, publish-on-merge, reopen-issue), dispatched
-  # by release_automation/scripts/act.py.
+  # publish-release, create-draft, publish-on-merge, reopen-issue,
+  # create-maintenance-branch), dispatched by release_automation/scripts/act.py.
+  # The App token writes .github/workflows/* for create-maintenance-branch
+  # (workflows permission) and bypasses maintenance-branch-protection.
   # ─────────────────────────────────────────────────────────────────────────────
   act:
     needs: [plan]

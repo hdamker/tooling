@@ -12,14 +12,6 @@ name: CAMARA Validation
 on:
   workflow_call:
     inputs:
-      tooling_ref_override:
-        description: >-
-          Tooling checkout ref override. Accepts a 40-character SHA or one of
-          the refs listed in env.ALLOWED_TOOLING_REFS (workflow-level).
-          Pilot / break-glass / canary only.
-        type: string
-        required: false
-        default: ""
       profile:
         description: >-
           Validation profile override (advisory, standard, strict).
@@ -36,9 +28,6 @@ on:
         default: ""
 
 env:
-  # Allowlist for tooling_ref_override beyond a 40-char SHA. Comma-separated.
-  # Each consuming caller's override input must match a SHA or one of these.
-  ALLOWED_TOOLING_REFS: "main,v1-rc,hotfix"
   # Keep validation runtime pins explicit and aligned across reusable workflows.
   PYTHON_VERSION: "3.14"
   NODE_VERSION: "24"
@@ -49,7 +38,6 @@ permissions:
   issues: write
   contents: read
   statuses: write
-  id-token: write
 
 jobs:
   validate:
@@ -63,91 +51,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      # ── Step 2: Resolve tooling ref (OIDC → override → fallback) ──
-      - name: Resolve tooling ref
-        id: resolve-ref
-        uses: actions/github-script@v9
-        env:
-          TOOLING_REF_OVERRIDE: ${{ inputs.tooling_ref_override }}
-          ALLOWED_TOOLING_REFS: ${{ env.ALLOWED_TOOLING_REFS }}
-        with:
-          script: |
-            const overrideRef = (process.env.TOOLING_REF_OVERRIDE || '').trim();
-            const shaPattern = /^[0-9a-f]{40}$/i;
-            const allowedRefs = new Set(
-              (process.env.ALLOWED_TOOLING_REFS || '')
-                .split(',').map(s => s.trim()).filter(Boolean)
-            );
-            const workflowRefPattern =
-              /^([^/]+\/[^/]+)\/\.github\/workflows\/validation\.yml@.+$/;
-
-            function decodeJwtPayload(jwt) {
-              const parts = jwt.split('.');
-              if (parts.length !== 3) {
-                throw new Error('OIDC token is not a valid JWT');
-              }
-              const payload = parts[1]
-                .replace(/-/g, '+')
-                .replace(/_/g, '/');
-              const padLength = (4 - (payload.length % 4)) % 4;
-              const padded = payload + '='.repeat(padLength);
-              return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
-            }
-
-            // Tier 1: Explicit override (highest priority)
-            if (overrideRef) {
-              const isSha = shaPattern.test(overrideRef);
-              const isAllowedRef = allowedRefs.has(overrideRef);
-              if (!isSha && !isAllowedRef) {
-                const allowedList = [...allowedRefs].join(', ');
-                core.setFailed(
-                  `tooling_ref_override must be a 40-character SHA or one of: ${allowedList}`
-                );
-                return;
-              }
-              const ref = isSha ? overrideRef.toLowerCase() : overrideRef;
-              core.setOutput('tooling_checkout_repo', 'camaraproject/tooling');
-              core.setOutput('tooling_checkout_ref', ref);
-              core.setOutput('tooling_ref_source', 'override');
-              core.info(`Tooling ref: override ${isSha ? overrideRef.substring(0, 7) : overrideRef}`);
-              return;
-            }
-
-            // Tier 2: OIDC job_workflow_sha
-            try {
-              const oidcToken = await core.getIDToken('camara-validation-tooling-ref');
-              const claims = decodeJwtPayload(oidcToken);
-              const workflowRef = claims.job_workflow_ref || '';
-              const workflowSha = claims.job_workflow_sha || '';
-              const match = workflowRef.match(workflowRefPattern);
-
-              if (match && shaPattern.test(workflowSha)) {
-                const repo = match[1];
-                const ref = workflowSha.toLowerCase();
-                core.setOutput('tooling_checkout_repo', repo);
-                core.setOutput('tooling_checkout_ref', ref);
-                core.setOutput('tooling_ref_source', 'oidc');
-                core.info(`Tooling ref: OIDC ${ref.substring(0, 7)} from ${repo}`);
-                core.info(`job_workflow_ref: ${workflowRef}`);
-                return;
-              }
-              core.info(`OIDC claims unusable: ref=${workflowRef} sha=${workflowSha}`);
-            } catch (e) {
-              core.info(`OIDC token unavailable: ${e.message}`);
-            }
-
-            // Tier 3: Hardcoded fallback tag
-            core.setOutput('tooling_checkout_repo', 'camaraproject/tooling');
-            core.setOutput('tooling_checkout_ref', 'v1-rc');
-            core.setOutput('tooling_ref_source', 'fallback_tag');
-            core.info('Tooling ref: fallback camaraproject/tooling@v1-rc');
-
-      # ── Step 3: Checkout tooling (sparse) ──────────────────────────
+      # ── Step 2: Checkout tooling (sparse) ──────────────────────────
+      #
+      # The commit this workflow runs from (the caller's `uses:` ref): workflow
+      # and tooling always come from the same commit, also for fork PRs.
       - name: Checkout tooling
         uses: actions/checkout@v7
         with:
-          repository: ${{ steps.resolve-ref.outputs.tooling_checkout_repo }}
-          ref: ${{ steps.resolve-ref.outputs.tooling_checkout_ref }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           sparse-checkout: |
             config
             linting/config
@@ -157,7 +69,7 @@ jobs:
             tooling_lib
           path: .tooling
 
-      # ── Step 3b: Checkout central validation settings (main) ───────
+      # ── Step 3: Checkout central validation settings (main) ────────
       #
       # The validation settings file lives on `main` of camaraproject/tooling
       # so per-repo stage flips (and any other forward-compatible settings
@@ -337,7 +249,7 @@ jobs:
           active_release_snapshot_branch: ${{ steps.derive-release-state.outputs.snapshot_branch || '' }}
           active_release_issue_number: ${{ steps.derive-release-state.outputs.release_issue_number || '' }}
           release_history_path: ${{ steps.release-history.outputs.release_history_path || '' }}
-          tooling_ref: ${{ steps.resolve-ref.outputs.tooling_checkout_ref }}
+          tooling_ref: ${{ job.workflow_sha }}
           config_path: ${{ steps.resolve-config.outputs.config_path }}
 
       # ── Step 8: Mint validation app token (PR only) ──────────────

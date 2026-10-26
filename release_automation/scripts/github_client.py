@@ -57,13 +57,14 @@ class GitHubClient:
         self.repo = repo
         self.token = token
 
-    def _run_gh(self, args: List[str], check: bool = True) -> str:
+    def _run_gh(self, args: List[str], check: bool = True, input: Optional[str] = None) -> str:
         """
         Run a gh CLI command and return output.
 
         Args:
             args: Command arguments (without 'gh')
             check: Whether to raise on non-zero exit code
+            input: Text passed on stdin (for `gh api --input -`)
 
         Returns:
             Command output as string
@@ -86,7 +87,8 @@ class GitHubClient:
                 capture_output=True,
                 text=True,
                 check=check,
-                env=env
+                env=env,
+                input=input,
             )
             return result.stdout
         except subprocess.CalledProcessError as e:
@@ -1250,6 +1252,50 @@ class GitHubClient:
             if "422" in error_msg or "reference already exists" in error_msg:
                 return False
             raise
+
+    def commit_files(self, branch: str, files: Dict[str, str], message: str) -> str:
+        """Add one commit with the given files on top of a branch (Git Data API).
+
+        The branch moves by fast-forward only. A commit made this way with an
+        App token is attributed to and signed for the App.
+
+        Args:
+            branch: Existing branch (without refs/heads/)
+            files: Path -> new text content
+            message: Commit message
+
+        Returns:
+            SHA of the new commit
+
+        Raises:
+            GitHubClientError: If the branch is missing or a call fails (also
+                when a ruleset refuses the ref update)
+        """
+        head = self._run_gh([
+            "api", f"repos/{self.repo}/git/ref/heads/{branch}", "--jq", ".object.sha"
+        ]).strip()
+        base_tree = self._run_gh([
+            "api", f"repos/{self.repo}/git/commits/{head}", "--jq", ".tree.sha"
+        ]).strip()
+        tree = self._run_gh(
+            ["api", "-X", "POST", f"repos/{self.repo}/git/trees", "--input", "-", "--jq", ".sha"],
+            input=json.dumps({
+                "base_tree": base_tree,
+                "tree": [
+                    {"path": path, "mode": "100644", "type": "blob", "content": content}
+                    for path, content in files.items()
+                ],
+            }),
+        ).strip()
+        commit = self._run_gh(
+            ["api", "-X", "POST", f"repos/{self.repo}/git/commits", "--input", "-", "--jq", ".sha"],
+            input=json.dumps({"message": message, "tree": tree, "parents": [head]}),
+        ).strip()
+        self._run_gh([
+            "api", "-X", "PATCH", f"repos/{self.repo}/git/refs/heads/{branch}",
+            "-f", f"sha={commit}", "-F", "force=false",
+        ])
+        return commit
 
     def get_branch_sha(self, branch_name: str) -> Optional[str]:
         """Commit SHA a branch points to, or None if the branch doesn't exist."""
