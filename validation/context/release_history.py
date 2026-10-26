@@ -76,20 +76,76 @@ class ReleaseHistorySnapshot:
     base_ref: str
     lookup_status: str
     published_releases: Tuple[PublishedRelease, ...]
+    # None means the branch lookup did not run or failed; rules that need it skip.
+    maintenance_branches: Optional[Tuple[str, ...]] = None
 
     def release_tags_available(self) -> bool:
         """Return True when repository release tags are known enough to compare."""
         return self.lookup_status == "complete" or bool(self.published_releases)
 
-    def latest_release(self) -> Optional[PublishedRelease]:
+    def latest_release(self, cycle: Optional[int] = None) -> Optional[PublishedRelease]:
+        """Return the highest release tag, optionally within one release cycle."""
         releases = [
             release
             for release in self.published_releases
             if release.parsed_tag is not None
+            and (cycle is None or release.parsed_tag.major == cycle)
         ]
         if not releases:
             return None
         return max(releases, key=lambda release: release.parsed_tag)
+
+    def is_maintenance_line(self, cycle: int) -> bool:
+        """Return True when cycle ``rX`` already contains a terminal release.
+
+        Only releases with metadata count, so legacy releases without
+        release-metadata.yaml never turn a cycle into a maintenance line.
+        """
+        return any(
+            release.parsed_tag is not None
+            and release.parsed_tag.major == cycle
+            and release.metadata_available
+            and release.release_type in TERMINAL_RELEASE_TYPES
+            for release in self.published_releases
+        )
+
+    def patched_release(self, cycle: int) -> Optional[PublishedRelease]:
+        """Return the newest terminal release of a maintenance line.
+
+        rc pre-releases are skipped.  Returns None when a newer non-prerelease
+        release of the cycle has no metadata, because it could be the real
+        patched release.
+        """
+        candidates = [
+            release
+            for release in self.published_releases
+            if release.parsed_tag is not None
+            and release.parsed_tag.major == cycle
+            and not release.prerelease
+        ]
+        if not candidates:
+            return None
+        newest = max(candidates, key=lambda release: release.parsed_tag)
+        if (
+            not newest.metadata_available
+            or newest.release_type not in TERMINAL_RELEASE_TYPES
+        ):
+            return None
+        return newest
+
+    def later_cycle_releases(self, cycle: int) -> list[PublishedRelease]:
+        """Return releases of any type tagged in a cycle after ``cycle``."""
+        return [
+            release
+            for release in self.published_releases
+            if release.parsed_tag is not None and release.parsed_tag.major > cycle
+        ]
+
+    def has_maintenance_branch(self, cycle: int) -> Optional[bool]:
+        """Return whether ``maintenance/rX`` exists; None when unknown."""
+        if self.maintenance_branches is None:
+            return None
+        return f"maintenance/r{cycle}" in self.maintenance_branches
 
     def release_by_tag(self, tag: str) -> Optional[PublishedRelease]:
         for release in self.published_releases:
@@ -201,12 +257,24 @@ def parse_release_history(data: Any) -> Optional[ReleaseHistorySnapshot]:
     except (TypeError, ValueError):
         schema_version = 1
 
+    raw_branches = data.get("maintenance_branches")
+    maintenance_branches = (
+        tuple(
+            branch
+            for branch in raw_branches
+            if isinstance(branch, str) and branch.startswith("maintenance/")
+        )
+        if isinstance(raw_branches, list)
+        else None
+    )
+
     return ReleaseHistorySnapshot(
         schema_version=schema_version,
         repository=str(data.get("repository") or ""),
         base_ref=str(data.get("base_ref") or ""),
         lookup_status=str(data.get("lookup_status") or "missing"),
         published_releases=releases,
+        maintenance_branches=maintenance_branches,
     )
 
 

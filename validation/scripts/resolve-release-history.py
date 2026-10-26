@@ -67,6 +67,15 @@ def resolve_history(
     lookup_status = "complete"
     published_releases: list[dict[str, Any]] = []
 
+    # None tells the consumer the branch list is unknown; an empty list means
+    # the repository has no maintenance branches.
+    try:
+        maintenance_branches: list[str] | None = sorted(
+            branch.name for branch in client.list_branches("maintenance/*")
+        )
+    except GitHubClientError:
+        maintenance_branches = None
+
     # Contract for the consumer (validation.context.release_history): a "partial"
     # snapshot never truncates the release list.  Partial means either the whole
     # listing failed (empty published_releases) or per-tag metadata was
@@ -83,6 +92,7 @@ def resolve_history(
             "lookup_status": "partial",
             "lookup_error": str(exc),
             "published_releases": [],
+            "maintenance_branches": maintenance_branches,
         }
 
     for release in releases:
@@ -104,6 +114,7 @@ def resolve_history(
             "selection": "published-releases",
         },
         "published_releases": published_releases,
+        "maintenance_branches": maintenance_branches,
     }
 
 

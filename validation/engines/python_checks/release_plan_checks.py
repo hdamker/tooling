@@ -10,6 +10,7 @@ imported or modified.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from pathlib import Path
 from typing import List, Optional
@@ -17,6 +18,7 @@ from typing import List, Optional
 from release_automation.scripts import config
 from validation.context import ValidationContext
 from validation.context.release_history import (
+    TERMINAL_RELEASE_TYPES,
     PublishedRelease,
     normalize_api_version_base,
     parse_release_tag,
@@ -571,8 +573,20 @@ def check_release_plan_published_history(
                 )
             ]
 
+    # A maintenance-line plan (its cycle already has a terminal release, M1)
+    # is compared with that cycle's tags only; later cycles live on main or
+    # their own line.  Other plans keep the repository-wide latest tag.
+    parsed_target = parse_release_tag(target_tag)
+    line_cycle = (
+        parsed_target.major
+        if parsed_target is not None
+        and history.is_maintenance_line(parsed_target.major)
+        else None
+    )
     latest_release = (
-        history.latest_release() if history.release_tags_available() else None
+        history.latest_release(cycle=line_cycle)
+        if history.release_tags_available()
+        else None
     )
     latest_tag = latest_release.tag if latest_release is not None else None
 
@@ -588,6 +602,7 @@ def check_release_plan_published_history(
         published_target is not None
         and published_target.metadata_available
         and _inactive_plan_matches_published_release(release_plan, published_target)
+        and (line_cycle is None or target_tag == latest_tag)
     ):
         return []
 
@@ -595,6 +610,9 @@ def check_release_plan_published_history(
         published_target is not None
         and published_target.metadata_available
         and not _plan_matches_published_release(release_plan, published_target)
+        and not _inactive_plan_matches_published_release(
+            release_plan, published_target
+        )
     ):
         return [
             _release_history_finding(
@@ -607,7 +625,6 @@ def check_release_plan_published_history(
             )
         ]
 
-    parsed_target = parse_release_tag(target_tag)
     parsed_latest = parse_release_tag(latest_tag) if latest_tag else None
     if (
         parsed_target is not None
@@ -723,6 +740,296 @@ def check_release_plan_terminal_api_status(
         return []
 
     return _terminal_api_status_findings(release_plan, context)
+
+
+# ---------------------------------------------------------------------------
+# P-041: check-release-plan-maintenance-line
+# ---------------------------------------------------------------------------
+
+_MAINTENANCE_LINE_TYPES = ("maintenance-release", "pre-release-rc")
+_MAINTENANCE_BRANCH_RE = re.compile(r"^maintenance/r([1-9]\d*)$")
+
+
+def _maintenance_line_finding(
+    context: ValidationContext, message: str, suggestion: str
+) -> dict:
+    return make_finding(
+        engine_rule="check-release-plan-maintenance-line",
+        level="error",
+        message=_prefix_pre_existing_release_plan_condition(context, message),
+        path=_RELEASE_PLAN_PATH,
+        line=1,
+        suggestion=suggestion,
+    )
+
+
+def _next_line_tag(context: ValidationContext, cycle: int) -> Optional[str]:
+    history = context.release_history
+    latest = history.latest_release(cycle=cycle) if history is not None else None
+    if latest is None or latest.parsed_tag is None:
+        return None
+    return f"r{cycle}.{latest.parsed_tag.minor + 1}"
+
+
+def check_release_plan_maintenance_line(
+    repo_path: Path, context: ValidationContext
+) -> List[dict]:
+    """Validate a plan against the maintenance line it belongs to (003 M1/M3/M6)."""
+    plan_path = repo_path / _RELEASE_PLAN_PATH
+    release_plan = load_yaml_safe(plan_path)
+    if release_plan is None:
+        return []
+
+    history = context.release_history
+    if history is None or not history.release_tags_available():
+        return []
+
+    repo = release_plan.get("repository", {})
+    if not isinstance(repo, dict):
+        return []
+    release_type = repo.get("target_release_type", "none")
+    target_tag = repo.get("target_release_tag")
+    parsed_target = parse_release_tag(target_tag) if target_tag else None
+    if parsed_target is None:
+        return []
+
+    # Same guard as P-035: a parked plan only matters when the PR edits it.
+    if release_type == "none" and context.release_plan_changed is not True:
+        return []
+
+    cycle = parsed_target.major
+    branch_match = _MAINTENANCE_BRANCH_RE.fullmatch(history.base_ref)
+    line_cycle = int(branch_match.group(1)) if branch_match else None
+
+    if line_cycle is not None and cycle != line_cycle:
+        return [
+            _maintenance_line_finding(
+                context,
+                f"on branch '{history.base_ref}' target_release_tag must be in "
+                f"release cycle r{line_cycle}, not '{target_tag}'.",
+                f"Plan the next r{line_cycle}.y release on this branch; new "
+                "release cycles are planned on main.",
+            )
+        ]
+
+    # Published tags are P-035's: the plan must match what was published.
+    if history.release_by_tag(target_tag) is not None:
+        return []
+
+    if line_cycle is None:
+        if not history.is_maintenance_line(cycle):
+            return []
+
+        branch = f"maintenance/r{cycle}"
+        if history.has_maintenance_branch(cycle):
+            return [
+                _maintenance_line_finding(
+                    context,
+                    f"release cycle r{cycle} is maintained on branch "
+                    f"'{branch}'; main must not plan '{target_tag}'.",
+                    f"Plan the {target_tag} release on '{branch}', and keep "
+                    "main on a later release cycle.",
+                )
+            ]
+
+        later = history.later_cycle_releases(cycle)
+        if later:
+            later_tag = max(later, key=lambda release: release.parsed_tag).tag
+            return [
+                _maintenance_line_finding(
+                    context,
+                    f"release '{later_tag}' is already published in a later "
+                    f"cycle, so main can no longer release in cycle "
+                    f"r{cycle}; maintenance releases of r{cycle} need the "
+                    f"branch '{branch}'.",
+                    f"Ask the codeowners to create '{branch}' and plan "
+                    f"'{target_tag}' there, or plan a later release on main.",
+                )
+            ]
+
+    if release_type != "none" and release_type not in _MAINTENANCE_LINE_TYPES:
+        return [
+            _maintenance_line_finding(
+                context,
+                f"release cycle r{cycle} already has a public release, so "
+                f"target_release_type '{release_type}' is not allowed for "
+                f"'{target_tag}'; use 'maintenance-release' or "
+                "'pre-release-rc'.",
+                f"Use maintenance-release or pre-release-rc for a fix of "
+                f"r{cycle}, or open the next release cycle "
+                f"r{cycle + 1}.1 for new work.",
+            )
+        ]
+
+    next_tag = _next_line_tag(context, cycle)
+    if next_tag is not None and target_tag != next_tag:
+        return [
+            _maintenance_line_finding(
+                context,
+                f"target_release_tag '{target_tag}' skips tags: the next tag "
+                f"of release cycle r{cycle} is '{next_tag}'.",
+                f"Set target_release_tag: {next_tag}.",
+            )
+        ]
+
+    return []
+
+
+# ---------------------------------------------------------------------------
+# P-042: check-release-plan-maintenance-api-versions
+# ---------------------------------------------------------------------------
+
+_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+
+
+def _semver(version: str) -> Optional[tuple[int, int, int]]:
+    match = _SEMVER_RE.fullmatch(normalize_api_version_base(version))
+    if not match:
+        return None
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
+def _later_cycle_has_higher_major(
+    context: ValidationContext, cycle: int, api_name: str, major: int
+) -> bool:
+    history = context.release_history
+    if history is None:
+        return False
+    for release in history.later_cycle_releases(cycle):
+        if (
+            not release.metadata_available
+            or release.release_type not in TERMINAL_RELEASE_TYPES
+        ):
+            continue
+        for api in release.apis:
+            published = _semver(api.api_version)
+            if api.api_name == api_name and published and published[0] > major:
+                return True
+    return False
+
+
+def _maintenance_api_version_message(
+    context: ValidationContext,
+    cycle: int,
+    api_name: str,
+    planned: tuple[int, int, int],
+    patched: tuple[int, int, int],
+    patched_version: str,
+    patched_tag: str,
+    planned_version: str,
+) -> Optional[str]:
+    base = (
+        f"API '{api_name}' changes '{patched_version}' in {patched_tag} to "
+        f"'{planned_version}'"
+    )
+    if planned < patched:
+        return f"{base}; a maintenance release must not lower the version."
+    if planned[0] != patched[0]:
+        return f"{base}; a maintenance line allows no major version change."
+    if planned[1] == patched[1]:
+        return None
+    if patched[0] == 0:
+        return (
+            f"{base}; for 0.y.z versions the minor version is breaking, so a "
+            "maintenance line allows only patch versions."
+        )
+    if _later_cycle_has_higher_major(context, cycle, api_name, patched[0]):
+        return None
+    return (
+        f"{base}, a new minor version; a maintenance line allows that only "
+        "when a later release cycle has published a higher major version of "
+        "the API."
+    )
+
+
+def check_release_plan_maintenance_api_versions(
+    repo_path: Path, context: ValidationContext
+) -> List[dict]:
+    """Validate API versions of a maintenance-line plan against the patched release (003 M2)."""
+    plan_path = repo_path / _RELEASE_PLAN_PATH
+    release_plan = load_yaml_safe(plan_path)
+    if release_plan is None:
+        return []
+
+    history = context.release_history
+    if history is None or not history.release_tags_available():
+        return []
+
+    repo = release_plan.get("repository", {})
+    if not isinstance(repo, dict):
+        return []
+    release_type = repo.get("target_release_type", "none")
+    target_tag = repo.get("target_release_tag")
+    parsed_target = parse_release_tag(target_tag) if target_tag else None
+    if parsed_target is None or history.release_by_tag(target_tag) is not None:
+        return []
+    if release_type == "none" and context.release_plan_changed is not True:
+        return []
+
+    cycle = parsed_target.major
+    patched = history.patched_release(cycle)
+    if patched is None:
+        return []
+
+    def finding(message: str, suggestion: str, api_name: Optional[str] = None) -> dict:
+        return make_finding(
+            engine_rule="check-release-plan-maintenance-api-versions",
+            level="error",
+            message=_prefix_pre_existing_release_plan_condition(context, message),
+            path=_RELEASE_PLAN_PATH,
+            line=1,
+            api_name=api_name,
+            suggestion=suggestion,
+        )
+
+    planned = {name: version for name, version, _ in _planned_api_entries(release_plan)}
+    published = {api.api_name: api.api_version for api in patched.apis}
+    added = sorted(set(planned) - set(published))
+    removed = sorted(set(published) - set(planned))
+    if added or removed:
+        changes = "; ".join(
+            part
+            for part in (
+                f"added: {', '.join(added)}" if added else "",
+                f"removed: {', '.join(removed)}" if removed else "",
+            )
+            if part
+        )
+        return [
+            finding(
+                f"a maintenance release must keep the same APIs as "
+                f"{patched.tag}, the release it patches ({changes}).",
+                "Restore the API list of the patched release; new APIs are "
+                "released on main in a later release cycle.",
+            )
+        ]
+
+    findings: List[dict] = []
+    for api_name, planned_version in planned.items():
+        planned_semver = _semver(planned_version)
+        patched_semver = _semver(published[api_name])
+        if planned_semver is None or patched_semver is None:
+            continue
+        message = _maintenance_api_version_message(
+            context,
+            cycle,
+            api_name,
+            planned_semver,
+            patched_semver,
+            normalize_api_version_base(published[api_name]),
+            patched.tag,
+            planned_version,
+        )
+        if message:
+            findings.append(
+                finding(
+                    message,
+                    "Keep the published version or raise only the patch "
+                    "version for a maintenance release.",
+                    api_name=api_name,
+                )
+            )
+    return findings
 
 
 # ---------------------------------------------------------------------------

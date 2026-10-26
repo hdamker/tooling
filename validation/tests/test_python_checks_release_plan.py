@@ -20,6 +20,8 @@ from validation.engines.python_checks.release_plan_checks import (
     check_release_plan_active_release_state,
     check_release_plan_api_names_unique,
     check_release_plan_exclusivity,
+    check_release_plan_maintenance_api_versions,
+    check_release_plan_maintenance_line,
     check_release_plan_published_history,
     check_release_plan_semantics,
     check_release_plan_terminal_api_status,
@@ -364,14 +366,19 @@ def _published_release(
 def _release_history(
     *releases: dict,
     lookup_status: str = "complete",
+    base_ref: str = "main",
+    maintenance_branches: list[str] | None = None,
 ) -> dict:
-    return {
+    history = {
         "schema_version": 1,
         "repository": "camaraproject/QualityOnDemand",
-        "base_ref": "main",
+        "base_ref": base_ref,
         "lookup_status": lookup_status,
         "published_releases": list(releases),
     }
+    if maintenance_branches is not None:
+        history["maintenance_branches"] = maintenance_branches
+    return history
 
 
 def _context_with_release_history(
@@ -388,6 +395,471 @@ def _context_with_release_history(
         base_meta_release=base_meta_release,
         release_history=parse_release_history(history),
     )
+
+
+def _api(version: str, status: str = "public", name: str = "quality-on-demand") -> dict:
+    return {"api_name": name, "target_api_status": status, "target_api_version": version}
+
+
+def _published_api(version: str, name: str = "quality-on-demand") -> dict:
+    return {"api_name": name, "api_version": version, "api_file_name": name}
+
+
+class TestPublishedHistoryMaintenanceLine:
+    """P-035 compares a maintenance-line plan with its own cycle's tags (M11)."""
+
+    def _cycle_one_and_two(self) -> dict:
+        return _release_history(
+            _published_release("r1.6", apis=[_published_api("1.2.0")]),
+            _published_release(
+                "r1.9", release_type="pre-release-rc", apis=[_published_api("1.2.1-rc.1")]
+            ),
+            _published_release("r2.1", apis=[_published_api("2.0.0")]),
+            base_ref="maintenance/r1",
+            maintenance_branches=["maintenance/r1"],
+        )
+
+    def test_maintenance_plan_below_later_cycle_is_not_a_regression(
+        self, tmp_path: Path
+    ):
+        _write_release_plan(
+            tmp_path,
+            _make_plan(
+                target_release_type="maintenance-release",
+                target_release_tag="r1.10",
+                apis=[_api("1.2.1")],
+            ),
+        )
+        context = _context_with_release_history(self._cycle_one_and_two())
+
+        assert check_release_plan_published_history(tmp_path, context) == []
+
+    def test_maintenance_plan_regression_within_cycle_errors(self, tmp_path: Path):
+        _write_release_plan(
+            tmp_path,
+            _make_plan(
+                target_release_type="maintenance-release",
+                target_release_tag="r1.8",
+                apis=[_api("1.2.1")],
+            ),
+        )
+        context = _context_with_release_history(self._cycle_one_and_two())
+
+        findings = check_release_plan_published_history(tmp_path, context)
+
+        assert len(findings) == 1
+        assert "lower than latest published release tag 'r1.9'" in findings[0]["message"]
+
+    def test_published_maintenance_release_on_line_stays_quiet(self, tmp_path: Path):
+        history = self._cycle_one_and_two()
+        history["published_releases"].append(
+            _published_release(
+                "r1.10", release_type="maintenance-release", apis=[_published_api("1.2.1")]
+            )
+        )
+        _write_release_plan(
+            tmp_path,
+            _make_plan(
+                target_release_type="maintenance-release",
+                target_release_tag="r1.10",
+                apis=[_api("1.2.1")],
+            ),
+        )
+        context = _context_with_release_history(history)
+
+        assert check_release_plan_published_history(tmp_path, context) == []
+
+    def test_none_plan_on_older_line_tag_errors_when_edited(self, tmp_path: Path):
+        # Closes the inactive-match edge: a parked plan pointing at r1.6 after
+        # r1.7 was published on the same line regresses.
+        _write_release_plan(
+            tmp_path,
+            _make_plan(
+                target_release_type="none",
+                target_release_tag="r1.6",
+                apis=[_api("1.2.0")],
+            ),
+        )
+        context = _context_with_release_history(
+            _release_history(
+                _published_release("r1.6", apis=[_published_api("1.2.0")]),
+                _published_release(
+                    "r1.7", release_type="maintenance-release", apis=[_published_api("1.2.1")]
+                ),
+            )
+        )
+
+        findings = check_release_plan_published_history(tmp_path, context)
+
+        assert len(findings) == 1
+        assert "lower than latest published release tag 'r1.7'" in findings[0]["message"]
+
+    def test_none_plan_on_latest_line_tag_stays_quiet(self, tmp_path: Path):
+        _write_release_plan(
+            tmp_path,
+            _make_plan(
+                target_release_type="none",
+                target_release_tag="r1.7",
+                apis=[_api("1.2.1")],
+            ),
+        )
+        context = _context_with_release_history(
+            _release_history(
+                _published_release("r1.6", apis=[_published_api("1.2.0")]),
+                _published_release(
+                    "r1.7", release_type="maintenance-release", apis=[_published_api("1.2.1")]
+                ),
+                _published_release("r2.1", release_type="pre-release-alpha",
+                                   apis=[_published_api("2.0.0-alpha.1")]),
+            )
+        )
+
+        assert check_release_plan_published_history(tmp_path, context) == []
+
+
+def _cycle_one_history(*extra: dict, **kwargs) -> dict:
+    """Cycle 1 with public r1.6 (spec notation), plus optional releases."""
+    return _release_history(
+        _published_release("r1.5", release_type="pre-release-rc",
+                           apis=[_published_api("1.2.0-rc.1")]),
+        _published_release("r1.6", apis=[_published_api("1.2.0")]),
+        *extra,
+        **kwargs,
+    )
+
+
+def _maintenance_plan(tag: str, release_type: str = "maintenance-release",
+                      version: str = "1.2.1") -> dict:
+    status = "rc" if release_type == "pre-release-rc" else "public"
+    return _make_plan(
+        target_release_type=release_type,
+        target_release_tag=tag,
+        apis=[_api(version, status)],
+    )
+
+
+class TestCheckReleasePlanMaintenanceLine:
+    def _findings(self, tmp_path: Path, plan: dict, history: dict, **ctx) -> list:
+        _write_release_plan(tmp_path, plan)
+        context = _context_with_release_history(history, **ctx)
+        return check_release_plan_maintenance_line(tmp_path, context)
+
+    def test_absent_history_skips(self, tmp_path: Path):
+        _write_release_plan(tmp_path, _maintenance_plan("r1.9"))
+        assert check_release_plan_maintenance_line(tmp_path, _make_context()) == []
+
+    # Spec 2.4 / 1.1: case A on main
+    def test_case_a_maintenance_plan_on_main_ok(self, tmp_path: Path):
+        history = _cycle_one_history(maintenance_branches=[])
+        assert self._findings(tmp_path, _maintenance_plan("r1.7"), history) == []
+
+    def test_case_a_rc_on_line_ok(self, tmp_path: Path):
+        history = _cycle_one_history(maintenance_branches=[])
+        plan = _maintenance_plan("r1.7", "pre-release-rc")
+        assert self._findings(tmp_path, plan, history) == []
+
+    def test_case_a_allowed_while_later_cycle_only_planned(self, tmp_path: Path):
+        # Spec 2.4: main may be rewritten from unpublished r2.1 back to r1.7.
+        history = _cycle_one_history(maintenance_branches=[])
+        assert self._findings(tmp_path, _maintenance_plan("r1.7"), history) == []
+
+    # Spec 1.7
+    @pytest.mark.parametrize("release_type", ["pre-release-alpha", "public-release"])
+    def test_disallowed_type_on_maintenance_line(self, tmp_path: Path, release_type):
+        plan = _make_plan(
+            target_release_type=release_type,
+            target_release_tag="r1.7",
+            apis=[_api("1.3.0", "alpha" if release_type == "pre-release-alpha" else "public")],
+        )
+        findings = self._findings(tmp_path, plan, _cycle_one_history())
+
+        assert len(findings) == 1
+        assert findings[0]["level"] == "error"
+        assert findings[0]["engine_rule"] == "check-release-plan-maintenance-line"
+        assert "release cycle r1 already has a public release" in findings[0]["message"]
+        assert f"'{release_type}'" in findings[0]["message"]
+
+    # Spec 1.8
+    def test_tag_must_be_next_in_cycle(self, tmp_path: Path):
+        history = _cycle_one_history(
+            _published_release("r1.7", release_type="pre-release-rc",
+                               apis=[_published_api("1.2.1-rc.1")]),
+        )
+        findings = self._findings(tmp_path, _maintenance_plan("r1.9"), history)
+
+        assert len(findings) == 1
+        assert "next tag of release cycle r1 is 'r1.8'" in findings[0]["message"]
+
+    # Spec 2.3
+    @pytest.mark.parametrize("later_type", ["pre-release-alpha", "public-release"])
+    def test_case_a_ended_by_later_cycle_release(self, tmp_path: Path, later_type):
+        history = _cycle_one_history(
+            _published_release("r2.1", release_type=later_type,
+                               apis=[_published_api("2.0.0")]),
+            maintenance_branches=[],
+        )
+        findings = self._findings(tmp_path, _maintenance_plan("r1.7"), history)
+
+        assert len(findings) == 1
+        assert "'r2.1' is already published" in findings[0]["message"]
+        assert "maintenance/r1" in findings[0]["message"]
+
+    # Spec 1.5
+    def test_main_must_not_return_to_maintained_cycle(self, tmp_path: Path):
+        history = _cycle_one_history(maintenance_branches=["maintenance/r1"])
+        findings = self._findings(tmp_path, _maintenance_plan("r1.7"), history)
+
+        assert len(findings) == 1
+        assert "maintained on branch 'maintenance/r1'" in findings[0]["message"]
+
+    def test_unknown_branch_list_skips_branch_check(self, tmp_path: Path):
+        history = _cycle_one_history()
+        assert self._findings(tmp_path, _maintenance_plan("r1.7"), history) == []
+
+    # Spec 1.6: published plan on main stays quiet
+    def test_published_target_is_left_to_p035(self, tmp_path: Path):
+        plan = _make_plan(target_release_type="public-release",
+                          target_release_tag="r1.6", apis=[_api("1.2.0")])
+        history = _cycle_one_history(maintenance_branches=["maintenance/r1"])
+        assert self._findings(tmp_path, plan, history) == []
+
+    def test_non_maintenance_plans_unchanged(self, tmp_path: Path):
+        # Next cycle after a public release, and a cycle without one.
+        plan = _make_plan(target_release_type="pre-release-alpha",
+                          target_release_tag="r2.1", apis=[_api("2.0.0", "alpha")])
+        assert self._findings(tmp_path, plan, _cycle_one_history()) == []
+
+        plan = _make_plan(target_release_type="public-release",
+                          target_release_tag="r4.3", apis=[_api("1.0.0")])
+        history = _release_history(
+            _published_release("r4.1", release_type="pre-release-alpha",
+                               apis=[_published_api("1.0.0-alpha.1")]),
+            _published_release("r4.2", release_type="pre-release-rc",
+                               apis=[_published_api("1.0.0-rc.1")]),
+        )
+        assert self._findings(tmp_path, plan, history) == []
+
+    def test_legacy_public_release_without_metadata_is_not_a_line(self, tmp_path: Path):
+        plan = _make_plan(target_release_type="public-release",
+                          target_release_tag="r1.7", apis=[_api("1.3.0")])
+        history = _release_history(
+            _published_release("r1.6", metadata_available=False),
+            lookup_status="partial",
+        )
+        assert self._findings(tmp_path, plan, history) == []
+
+    def test_none_unrelated_pr_is_silent(self, tmp_path: Path):
+        plan = _maintenance_plan("r1.9", "none")
+        findings = self._findings(
+            tmp_path, plan, _cycle_one_history(), release_plan_changed=False
+        )
+        assert findings == []
+
+    def test_none_edited_plan_still_checks_tag(self, tmp_path: Path):
+        plan = _maintenance_plan("r1.9", "none")
+        findings = self._findings(tmp_path, plan, _cycle_one_history())
+        assert len(findings) == 1
+        assert "next tag of release cycle r1 is 'r1.7'" in findings[0]["message"]
+
+    def test_pre_existing_condition_prefix(self, tmp_path: Path):
+        findings = self._findings(
+            tmp_path, _maintenance_plan("r1.9"), _cycle_one_history(),
+            release_plan_changed=False,
+        )
+        assert findings[0]["message"].startswith("Pre-existing release-plan condition:")
+
+    # On maintenance/rX
+    def _branch_history(self, *extra: dict) -> dict:
+        return _cycle_one_history(
+            _published_release("r2.1", apis=[_published_api("2.0.0")]),
+            *extra,
+            base_ref="maintenance/r1",
+            maintenance_branches=["maintenance/r1"],
+        )
+
+    @pytest.mark.parametrize("release_type", ["maintenance-release", "pre-release-rc", "none"])
+    def test_branch_allows_line_types(self, tmp_path: Path, release_type):
+        plan = _maintenance_plan("r1.7", release_type)
+        assert self._findings(tmp_path, plan, self._branch_history()) == []
+
+    def test_branch_rejects_other_cycle(self, tmp_path: Path):
+        plan = _make_plan(target_release_type="pre-release-alpha",
+                          target_release_tag="r2.2", apis=[_api("2.1.0", "alpha")])
+        findings = self._findings(tmp_path, plan, self._branch_history())
+
+        assert len(findings) == 1
+        assert "on branch 'maintenance/r1' target_release_tag must be in release cycle r1" in findings[0]["message"]
+
+    def test_branch_rejects_public_release(self, tmp_path: Path):
+        plan = _make_plan(target_release_type="public-release",
+                          target_release_tag="r1.7", apis=[_api("1.2.1")])
+        findings = self._findings(tmp_path, plan, self._branch_history())
+
+        assert len(findings) == 1
+        assert "'public-release'" in findings[0]["message"]
+
+    def test_branch_tag_must_be_next(self, tmp_path: Path):
+        findings = self._findings(tmp_path, _maintenance_plan("r1.8"), self._branch_history())
+
+        assert len(findings) == 1
+        assert "next tag of release cycle r1 is 'r1.7'" in findings[0]["message"]
+
+
+class TestCheckReleasePlanMaintenanceApiVersions:
+    def _findings(self, tmp_path: Path, plan_apis: list[dict], patched_apis: list[dict],
+                  *later: dict, release_type: str = "maintenance-release", **ctx) -> list:
+        _write_release_plan(
+            tmp_path,
+            _make_plan(target_release_type=release_type, target_release_tag="r1.7",
+                       apis=plan_apis),
+        )
+        history = _release_history(
+            _published_release("r1.6", apis=patched_apis),
+            *later,
+        )
+        context = _context_with_release_history(history, **ctx)
+        return check_release_plan_maintenance_api_versions(tmp_path, context)
+
+    def test_absent_history_skips(self, tmp_path: Path):
+        _write_release_plan(tmp_path, _maintenance_plan("r1.7"))
+        assert check_release_plan_maintenance_api_versions(tmp_path, _make_context()) == []
+
+    # Spec 4.1
+    def test_patch_bump_ok(self, tmp_path: Path):
+        assert self._findings(tmp_path, [_api("1.2.1")], [_published_api("1.2.0")]) == []
+
+    # Spec 4.2
+    def test_unchanged_api_next_to_bumped_api_ok(self, tmp_path: Path):
+        findings = self._findings(
+            tmp_path,
+            [_api("1.2.0"), _api("0.3.1", name="qos-profiles")],
+            [_published_api("1.2.0"), _published_api("0.3.0", name="qos-profiles")],
+        )
+        assert findings == []
+
+    # Spec 4.3
+    def test_minor_bump_errors(self, tmp_path: Path):
+        findings = self._findings(tmp_path, [_api("1.3.0")], [_published_api("1.2.0")])
+
+        assert len(findings) == 1
+        assert findings[0]["level"] == "error"
+        assert findings[0]["engine_rule"] == "check-release-plan-maintenance-api-versions"
+        assert findings[0]["api_name"] == "quality-on-demand"
+        assert "minor version" in findings[0]["message"]
+        assert "'1.2.0' in r1.6" in findings[0]["message"]
+
+    # Spec 4.4
+    def test_minor_bump_ok_when_later_cycle_published_higher_major(self, tmp_path: Path):
+        findings = self._findings(
+            tmp_path, [_api("1.3.0")], [_published_api("1.2.0")],
+            _published_release("r2.1", apis=[_published_api("2.0.0")]),
+        )
+        assert findings == []
+
+    def test_later_cycle_prerelease_of_higher_major_does_not_allow_minor(self, tmp_path: Path):
+        findings = self._findings(
+            tmp_path, [_api("1.3.0")], [_published_api("1.2.0")],
+            _published_release("r2.1", release_type="pre-release-alpha",
+                               apis=[_published_api("2.0.0-alpha.1")]),
+        )
+        assert len(findings) == 1
+
+    # Spec 4.5
+    def test_initial_version_minor_bump_errors_despite_later_major(self, tmp_path: Path):
+        findings = self._findings(
+            tmp_path, [_api("0.2.0")], [_published_api("0.1.0")],
+            _published_release("r2.1", apis=[_published_api("1.0.0")]),
+        )
+        assert len(findings) == 1
+        assert "0.y.z" in findings[0]["message"]
+
+    # Spec 4.6
+    @pytest.mark.parametrize("version", ["2.0.0", "1.1.9", "1.2.0-x"])
+    def test_major_bump_or_decrease_errors(self, tmp_path: Path, version):
+        findings = self._findings(tmp_path, [_api(version)], [_published_api("1.2.0")])
+        if version == "1.2.0-x":
+            assert findings == []  # not a semantic version: schema's concern
+        else:
+            assert len(findings) == 1
+
+    # Spec 4.7
+    @pytest.mark.parametrize(
+        "plan_names, expected",
+        [
+            (["quality-on-demand", "qos-profiles", "qos-provisioning"], "added: qos-provisioning"),
+            (["quality-on-demand"], "removed: qos-profiles"),
+        ],
+    )
+    def test_api_set_must_equal_patched_release(self, tmp_path: Path, plan_names, expected):
+        findings = self._findings(
+            tmp_path,
+            [_api("1.2.1" if n == "quality-on-demand" else "0.3.0", name=n) for n in plan_names],
+            [_published_api("1.2.0"), _published_api("0.3.0", name="qos-profiles")],
+        )
+        assert len(findings) == 1
+        assert "same APIs as r1.6" in findings[0]["message"]
+        assert expected in findings[0]["message"]
+
+    # Spec 4.8
+    def test_rc_on_line_patch_bump_ok(self, tmp_path: Path):
+        findings = self._findings(
+            tmp_path, [_api("1.2.1", "rc")], [_published_api("1.2.0")],
+            release_type="pre-release-rc",
+        )
+        assert findings == []
+
+    def test_rc_skipped_for_patched_release(self, tmp_path: Path):
+        # Spec 1.9: an rc after r1.6 does not become the patched release.
+        _write_release_plan(tmp_path, _make_plan(
+            target_release_type="maintenance-release", target_release_tag="r1.8",
+            apis=[_api("1.3.0")]))
+        history = _release_history(
+            _published_release("r1.6", apis=[_published_api("1.2.0")]),
+            _published_release("r1.7", release_type="pre-release-rc",
+                               apis=[_published_api("1.3.0-rc.1")]),
+        )
+        findings = check_release_plan_maintenance_api_versions(
+            tmp_path, _context_with_release_history(history))
+        assert len(findings) == 1
+        assert "'1.2.0' in r1.6" in findings[0]["message"]
+
+    def test_non_maintenance_plan_not_checked(self, tmp_path: Path):
+        _write_release_plan(tmp_path, _make_plan(
+            target_release_type="public-release", target_release_tag="r2.3",
+            apis=[_api("3.0.0")]))
+        history = _release_history(
+            _published_release("r1.6", apis=[_published_api("1.2.0")]),
+            _published_release("r2.2", release_type="pre-release-rc",
+                               apis=[_published_api("2.0.0-rc.1")]),
+        )
+        assert check_release_plan_maintenance_api_versions(
+            tmp_path, _context_with_release_history(history)) == []
+
+    def test_unknown_patched_release_skips(self, tmp_path: Path):
+        _write_release_plan(tmp_path, _maintenance_plan("r1.8", version="1.3.0"))
+        history = _release_history(
+            _published_release("r1.6", apis=[_published_api("1.2.0")]),
+            _published_release("r1.7", metadata_available=False),
+            lookup_status="partial",
+        )
+        assert check_release_plan_maintenance_api_versions(
+            tmp_path, _context_with_release_history(history)) == []
+
+    def test_none_unrelated_pr_is_silent(self, tmp_path: Path):
+        findings = self._findings(
+            tmp_path, [_api("1.3.0")], [_published_api("1.2.0")],
+            release_type="none", release_plan_changed=False,
+        )
+        assert findings == []
+
+    def test_published_target_is_left_to_p035(self, tmp_path: Path):
+        _write_release_plan(tmp_path, _make_plan(
+            target_release_type="public-release", target_release_tag="r1.6",
+            apis=[_api("1.2.0")]))
+        history = _release_history(
+            _published_release("r1.6", apis=[_published_api("1.2.0")]))
+        assert check_release_plan_maintenance_api_versions(
+            tmp_path, _context_with_release_history(history)) == []
 
 
 class TestCheckReleasePlanPublishedHistory:
