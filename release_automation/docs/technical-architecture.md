@@ -32,15 +32,14 @@ tooling/
 │   ├── scripts/
 │   │   ├── __init__.py
 │   │   ├── act.py                    # Act job: dispatches the plan's action, writes the JSON outcome
-│   │   ├── bot_context.py            # BotContext dataclass
+│   │   ├── bot_context.py            # BotContext schema; bot_context(plan) derives the run's context
 │   │   ├── bot_identity.py           # Commit identity (App bot or github-actions[bot])
 │   │   ├── bot_responder.py          # Message formatting + template rendering
 │   │   ├── changelog_generator.py    # CHANGELOG draft generation
-│   │   ├── command_policy.py         # Plan job: Trigger x State -> Plan or Rejection, the response
+│   │   ├── command_policy.py         # Plan job: state derivation, Trigger x State -> Plan or Rejection, the response, the plan document
 │   │   ├── commands.py               # Slash commands, dispatch actions, valid actions per state
 │   │   ├── common_sync.py            # Common cache detection and common sync
 │   │   ├── config.py                 # Shared constants and configuration
-│   │   ├── context_builder.py        # build_context() for unified context
 │   │   ├── draft_release.py          # Draft release create/delete, snapshot discard
 │   │   ├── finalize.py               # Finalize job: sync PR, common sync, Release Issue, result
 │   │   ├── git_operations.py         # Git operations for snapshot/review branches
@@ -51,6 +50,7 @@ tooling/
 │   │   ├── labels.py                 # Labels applied by release automation
 │   │   ├── mechanical_transformer.py # Placeholder replacement
 │   │   ├── metadata_generator.py     # release-metadata.yaml generation
+│   │   ├── plan_document.py          # PlanDocument: what the plan job decided and knows, as JSON between jobs
 │   │   ├── readme_updater.py         # README Release Information updater
 │   │   ├── regression_runner.py      # RA regression canary runner
 │   │   ├── release_publisher.py      # Draft release publication
@@ -59,10 +59,10 @@ tooling/
 │   │   ├── state_manager.py          # State derivation logic
 │   │   ├── sync_pr.py                # Post-release sync PR
 │   │   ├── template_loader.py        # Shared template loading utilities
-│   │   ├── trigger.py                # Plan job: payload -> Trigger
+│   │   ├── release_line.py           # Plan job resolve step: payload -> Trigger, release line -> base branch
+│   │   ├── trigger.py                # payload -> Trigger
 │   │   ├── version_calculator.py     # API version extension calculation
-│   │   ├── wip_checker.py            # wip version check before a snapshot
-│   │   └── workflow_context.py       # Workflow context assembly helpers
+│   │   └── wip_checker.py            # wip version check before a snapshot
 │   │
 │   ├── templates/
 │   │   ├── bot_messages/
@@ -112,12 +112,6 @@ tooling/
 │
 ├── shared-actions/
 │   ├── create-snapshot/                  # Orchestrates snapshot + release-review branch
-│   │   └── action.yml
-│   │
-│   ├── derive-release-state/            # State derivation from artifacts
-│   │   └── action.yml
-│   │
-│   ├── post-bot-comment/                # Create/update bot comments with templates
 │   │   └── action.yml
 │   │
 │   ├── update-issue-section/            # Update reserved sections in issue body
@@ -366,7 +360,7 @@ All consumers draw from the same unified context (BotContext schema):
 
 #### BotContext Schema
 
-All context variables are defined in a single `BotContext` dataclass (`bot_context.py`). The `build_context()` function (`context_builder.py`) constructs it from workflow job outputs, fills defaults for any missing data, and returns a dict guaranteed to have all keys.
+All context variables are defined in a single `BotContext` dataclass (`bot_context.py`). `bot_context(plan)` derives the run's base context from the plan document in each job; `build_context()` fills defaults for any missing field, derives the flags and returns a dict guaranteed to have all keys (a field outside the schema is an error).
 
 **Principle:** If the data is produced by the workflow, make it available in the context — even if no current consumer uses it.
 
@@ -639,7 +633,7 @@ The reusable workflow (`release-automation-reusable.yml`) has four jobs. `plan` 
 
 | Job | Runs when | Does |
 |-----|-----------|------|
-| `plan` | Always | Acknowledges the command, classifies the trigger (`trigger.py`), derives the release state, checks the common cache, assembles the context, applies the command policy (`command_policy.py`), posts the one response (interim status, rejection, configuration error or publish confirmation) |
+| `plan` | Always | Acknowledges the command; *Resolve* classifies the trigger and its release line (`release_line.py`); *Plan* derives the release state, checks the common cache, applies the command policy, posts the one response (interim status, rejection, configuration error or publish confirmation) and writes the plan document (`command_policy.py`) |
 | `snapshot` | Plan action is `create-snapshot` | Pre-snapshot validation, snapshot branch, release-review branch and Release PR; own job because it needs the validation toolchain (Node) |
 | `act` | Any other plan action | `act.py` dispatches `discard-snapshot`, `delete-draft`, `publish-release`, `create-draft`, `publish-on-merge` or `reopen-issue` to the matching module |
 | `finalize` | Plan asks for it; also after a failed `snapshot` or `act` | Post-release sync PR, common sync, Release Issue sync and notifications, result comment, published Release Issue (`finalize.py`) |
@@ -671,29 +665,23 @@ flowchart TD
 
 All three stages edit the same comment: `plan` passes the acknowledgment's comment ID to `finalize` as `result_comment_id`. For rejected commands, the acknowledgment is updated directly with the rejection message (skipping interim) and `finalize` does not run.
 
-**Context assembly** (`plan` job):
+**The plan document** (`plan_document.py`):
 
-The *Assemble Context* step of `plan` runs after state derivation and the common cache check. It builds the base BotContext with `build_context()` from the trigger outputs and the derived state, and the command policy stores it in the plan as `base_context`. `snapshot`, `act` and `finalize` take the context from the plan, so there is a single source. A command's outcome fields (for example `release_pr_url`) are passed to `finalize` as delta context for the result comment.
+`plan` derives the release state once and writes one typed `PlanDocument` (trigger, derived release, common cache, base branch, the decision) as its `plan` output. `snapshot`, `act` and `finalize` read it with `from_json()` and never derive state again; each derives the bot message base context from it with `bot_context(plan)`. A command's outcome fields (for example `release_pr_url`) are passed to `finalize` as delta context for the result comment.
 
 ---
 
 ## 4. Shared Actions
 
-### 4.1 derive-release-state
+### 4.1 Release state derivation
 
-Derives current release state from repository artifacts. Takes no inputs — `release_tag` is derived from `release-plan.yaml` (main) or `release-metadata.yaml` (snapshot branch).
-
-**Outputs:** `release_tag`, `state`, `release_type`, `source`, `snapshot_id`, `snapshot_branch`, `release_review_branch`, `release_pr_number`, `src_commit_sha`, `apis_json`, `commonalities_release`, `identity_consent_management_release`, `config_error`, `config_error_type`
+No longer a composite action: the `plan` job's *Plan* step calls `ReleaseStateManager.derive_state(base_branch)` (`state_manager.py`) and carries the result in the plan document. `release_tag` comes from `release-plan.yaml` (base branch) or `release-metadata.yaml` (snapshot branch). The validation workflow's P-033 step runs the same derivation as `python -m release_automation.scripts.state_manager` (outputs `state`, `snapshot_branch`, `release_issue_number`).
 
 **State values:** `planned`, `snapshot-active`, `draft-ready`, `published`, `not-planned`
 
-### 4.2 post-bot-comment
+### 4.2 Bot comments
 
-Creates or updates a bot comment with a release-specific marker (`<!-- release-bot:{release_tag} -->`).
-
-**Inputs:** `issue_number`, `release_tag`, `template`, `context` (JSON), `comment_id` (optional — update existing)
-
-**Output:** `comment_id`
+No longer a composite action: every job posts with `bot_responder.post_comment()`, which renders a template over `bot_context(plan)` plus the comment's delta and prepends the marker `<!-- release-bot:{release_tag} -->`; the `plan` job updates the acknowledgment with its response.
 
 ### 4.3 update-issue-section
 
@@ -817,36 +805,33 @@ stateDiagram-v2
 
 ### 5.3 Context Data Flow
 
-Data flows from artifacts through derive-state into the unified BotContext for all consumers:
+Data flows from artifacts through the plan job's state derivation into the plan document, and from there into the unified BotContext in every job:
 
 ```
-release-plan.yaml (main branch)
+release-plan.yaml (base branch)
     │
-    ├─► derive-state ──► release_tag, state, release_type
-    │                     target_api_version, target_api_status (per API)
+    ├─► derive_state ──► release_tag, state, release_type, meta_release
+    │                     api_name, api_version (= target version) per API, dependency releases
     │
 release-metadata.yaml (snapshot branch, if exists)
     │
-    ├─► derive-state ──► src_commit_sha, snapshot_id, snapshot_branch,
-    │                     release_review_branch, release_pr_number,
-    │                     api_version, api_title (per API),
-    │                     commonalities_release, identity_consent_management_release
-    │
-    └─► derive-state merges both sources into apis_json
+    └─► derive_state ──► src_commit_sha, snapshot_id, snapshot_branch,
+                          release_review_branch, release_pr_number, draft_release_url,
+                          api_version, api_title (per API),
+                          commonalities_release, identity_consent_management_release
               │
               ▼
     ┌──────────────────────┐
-    │  Assemble Context    │◄── trigger outputs (command, user, trigger_type)
-    │  └─ build_context()  │◄── derive-state outputs (all above)
-    │  (plan job)          │◄── command action outcome (release_pr_url, draft_release_url, ...)
-    │                      │◄── workflow env (workflow_run_url)
+    │  PlanDocument        │◄── Trigger (command, user, trigger_type, issue_number)
+    │  (plan job output,   │◄── ReleaseInfoResult (all above)
+    │   JSON between jobs) │◄── CommonCache, base_branch, the policy's decision
     └────────┬─────────────┘
-             │
+             │  bot_context(plan) in snapshot, act and finalize
              ▼
     ┌─────────────────┐
-    │   BotContext     │──► bot_responder.render() ──► bot comments
-    │   (complete,    │──► issue_manager ──► issue description, config section
-    │    no missing   │
+    │   BotContext     │◄── per comment: the action's outcome as delta (release_pr_url, draft_release_url, ...)
+    │   (complete,    │──► bot_responder.render() ──► bot comments
+    │    no missing   │──► issue_manager ──► issue description, config section
     │    keys)        │
     └────────┬────────┘
              │
@@ -857,7 +842,7 @@ release-metadata.yaml (snapshot branch, if exists)
              └──► changelog_generator.py ──► CHANGELOG/CHANGELOG-r{cycle}.md
 ```
 
-**Fresh vs stale data:** When create-snapshot runs in the same workflow, its outputs (release_pr_url, api versions) are fresh. On subsequent workflow runs (e.g., issue close/reopen), derive-state reads the same data from persisted artifacts — this is functionally equivalent, not stale.
+**Fresh vs stale data:** When create-snapshot runs in the same workflow, its outputs (release_pr_url, api versions) are fresh. On subsequent workflow runs (e.g., issue close/reopen), the plan job reads the same data from persisted artifacts — this is functionally equivalent, not stale.
 
 ---
 

@@ -44,19 +44,20 @@ permissions:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
-  # Plan — classify the trigger, derive state, apply the command
-  # policy, post the one response (ack update, rejection, config error or
-  # publish confirmation).
+  # Plan — resolve the trigger and its release line, then derive the state,
+  # apply the command policy and post the one response (ack update,
+  # rejection, config error or publish confirmation). Writes the plan document
+  # the other jobs read; nothing is derived again after this job.
   # ─────────────────────────────────────────────────────────────────────────────
   plan:
     runs-on: ubuntu-latest
     outputs:
-      plan: ${{ steps.policy.outputs.plan }}
-      action: ${{ steps.policy.outputs.action }}
-      finalize: ${{ steps.policy.outputs.finalize }}
+      plan: ${{ steps.plan.outputs.plan }}
+      action: ${{ steps.plan.outputs.action }}
+      finalize: ${{ steps.plan.outputs.finalize }}
       # The acknowledgment updated with interim_processing; finalize replaces
       # it with the result comment.
-      result_comment_id: ${{ steps.policy.outputs.response == 'interim_processing' && steps.respond.outcome == 'success' && steps.respond.outputs.comment_id || '' }}
+      result_comment_id: ${{ steps.plan.outputs.result_comment_id }}
     steps:
       - name: Fork Guard - Check Issues Enabled
         id: fork-guard
@@ -71,7 +72,7 @@ jobs:
           fi
 
       # Post early acknowledgment for slash commands, before any checkout so it
-      # lands within seconds. Later updated by Post Response with the policy's
+      # lands within seconds. Later updated by Plan with the policy's
       # template. Uses GITHUB_TOKEN (not App token) to avoid
       # triggering extra workflow runs. The command list mirrors COMMANDS in
       # release_automation/scripts/commands.py, pinned by
@@ -139,167 +140,45 @@ jobs:
         if: steps.fork-guard.outputs.issues_enabled == 'true'
         run: pip install --quiet -r _tooling/requirements.txt
 
-      # release_tag is NOT output here - it comes from Derive Release State, which
-      # reads the authoritative sources (release-plan.yaml or release-metadata.yaml).
-      - name: Detect Trigger Type
-        id: detect
+      # The event → Trigger, and the branch whose release-plan.yaml the run
+      # works on: main or maintenance/rX (the ref of a push or dispatch, the
+      # line of the tag the Release Issue or the snapshot branch names otherwise).
+      - name: Resolve trigger and release line
+        id: resolve
         if: steps.fork-guard.outputs.issues_enabled == 'true'
         working-directory: _tooling
-        run: python -m release_automation.scripts.trigger
-
-      # main, or maintenance/rX: the ref of a push or dispatch, the line of
-      # the tag the Release Issue or the snapshot branch names otherwise
-      - name: Resolve Release Line
-        id: line
-        if: steps.detect.outputs.should_continue == 'true'
-        working-directory: _tooling
         env:
-          TRIGGER_JSON: ${{ steps.detect.outputs.trigger }}
           GITHUB_TOKEN: ${{ github.token }}
         run: python -m release_automation.scripts.release_line
 
-      - name: Derive Release State
-        id: state
-        if: steps.detect.outputs.should_continue == 'true'
-        uses: ./_tooling/shared-actions/derive-release-state
-        with:
-          base_branch: ${{ steps.line.outputs.base_branch }}
-
-      # ── Common file cache sync detection (on the base branch) ─────────
+      # The base branch's common files, for the cache check in Plan
       - name: Checkout API repo (sparse, for cache sync check)
-        if: |
-          steps.state.outputs.config_error == '' &&
-          steps.state.outputs.commonalities_release != ''
+        if: steps.resolve.outputs.should_continue == 'true'
         uses: actions/checkout@v7
         with:
-          ref: ${{ steps.line.outputs.base_branch }}
+          ref: ${{ steps.resolve.outputs.base_branch }}
           path: _api_repo
           sparse-checkout: |
             code/common
           sparse-checkout-cone-mode: true
 
-      - name: Check common cache sync
-        id: cache-sync
-        if: |
-          steps.state.outputs.config_error == '' &&
-          steps.state.outputs.commonalities_release != ''
+      # Derives the release state, checks the common cache, applies the
+      # command policy, posts the one response comment (interim status,
+      # rejection, configuration error or publish confirmation; GITHUB_TOKEN,
+      # like every Release Issue write), writes the summary and the plan.
+      # Fails the job for a refused dispatch action and for a configuration
+      # error on a push or dispatch (no comment to post; the log says how to fix).
+      - name: Plan
+        id: plan
+        if: steps.resolve.outputs.should_continue == 'true'
         working-directory: _tooling
         env:
+          TRIGGER_JSON: ${{ steps.resolve.outputs.trigger }}
+          BASE_BRANCH: ${{ steps.resolve.outputs.base_branch }}
           API_REPO_PATH: ${{ github.workspace }}/_api_repo
-          COMMONALITIES_RELEASE: ${{ steps.state.outputs.commonalities_release }}
-          ICM_RELEASE: ${{ steps.state.outputs.identity_consent_management_release }}
-          BASE_BRANCH: ${{ steps.line.outputs.base_branch }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: python -m release_automation.scripts.common_sync
-
-      # ── Assemble Context (skipped on config error) ──
-      - name: Assemble Context
-        id: assemble
-        if: |
-          steps.detect.outputs.should_continue == 'true' &&
-          steps.state.outputs.config_error == ''
-        run: |
-          python3 _tooling/release_automation/scripts/workflow_context.py
-        env:
-          CTX_COMMAND: ${{ steps.detect.outputs.command }}
-          CTX_COMMAND_ARGS: ${{ steps.detect.outputs.command_args }}
-          CTX_USER: ${{ steps.detect.outputs.user }}
-          CTX_TRIGGER_TYPE: ${{ steps.detect.outputs.trigger_type }}
-          CTX_RELEASE_TAG: ${{ steps.state.outputs.release_tag }}
-          CTX_STATE: ${{ steps.state.outputs.state }}
-          CTX_RELEASE_TYPE: ${{ steps.state.outputs.release_type }}
-          CTX_META_RELEASE: ${{ steps.state.outputs.meta_release }}
-          CTX_SNAPSHOT_ID: ${{ steps.state.outputs.snapshot_id }}
-          CTX_SNAPSHOT_BRANCH: ${{ steps.state.outputs.snapshot_branch }}
-          CTX_RELEASE_REVIEW_BRANCH: ${{ steps.state.outputs.release_review_branch }}
-          CTX_RELEASE_PR_NUMBER: ${{ steps.state.outputs.release_pr_number }}
-          CTX_SRC_COMMIT_SHA: ${{ steps.state.outputs.src_commit_sha }}
-          CTX_APIS_JSON: ${{ steps.state.outputs.apis_json }}
-          CTX_COMMONALITIES_RELEASE: ${{ steps.state.outputs.commonalities_release }}
-          CTX_IDENTITY_CONSENT_MANAGEMENT_RELEASE: ${{ steps.state.outputs.identity_consent_management_release }}
-          CTX_COMMON_CACHE_STATUS: ${{ steps.cache-sync.outputs.common_cache_status }}
-          CTX_COMMON_CACHE_DETAILS: ${{ steps.cache-sync.outputs.common_cache_details }}
-          GITHUB_TOKEN: ${{ github.token }}
-
-      # ── Command policy: Plan or Rejection, the action, the response ──
-      - name: Apply Command Policy
-        id: policy
-        if: steps.detect.outputs.should_continue == 'true'
-        working-directory: _tooling
-        env:
-          TRIGGER_JSON: ${{ steps.detect.outputs.trigger }}
-          STATE_JSON: ${{ toJSON(steps.state.outputs) }}
-          BASE_CONTEXT: ${{ steps.assemble.outputs.base_context }}
-          COMMON_CACHE_STATUS: ${{ steps.cache-sync.outputs.common_cache_status }}
-          COMMON_CACHE_DETAILS: ${{ steps.cache-sync.outputs.common_cache_details }}
-          COMMON_SYNC_PR_URL: ${{ steps.cache-sync.outputs.common_sync_pr_url }}
+          ACK_COMMENT_ID: ${{ steps.ack.outputs.comment_id }}
           GITHUB_TOKEN: ${{ github.token }}
         run: python -m release_automation.scripts.command_policy
-
-      # ── Response: one bot comment, template chosen by the policy ──
-      # GITHUB_TOKEN, like every Release Issue write (no extra caller runs).
-      # A failed interim post does not stop the command (finalize then posts
-      # no result comment, as before).
-      - name: Post Response
-        id: respond
-        if: steps.policy.outputs.response != ''
-        continue-on-error: ${{ steps.policy.outputs.response == 'interim_processing' }}
-        uses: ./_tooling/shared-actions/post-bot-comment
-        with:
-          github_token: ${{ github.token }}
-          issue_number: ${{ steps.detect.outputs.issue_number }}
-          release_tag: ${{ steps.policy.outputs.response_release_tag }}
-          run_id: ${{ github.run_id }}
-          template: ${{ steps.policy.outputs.response }}
-          base_context: ${{ steps.assemble.outputs.base_context || '{}' }}
-          context: ${{ steps.policy.outputs.response_context }}
-          comment_id: ${{ steps.ack.outputs.comment_id }}
-
-      # create-maintenance-branch refused: the step summary says why
-      - name: Fail workflow (dispatch action refused)
-        if: steps.policy.outputs.refusal != ''
-        env:
-          REFUSAL: ${{ steps.policy.outputs.refusal }}
-        run: |
-          echo "::error title=Refused::$REFUSAL"
-          exit 1
-
-      - name: Fail workflow (config error on a non-slash-command trigger)
-        if: |
-          steps.state.outputs.config_error != '' &&
-          steps.detect.outputs.trigger_type != 'slash_command'
-        env:
-          CONFIG_ERROR: ${{ steps.state.outputs.config_error }}
-          ERROR_TYPE: ${{ steps.state.outputs.config_error_type }}
-        run: |
-          echo "::error::Configuration Error: $CONFIG_ERROR"
-          echo ""
-          echo "Error type: $ERROR_TYPE"
-          echo ""
-          echo "How to fix:"
-          case "$ERROR_TYPE" in
-            missing_file)
-              echo "  1. Create release-plan.yaml in repository root"
-              echo "  2. Use the template from ReleaseManagement documentation"
-              echo "  3. Commit and push to main branch"
-              ;;
-            malformed_yaml)
-              echo "  1. Fix YAML syntax in release-plan.yaml"
-              echo "  2. Validate with an online YAML validator"
-              echo "  3. Commit and push the fix"
-              ;;
-            missing_field)
-              echo "  1. Add the missing field to release-plan.yaml"
-              echo "  2. Required: repository.target_release_tag"
-              echo "  3. Commit and push the fix"
-              ;;
-            release_line)
-              echo "  1. A cycle with a maintenance/rX branch is released from that branch only"
-              echo "  2. Set target_release_tag on this branch to a tag of its own line"
-              echo "  3. Commit and push the fix"
-              ;;
-          esac
-          exit 1
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Snapshot — /create-snapshot: pre-snapshot validation, snapshot branch,
@@ -440,7 +319,7 @@ jobs:
         id: create
         uses: ./_tooling/shared-actions/create-snapshot
         with:
-          release_tag: ${{ fromJSON(needs.plan.outputs.plan).release_tag }}
+          release_tag: ${{ fromJSON(needs.plan.outputs.plan).release.release_tag }}
           base_branch: ${{ fromJSON(needs.plan.outputs.plan).base_branch }}
           github_token: ${{ steps.app-token.outputs.token || github.token }}
           tooling_path: ${{ github.workspace }}/_tooling

@@ -3,7 +3,8 @@
 Expected values reproduce the former update-issue, post-result and
 create-sync-pr jobs of release-automation-reusable.yml: their job and step
 conditions, "Resolve Sync Context", "Determine Result Template", "Resolve
-Reason" and "Build Result Context".
+Reason" and "Build Result Context". The plan arrives as the typed plan
+document (Run.from_needs).
 """
 
 import json
@@ -24,6 +25,7 @@ from release_automation.scripts.finalize import (
 )
 from release_automation.scripts.issue_sync import WorkflowSync
 from release_automation.scripts.sync_pr import SyncPrOutcome
+from release_automation.tests.plans import make_plan
 
 PLAN = {
     "trigger_type": "slash_command",
@@ -31,25 +33,21 @@ PLAN = {
     "command_args": "",
     "issue_number": "42",
     "user": "alice",
-    "allowed": True,
     "action": "",
     "state": "planned",
     "release_tag": "r4.1",
     "release_issue_number": "42",
     "snapshot_branch": "release-snapshot/r4.1-abc1234",
     "src_commit_sha": "abc1234def5678",
-    "common_cache_status": "",
-    "common_cache_details": "",
-    "common_sync_pr_url": "",
     "commonalities_release": "r4.3",
-    "base_context": {"release_tag": "r4.1", "state": "planned"},
+    "base_branch": "main",
+    "result_comment_id": "555",
 }
 
 
-def make_run(plan=None, jobs=None, event=None):
-    """jobs: {action: (job result, outcome)} — at most one action per run."""
+def make_needs(plan=None, jobs=None):
+    """toJSON(needs) of the finalize job; jobs: {action: (job result, outcome)} — at most one action per run."""
     plan = {**PLAN, **(plan or {})}
-    result_comment_id = plan.pop("result_comment_id", "555")
     needs = {
         "snapshot": {"result": "skipped", "outputs": {}},
         "act": {"result": "skipped", "outputs": {}},
@@ -58,11 +56,17 @@ def make_run(plan=None, jobs=None, event=None):
         plan["action"] = action
         job = "snapshot" if action == "create-snapshot" else "act"
         needs[job] = {"result": result, "outputs": {"outcome": json.dumps({"action": action, **outcome})} if outcome else {}}
+    document = make_plan(**plan)
     needs["plan"] = {"result": "success", "outputs": {
-        "plan": json.dumps(plan), "action": plan["action"], "finalize": "true", "result_comment_id": result_comment_id,
+        "plan": document.to_json(), "action": document.action, "finalize": "true",
+        "result_comment_id": document.result_comment_id,
     }}
-    return Run(
-        needs=needs,
+    return needs
+
+
+def make_run(plan=None, jobs=None, event=None):
+    return Run.from_needs(
+        make_needs(plan, jobs),
         event=event or {},
         server_url="https://github.com",
         repository="camaraproject/Example",
@@ -137,8 +141,8 @@ def test_overrides_after_create_snapshot():
 def test_overrides_after_draft_creation():
     run = make_run(
         {"trigger_type": "pr_merge"},
-        {"create-draft": ok(draft_release_url="https://github.com/camaraproject/Example/releases/tag/untagged-1")},
-        event={"pull_request": {"number": 14}},
+        {"create-draft": ok(draft_release_url="https://github.com/camaraproject/Example/releases/tag/untagged-1",
+                            release_pr_number="14")},
     )
 
     assert sync_overrides(run) == {
@@ -209,7 +213,7 @@ def test_not_planned_notification():
     ]
 
 
-@pytest.mark.parametrize("state", ["planned", "not_planned"])
+@pytest.mark.parametrize("state", ["planned", "snapshot-active"])
 def test_no_not_planned_notification_in_other_states(state):
     assert notifications(make_run({"state": state}), WorkflowSync(issue_number="42", issue_action="updated"), None) == []
 
@@ -646,8 +650,7 @@ def test_result_comment_failure_skips_the_published_issue(stubs, tmp_path):
 def test_sync_issue_command(stubs, tmp_path):
     gh = FakeGitHub()
 
-    base = {"release_tag": "r4.1", "command": "sync-issue", "user": "alice"}
-    report = run_finalize(make_run({"command": "sync-issue", "base_context": base}), clients(gh, tmp_path))
+    report = run_finalize(make_run({"command": "sync-issue"}), clients(gh, tmp_path))
 
     assert kinds(gh) == ["issue-sync", "update"]
     assert stubs["issue_sync"]["force_update"] is True
@@ -770,7 +773,7 @@ def test_main_exit_code(stubs, tmp_path, monkeypatch):
     event.write_text("{}")
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
     monkeypatch.setenv("GITHUB_REPOSITORY", "camaraproject/Example")
-    monkeypatch.setenv("NEEDS_JSON", json.dumps(make_run({"command": "sync-issue", "result_comment_id": ""}).needs))
+    monkeypatch.setenv("NEEDS_JSON", json.dumps(make_needs({"command": "sync-issue", "result_comment_id": ""})))
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
 
     assert finalize.main(clients(FakeGitHub(), tmp_path)) == 1

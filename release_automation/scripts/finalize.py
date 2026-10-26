@@ -15,8 +15,9 @@ after plan for push, workflow_dispatch and /sync-issue. In order:
 4. after a publication: the published Release Issue — STATE/ACTIONS, label,
    closed only when the sync PR was created (issue_sync)
 
-What ran before comes from toJSON(needs): the plan job's JSON plan, and the
-result and JSON outcome of the snapshot or act job that executed its action.
+What ran before comes from toJSON(needs): the plan job's plan document, and
+the result and JSON outcome of the snapshot or act job that executed its
+action (Run.from_needs).
 
 Sync PRs and common sync use the repository client (App token: commits and
 PRs); every Release Issue write uses the issue client (GITHUB_TOKEN), so no
@@ -35,10 +36,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import config
+from .bot_context import bot_context
 from .bot_identity import resolve_bot_identity
 from .commands import COMMANDS, command
 from .common_sync import CommonSyncOutcome
 from .issue_sync import WorkflowSync, post_publish_warnings
+from .plan_document import PlanDocument
 from .sync_pr import SyncPrOutcome
 
 COMMONALITIES_REPO = "camaraproject/Commonalities"
@@ -55,53 +58,51 @@ STATE_CHANGING_ACTIONS = tuple(
 
 @dataclass
 class Run:
-    """What finalize knows about the run: needs, the event payload, repository."""
-    needs: Dict[str, Any]
+    """
+    What finalize knows about the run: the plan, the outcome and result of the
+    job that executed its action, the event payload, the repository.
+    """
+    plan: PlanDocument
+    outcome: Dict[str, str] = field(default_factory=dict)
+    result: str = ""  # conclusion of the job that executed the action ("" without one)
     event: Dict[str, Any] = field(default_factory=dict)
     server_url: str = "https://github.com"
     repository: str = ""
     run_id: str = ""
 
-    def _outputs(self, job: str) -> Dict[str, Any]:
-        return (self.needs.get(job) or {}).get("outputs") or {}
+    @classmethod
+    def from_needs(cls, needs: Dict[str, Any], event: Dict[str, Any], server_url: str, repository: str,
+                   run_id: str = "") -> "Run":
+        """Build the run from toJSON(needs) of the finalize job."""
+        def outputs(job: str) -> Dict[str, Any]:
+            return (needs.get(job) or {}).get("outputs") or {}
 
-    def _json(self, job: str, name: str) -> Dict[str, Any]:
-        return json.loads(self._outputs(job).get(name) or "{}")
-
-    def plan(self, name: str) -> str:
-        value = self._json("plan", "plan").get(name, "")
-        if isinstance(value, bool):
-            return "true" if value else "false"
-        return str(value or "")
+        plan = PlanDocument.from_json(outputs("plan")["plan"])
+        outcome: Dict[str, str] = {}
+        result = ""
+        if plan.action:
+            job = "snapshot" if plan.action == "create-snapshot" else "act"
+            outcome = json.loads(outputs(job).get("outcome") or "{}")
+            result = (needs.get(job) or {}).get("result", "")
+        return cls(plan=plan, outcome=outcome, result=result, event=event, server_url=server_url,
+                   repository=repository, run_id=run_id)
 
     @property
     def base_context(self) -> Dict[str, Any]:
-        value = self._json("plan", "plan").get("base_context")
-        return value if isinstance(value, dict) else {}
+        return bot_context(self.plan)
 
     @property
     def result_comment_id(self) -> str:
         """The acknowledgment the plan job updated with interim_processing, "" if none."""
-        return self._outputs("plan").get("result_comment_id", "") or ""
+        return self.plan.result_comment_id
 
     @property
     def action(self) -> str:
-        return self.plan("action")
-
-    @property
-    def _action_job(self) -> str:
-        return "snapshot" if self.action == "create-snapshot" else "act"
+        return self.plan.action
 
     def out(self, name: str) -> str:
         """A value of the action's outcome ("" without an action or outcome)."""
-        if not self.action:
-            return ""
-        return str(self._json(self._action_job, "outcome").get(name, "") or "")
-
-    @property
-    def result(self) -> str:
-        """Conclusion of the job that executed the action."""
-        return (self.needs.get(self._action_job) or {}).get("result", "") if self.action else ""
+        return str(self.outcome.get(name, "") or "")
 
     def succeeded(self, action: str) -> bool:
         """The action ran, its job concluded success and it reported success."""
@@ -120,21 +121,21 @@ class Run:
 
 def issue_sync_due(run: Run) -> bool:
     """Release Issue sync (and common sync): a successful command, an issue event, or a sync."""
-    if not run.plan("state"):
+    if not run.plan.state:
         return False
-    issue_event = run.plan("trigger_type") in ("issue_close", "issue_reopen") and (
+    issue_event = run.plan.trigger.trigger_type in ("issue_close", "issue_reopen") and (
         not run.action or run.succeeded("reopen-issue")
     )
     return (
         any(run.succeeded(action) for action in STATE_CHANGING_ACTIONS)
         or issue_event
-        or run.plan("command") == "sync-issue"
+        or run.plan.trigger.command == "sync-issue"
     )
 
 
 def result_due(run: Run) -> bool:
     """Result comment: an allowed slash command whose acknowledgment was updated by plan."""
-    return run.plan("trigger_type") == "slash_command" and run.result_comment_id != ""
+    return run.plan.trigger.trigger_type == "slash_command" and run.result_comment_id != ""
 
 
 # ── Release Issue sync ───────────────────────────────────────────────────────
@@ -157,17 +158,16 @@ def sync_overrides(run: Run) -> Dict[str, Any]:
             force_update=True,
         )
     elif run.succeeded(ACTION_CREATE_DRAFT):
-        pr_number = (run.event.get("pull_request") or {}).get("number", "")
         overrides.update(
             state_override=config.STATE_DRAFT_READY,
-            snapshot_branch_override=run.plan("snapshot_branch"),
-            release_pr_number_override=str(pr_number),
+            snapshot_branch_override=run.plan.snapshot_branch,
+            release_pr_number_override=run.out("release_pr_number"),
             draft_release_url_override=run.out("draft_release_url"),
             force_update=True,
         )
     elif run.succeeded("discard-snapshot") or run.succeeded("delete-draft"):
         overrides.update(state_override=command(run.action).state_after, force_update=True)
-    elif run.plan("command") == "sync-issue":
+    elif run.plan.trigger.command == "sync-issue":
         overrides.update(force_update=True)
     return overrides
 
@@ -178,24 +178,22 @@ Notification = Tuple[str, str, Dict[str, str]]
 def notifications(run: Run, sync: WorkflowSync, common: Optional[CommonSyncOutcome]) -> List[Notification]:
     """Comments after the issue sync, as (template, issue number, context delta)."""
     posts = []
-    if sync.issue_action == "updated" and run.plan("state") == "not-planned" and sync.issue_number:
+    if sync.issue_action == "updated" and run.plan.state == "not-planned" and sync.issue_number:
         posts.append(("state_not_planned", sync.issue_number, {"state": "not-planned"}))
     if sync.issue_action == "created" and sync.issue_number:
         closed = run.event.get("issue") or {}
         posts.append(("issue_created", sync.issue_number, {
             "state": "planned",
-            "trigger_type": run.plan("trigger_type"),
-            "release_plan_url": (
-                f"{run.server_url}/{run.repository}/blob/{run.plan('base_branch') or 'main'}/release-plan.yaml"
-            ),
+            "trigger_type": run.plan.trigger.trigger_type,
+            "release_plan_url": run.plan.release_plan_url,
             "closed_issue_number": str(closed.get("number", "")),
             "closed_issue_url": closed.get("html_url", ""),
         }))
-    issue = run.plan("release_issue_number") or sync.issue_number
+    issue = run.plan.release_issue_number or sync.issue_number
     if common and issue:
         if common.status == "created":
             posts.append(("common_sync_pr_created", issue, {
-                "common_cache_details": run.plan("common_cache_details"),
+                "common_cache_details": run.plan.cache.details,
                 "common_sync_pr_url": common.pr_url,
             }))
         elif common.status == "failed":
@@ -207,7 +205,7 @@ def notifications(run: Run, sync: WorkflowSync, common: Optional[CommonSyncOutco
 
 
 def result_template(run: Run, sync: Optional[WorkflowSync] = None) -> str:
-    cmd = command(run.plan("command"))
+    cmd = command(run.plan.trigger.command)
     if cmd is None:
         # No handler matched: a workflow bug
         return "internal_error"
@@ -219,18 +217,18 @@ def result_template(run: Run, sync: Optional[WorkflowSync] = None) -> str:
 
 def reported_state(run: Run) -> str:
     """The release state a result comment reports: after a successful command, its state_after."""
-    cmd = command(run.plan("command"))
+    cmd = command(run.plan.trigger.command)
     if cmd and cmd.state_after and run.succeeded(cmd.name):
         return cmd.state_after
     if run.published:
         return config.STATE_PUBLISHED
-    return run.plan("state")
+    return run.plan.state
 
 
 def result_context(run: Run, sync: Optional[SyncPrOutcome]) -> Dict[str, str]:
     """Context delta of the result comment over the plan's base context."""
-    command = run.plan("command")
-    reason = run.plan("command_args")
+    command = run.plan.trigger.command
+    reason = run.plan.trigger.command_args
     if not reason and command in ("discard-snapshot", "delete-draft"):
         reason = "No reason provided"
     context = {"reason": reason}
@@ -264,7 +262,7 @@ def result_context(run: Run, sync: Optional[SyncPrOutcome]) -> Dict[str, str]:
             sync_pr_number=sync.pr_number if sync else "",
             main_sync_pr_url=sync.main_pr_url if sync else "",
             main_sync_pr_number=sync.main_pr_number if sync else "",
-            src_commit_sha_short=run.plan("src_commit_sha")[:7],
+            src_commit_sha_short=run.plan.src_commit_sha[:7],
         )
         warnings = post_publish_warnings(run.out("error_message"), sync.status if sync else "")
         if warnings:
@@ -318,7 +316,7 @@ class Report:
 def post_comment(clients: Clients, run: Run, template: str, issue: str, delta: Dict[str, Any], comment_id: str = "") -> None:
     from .bot_responder import post_comment as post
 
-    post(clients.issues, template, issue, run.base_context, delta, run.plan("release_tag"), comment_id=comment_id)
+    post(clients.issues, template, issue, run.base_context, delta, run.plan.release_tag, comment_id=comment_id)
 
 
 def run_sync_pr(run: Run, clients: Clients) -> SyncPrOutcome:
@@ -329,8 +327,8 @@ def run_sync_pr(run: Run, clients: Clients) -> SyncPrOutcome:
     except Exception as e:
         print(f"::error::Could not resolve the bot identity: {e}")
         return SyncPrOutcome(status="failed")
-    tag = run.plan("release_tag")
-    base_branch = run.plan("base_branch") or "main"
+    tag = run.plan.release_tag
+    base_branch = run.plan.base_branch
     if base_branch == "main":
         git = clients.git(run.repository, "api-repo", clients.token)
         return create_sync_pr(clients.gh, git, tag, bot_name, bot_email)
@@ -355,29 +353,29 @@ def run_common_sync(run: Run, clients: Clients) -> CommonSyncOutcome:
         # Public repository; the App token is scoped to the API repository
         clients.git(COMMONALITIES_REPO, "commonalities"),
         clients.gh,
-        run.plan("commonalities_release"),
+        run.plan.release.commonalities_release,
         bot_name,
         bot_email,
-        base_branch=run.plan("base_branch") or "main",
+        base_branch=run.plan.base_branch,
     )
 
 
 def run_issue_sync(run: Run, clients: Clients, report: Report, summary_path: str) -> None:
     from .issue_sync import sync_for_workflow
 
-    if run.plan("common_cache_status") == "stale":
+    if run.plan.cache.status == "stale":
         report.common_sync = run_common_sync(run, clients)
         print(f"Common sync: {report.common_sync.status}")
 
     sync = sync_for_workflow(
         clients.issues,
-        release_tag=run.plan("release_tag"),
-        state=run.plan("state"),
-        common_cache_status=run.plan("common_cache_status"),
-        common_cache_details=run.plan("common_cache_details"),
-        common_sync_pr_url=(report.common_sync.pr_url if report.common_sync else "") or run.plan("common_sync_pr_url"),
+        release_tag=run.plan.release_tag,
+        state=run.plan.state,
+        common_cache_status=run.plan.cache.status,
+        common_cache_details=run.plan.cache.details,
+        common_sync_pr_url=(report.common_sync.pr_url if report.common_sync else "") or run.plan.cache.sync_pr_url,
         summary_path=summary_path,
-        base_branch=run.plan("base_branch") or "main",
+        base_branch=run.plan.base_branch,
         **sync_overrides(run),
     )
     report.issue_sync = sync
@@ -403,7 +401,7 @@ def run_result(run: Run, clients: Clients, report: Report) -> None:
     report.result_template = result_template(run, report.issue_sync)
     try:
         post_comment(
-            clients, run, report.result_template, run.plan("issue_number"),
+            clients, run, report.result_template, run.plan.trigger.issue_number,
             {**result_context(run, report.sync_pr), "state": reported_state(run)}, comment_id=run.result_comment_id,
         )
     except Exception as e:
@@ -417,7 +415,7 @@ def run_result(run: Run, clients: Clients, report: Report) -> None:
 def run_merge_publication(run: Run, clients: Clients, report: Report) -> None:
     """publish_mode on_merge: the result goes to the Release Issue as a new comment."""
     report.result_template = "release_published" if run.published else "publish_failed"
-    issue = run.plan("release_issue_number")
+    issue = run.plan.release_issue_number
     if not issue:
         print("::warning::No Release Issue to report the publication on")
         return
@@ -436,12 +434,12 @@ def finalize_published(run: Run, clients: Clients, report: Report) -> None:
     from .issue_manager import IssueManager
     from .issue_sync import IssueSyncManager
 
-    if run.published and run.plan("release_issue_number"):
+    if run.published and run.plan.release_issue_number:
         sync = report.sync_pr or SyncPrOutcome(status="")
-        print(f"Updating release issue #{run.plan('release_issue_number')} after publish (sync status: {sync.status})")
+        print(f"Updating release issue #{run.plan.release_issue_number} after publish (sync status: {sync.status})")
         report.issue_finalized = IssueSyncManager(clients.issues, issue_manager=IssueManager()).finalize_published_issue(
-            issue_number=int(run.plan("release_issue_number")),
-            release_tag=run.plan("release_tag"),
+            issue_number=int(run.plan.release_issue_number),
+            release_tag=run.plan.release_tag,
             release_url=run.out("release_url"),
             reference_tag=run.out("reference_tag"),
             sync_pr_url=sync.pr_url,
@@ -472,12 +470,12 @@ def maintenance_branch_rows(run: Run) -> List[Tuple[str, str]]:
     The summary is the only feedback: no Release Issue exists yet for the line.
     """
     if run.succeeded("create-maintenance-branch"):
-        bp = run._json("plan", "plan").get("branch_plan") or {}
-        branch, next_tag = run.out("branch"), bp.get("next_tag", "")
+        bp = run.plan.branch_plan
+        branch, next_tag = run.out("branch"), bp.next_tag
         rows = [
             ("Maintenance branch", (
-                f"{branch} created at {bp.get('patched_sha', '')[:7]}, the source commit of "
-                f"{bp.get('patched_release', '')}; set-up commit {run.out('setup_commit_sha')[:7]}"
+                f"{branch} created at {bp.patched_sha[:7]}, the source commit of "
+                f"{bp.patched_release}; set-up commit {run.out('setup_commit_sha')[:7]}"
             )),
             ("Release plan", f"parked at {next_tag}, target_release_type: none"),
             ("Next step", (
@@ -497,8 +495,8 @@ def write_summary(run: Run, report: Report, summary_path: str) -> None:
     if not summary_path:
         return
     rows = [
-        ("Trigger", f"{run.plan('trigger_type')} {run.plan('command')}".strip()),
-        ("Release", f"{run.plan('release_tag')} ({run.plan('state') or 'no state'})"),
+        ("Trigger", f"{run.plan.trigger.trigger_type} {run.plan.trigger.command}".strip()),
+        ("Release", f"{run.plan.release_tag} ({run.plan.state or 'no state'})"),
     ]
     if report.sync_pr:
         sync_text = f"{report.sync_pr.status} {report.sync_pr.pr_url}".strip()
@@ -527,8 +525,8 @@ def main(clients: Optional[Clients] = None) -> int:
     env = os.environ
     with open(env["GITHUB_EVENT_PATH"], encoding="utf-8") as f:
         event = json.load(f)
-    run = Run(
-        needs=json.loads(env["NEEDS_JSON"]),
+    run = Run.from_needs(
+        json.loads(env["NEEDS_JSON"]),
         event=event,
         server_url=env.get("GITHUB_SERVER_URL", "https://github.com"),
         repository=env["GITHUB_REPOSITORY"],

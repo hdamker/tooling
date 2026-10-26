@@ -170,6 +170,22 @@ class FakeGitHub:
         self._call("get_collaborator_permission")
         return self.permissions.get(username, "none")
 
+    def find_pr_for_branch(self, head_branch):
+        self._call("find_pr_for_branch")
+        return next((pr["number"] for pr in self.prs if pr["head"] == head_branch and not pr.get("closed")), None)
+
+    def find_open_pr(self, head_branch):
+        self._call("find_open_pr")
+        pr = next((pr for pr in self.prs if pr["head"] == head_branch and not pr.get("closed")), None)
+        return (pr["number"], f"{REPO_URL}/pull/{pr['number']}") if pr else None
+
+    def get_issue(self, issue_number):
+        self._call("get_issue")
+        issue = next((i for i in self.issues if i["number"] == issue_number), None)
+        if issue is None:
+            raise GitHubClientError(f"gh command failed: issue #{issue_number} not found")
+        return issue
+
     def create_pr(self, title, body, head, base):
         self._call("create_pr")
         number = next(self._ids)

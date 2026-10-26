@@ -115,7 +115,7 @@ class TestRender:
 
     def test_render_real_template(self, bot_responder):
         """Renders an actual bot message template."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
         # Use build_context for proper defaults
         context = build_context(
             command="/create-snapshot",
@@ -223,7 +223,7 @@ class TestRealTemplates:
 
     def test_snapshot_created_template(self, bot_responder):
         """snapshot_created template renders correctly."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
         context = build_context(
             release_tag="r4.1",
             meta_release="Spring 2026",
@@ -246,7 +246,7 @@ class TestRealTemplates:
 
     def test_command_rejected_template(self, bot_responder):
         """command_rejected template renders correctly."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
         # Use build_context for state flags
         context = build_context(
             command="/create-snapshot",
@@ -264,7 +264,7 @@ class TestRealTemplates:
 
     def test_snapshot_failed_template(self, bot_responder):
         """snapshot_failed template renders with error message."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
         context = build_context(
             release_tag="r4.1",
             state="planned",
@@ -278,7 +278,7 @@ class TestRealTemplates:
 
     def test_snapshot_failed_template_with_error_message(self, bot_responder):
         """snapshot_failed template renders with single error_message."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
         context = build_context(
             release_tag="r4.1",
             state="planned",
@@ -293,7 +293,7 @@ class TestRealTemplates:
 
     def test_issue_created_template_after_push(self, bot_responder):
         """issue_created template after a push carries no trigger line."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
         context = build_context(
             release_tag="r4.1",
             state="planned",
@@ -307,7 +307,7 @@ class TestRealTemplates:
 
     def test_issue_created_template_after_dispatch(self, bot_responder):
         """issue_created template after workflow dispatch links release-plan.yaml."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
         context = build_context(
             release_tag="r4.1",
             state="planned",
@@ -330,7 +330,7 @@ class TestContextIntegration:
 
     def test_config_error_partial_context(self, bot_responder):
         """handle-config-error job's partial context renders config_error."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
 
         raw = {
             "error_type": "missing_file",
@@ -345,7 +345,7 @@ class TestContextIntegration:
 
     def test_config_error_derives_boolean_flags(self, bot_responder):
         """Boolean flags are derived from error_type without explicit passing."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
 
         raw = {
             "error_type": "malformed_yaml",
@@ -361,7 +361,7 @@ class TestContextIntegration:
 
     def test_post_result_renders_snapshot_created(self, bot_responder):
         """post-result job's context renders snapshot_created template."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
 
         raw = {
             "command": "create-snapshot",
@@ -385,7 +385,7 @@ class TestContextIntegration:
 
     def test_issue_reopened_partial_context(self, bot_responder):
         """handle-issue-event's minimal context renders issue_reopened."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
 
         raw = {
             "release_tag": "r4.1",
@@ -404,7 +404,7 @@ class TestContextIntegration:
     def test_apis_json_string_to_list_conversion(self):
         """apis_json string is correctly converted to apis list."""
         import json
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
 
         raw = {
             "release_tag": "r4.1",
@@ -424,7 +424,7 @@ class TestContextIntegration:
 
     def test_interim_processing_minimal_context(self, bot_responder):
         """post-interim's minimal context renders interim_processing."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
 
         raw = {
             "command": "/create-snapshot",
@@ -438,7 +438,7 @@ class TestContextIntegration:
 
     def test_rejection_partial_context(self, bot_responder):
         """post-rejection job's context renders command_rejected."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
 
         raw = {
             "command": "/create-snapshot",
@@ -461,7 +461,7 @@ class TestPublicationTemplates:
 
     def test_publish_confirmation_template(self, bot_responder):
         """publish_confirmation template renders with draft details."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
 
         context = build_context(
             release_tag="r4.1",
@@ -485,7 +485,7 @@ class TestPublicationTemplates:
 
     def test_release_published_template(self, bot_responder):
         """release_published template renders with release details."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
 
         context = build_context(
             release_tag="r4.1",
@@ -509,7 +509,7 @@ class TestPublicationTemplates:
 
     def test_release_published_template_without_sync_pr(self, bot_responder):
         """release_published template renders without sync PR — no broken link."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
 
         context = build_context(
             release_tag="r4.1",
@@ -526,7 +526,7 @@ class TestPublicationTemplates:
 
     def test_release_published_template_with_warnings(self, bot_responder):
         """release_published template shows warning section when warnings exist."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
 
         context = build_context(
             release_tag="r4.1",
@@ -551,7 +551,7 @@ class TestPublicationTemplates:
 
     def test_release_published_template_sync_pr_failure_warning(self, bot_responder):
         """release_published shows warning when sync PR failed (no sync PR link)."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
 
         context = build_context(
             release_tag="r4.1",
@@ -575,7 +575,7 @@ class TestPublicationTemplates:
 
     def test_release_published_template_issue_stays_open_no_changes(self, bot_responder):
         """release_published shows 'remains open' when sync produced no changes."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
 
         context = build_context(
             release_tag="r4.1",
@@ -595,7 +595,7 @@ class TestPublicationTemplates:
 
     def test_release_published_template_no_warnings(self, bot_responder):
         """release_published template hides warning section when no warnings."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
 
         context = build_context(
             release_tag="r4.1",
@@ -612,7 +612,7 @@ class TestPublicationTemplates:
 
     def test_publish_failed_template(self, bot_responder):
         """publish_failed template renders with error message."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
 
         context = build_context(
             release_tag="r4.1",
@@ -630,7 +630,7 @@ class TestPublicationTemplates:
 
     def test_internal_error_template(self, bot_responder):
         """internal_error template renders with debug info."""
-        from release_automation.scripts.context_builder import build_context
+        from release_automation.scripts.bot_context import build_context
 
         context = build_context(
             command="publish-release",

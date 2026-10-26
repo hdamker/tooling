@@ -2,13 +2,11 @@
 
 One payload fixture per event. Expected values reproduce the former inline
 `Detect Trigger Type` github-script step of release-automation-reusable.yml.
+The resolve step that runs parse_trigger() is tested in test_release_line.
 """
-
-import json
 
 import pytest
 
-from release_automation.scripts import trigger as trigger_mod
 from release_automation.scripts.trigger import TRIGGER_UNKNOWN, Trigger, parse_trigger
 
 
@@ -301,7 +299,7 @@ def test_unhandled_event():
     assert parse("schedule", {"schedule": "0 0 * * *"}) == Trigger(trigger_type="unknown")
 
 
-# ── main(): env → GITHUB_OUTPUT ──────────────────────────────────────────────
+# ── GITHUB_OUTPUT helper for the step tests ──────────────────────────────────
 
 
 def read_outputs(path):
@@ -317,61 +315,3 @@ def read_outputs(path):
             i = j
         i += 1
     return outputs
-
-
-def run_main(tmp_path, monkeypatch, event_name, payload):
-    event_path = tmp_path / "event.json"
-    event_path.write_text(json.dumps(payload))
-    output_path = tmp_path / "output"
-    output_path.write_text("")
-    monkeypatch.setenv("GITHUB_EVENT_NAME", event_name)
-    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
-    monkeypatch.setenv("GITHUB_ACTOR", "erin")
-    monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
-    trigger_mod.main()
-    return read_outputs(output_path)
-
-
-OUTPUT_NAMES = {
-    "trigger_type", "command", "command_args", "issue_number", "user",
-    "should_continue", "confirm_tag", "ref", "release_tag", "trigger",
-}
-
-
-def test_main_writes_check_trigger_outputs(tmp_path, monkeypatch):
-    payload = issue_comment_payload("/publish-release --confirm r1.2")
-
-    out = run_main(tmp_path, monkeypatch, "issue_comment", payload)
-
-    assert set(out) == OUTPUT_NAMES
-    assert Trigger(**json.loads(out.pop("trigger"))) == parse("issue_comment", payload)
-    assert out == {
-        "trigger_type": "slash_command",
-        "command": "publish-release",
-        "command_args": "--confirm r1.2",
-        "issue_number": "42",
-        "user": "alice",
-        "should_continue": "true",
-        "confirm_tag": "r1.2",
-        "ref": "",
-        "release_tag": "",
-    }
-
-
-def test_main_skipped_event(tmp_path, monkeypatch):
-    payload = issue_comment_payload("/create-snapshot", labels=[])
-
-    out = run_main(tmp_path, monkeypatch, "issue_comment", payload)
-
-    assert out["should_continue"] == "false"
-    assert out["trigger_type"] == ""
-
-
-def test_main_push(tmp_path, monkeypatch):
-    payload = push_payload({"modified": ["release-plan.yaml"]})
-
-    out = run_main(tmp_path, monkeypatch, "push", payload)
-
-    assert out["trigger_type"] == "push"
-    assert out["command"] == "sync-issue"
-    assert out["user"] == "erin"

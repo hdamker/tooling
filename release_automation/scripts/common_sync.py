@@ -14,15 +14,10 @@ sync-common/<release>, a maintenance branch sync-common/<base_branch>/<release>.
 The interface takes a git client and a GitHub client and no release-automation
 types, so the module can move to a repository-reconcile workflow; the
 release-state gate stays with the caller.
-
-Usage (workflow step, detection):
-    python3 -m release_automation.scripts.common_sync
 """
 
-import os
 import re
 import shutil
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -339,27 +334,3 @@ def sync_common(
     add_pr_labels(gh, number, PR_LABELS)
     print(f"Sync PR created: {url}")
     return CommonSyncOutcome(status="created", pr_url=url, pr_number=str(number), unexpected_files=unexpected)
-
-
-def main(client=None) -> int:
-    from release_automation.scripts.trigger import write_outputs
-
-    release = os.environ["COMMONALITIES_RELEASE"]
-    check = detect(Path(os.environ["API_REPO_PATH"]), release, os.environ.get("ICM_RELEASE", ""))
-    sync_pr_url = ""
-    if check.status == "stale":
-        if client is None:
-            from .github_client import GitHubClient
-            client = GitHubClient(repo=os.environ["GITHUB_REPOSITORY"], token=os.environ.get("GITHUB_TOKEN"))
-        sync_pr_url = find_sync_pr(client, release, os.environ.get("BASE_BRANCH") or MAIN_BRANCH)
-        print(f"Found existing sync PR: {sync_pr_url}" if sync_pr_url else "No existing sync PR found")
-    write_outputs(os.environ["GITHUB_OUTPUT"], {
-        "common_cache_status": check.status,
-        "common_cache_details": check.details,
-        "common_sync_pr_url": sync_pr_url,
-    })
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

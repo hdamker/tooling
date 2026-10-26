@@ -1,9 +1,9 @@
-"""Tests for bot_context.py and context_builder.py."""
+"""Tests for bot_context.py: the schema, build_context() and bot_context(plan)."""
 
 import pytest
 
-from release_automation.scripts.bot_context import BotContext
-from release_automation.scripts.context_builder import build_context
+from release_automation.scripts.bot_context import BotContext, bot_context, build_context
+from release_automation.tests.plans import REPO_URL, make_plan
 
 
 class TestBotContext:
@@ -189,14 +189,14 @@ class TestBotContext:
         expected_keys = {
             "command", "command_args", "user", "trigger_type",
             "closed_issue_number", "closed_issue_url", "release_plan_url",
-            "release_tag", "state", "release_type", "meta_release", "short_type",
+            "release_tag", "state", "release_type", "meta_release", "short_type", "base_branch",
             "snapshot_id", "snapshot_branch", "snapshot_branch_url",
             "release_review_branch", "release_review_branch_url",
             "src_commit_sha", "release_pr_number", "release_pr_url",
             "apis",
             "commonalities_release", "identity_consent_management_release",
             "error_message", "error_type",
-            "is_missing_file", "is_malformed_yaml", "is_missing_field",
+            "is_missing_file", "is_malformed_yaml", "is_missing_field", "is_release_line",
             "state_snapshot_active", "state_draft_ready", "state_published",
             "trigger_workflow_dispatch", "trigger_issue_close",
             "has_meta_release", "has_reason",
@@ -282,14 +282,14 @@ class TestBuildContext:
         expected_keys = {
             "command", "command_args", "user", "trigger_type",
             "closed_issue_number", "closed_issue_url", "release_plan_url",
-            "release_tag", "state", "release_type", "meta_release", "short_type",
+            "release_tag", "state", "release_type", "meta_release", "short_type", "base_branch",
             "snapshot_id", "snapshot_branch", "snapshot_branch_url",
             "release_review_branch", "release_review_branch_url",
             "src_commit_sha", "release_pr_number", "release_pr_url",
             "apis",
             "commonalities_release", "identity_consent_management_release",
             "error_message", "error_type",
-            "is_missing_file", "is_malformed_yaml", "is_missing_field",
+            "is_missing_file", "is_malformed_yaml", "is_missing_field", "is_release_line",
             "state_snapshot_active", "state_draft_ready", "state_published",
             "trigger_workflow_dispatch", "trigger_issue_close",
             "has_meta_release", "has_reason",
@@ -327,16 +327,10 @@ class TestBuildContext:
         assert result["state_draft_ready"] is True
         assert result["state_snapshot_active"] is False
 
-    def test_ignores_unknown_kwargs(self):
-        """Unknown kwargs are silently ignored."""
-        result = build_context(
-            release_tag="r4.1",
-            unknown_field="should be ignored",
-            another_unknown=42,
-        )
-        assert result["release_tag"] == "r4.1"
-        assert "unknown_field" not in result
-        assert "another_unknown" not in result
+    def test_rejects_unknown_fields(self):
+        """A field outside the schema is a programming error, not ignored."""
+        with pytest.raises(TypeError):
+            build_context(release_tag="r4.1", unknown_field="x")
 
     def test_empty_call(self):
         """build_context() with no args returns all defaults."""
@@ -519,3 +513,55 @@ class TestWP49Fields:
         assert result["closed_issue_number"] == "42"
         assert result["closed_issue_url"] == "https://github.com/org/repo/issues/42"
         assert result["release_plan_url"] == "https://github.com/org/repo/blob/main/release-plan.yaml"
+
+
+class TestBotContextFromPlan:
+    """bot_context(plan): the run's base context is a view of the plan document (107 D3)."""
+
+    def test_snapshot_active_plan(self):
+        plan = make_plan(
+            trigger_type="slash_command", command="discard-snapshot", command_args="redo", user="alice",
+            release_tag="r1.4", state="snapshot-active", release_type="pre-release-rc", meta_release="Sync26",
+            base_branch="maintenance/r1", snapshot_id="r1.4-abc1234", snapshot_branch="release-snapshot/r1.4-abc1234",
+            release_review_branch="release-review/r1.4-abc1234", src_commit_sha="abc1234def", release_pr_number="41",
+            apis=[{"api_name": "qod", "api_version": "1.0.1"}], commonalities_release="r4.3",
+            common_cache_status="stale", common_cache_details="d", common_sync_pr_url="u",
+        )
+
+        ctx = bot_context(plan)
+
+        assert ctx["command"] == "discard-snapshot" and ctx["command_args"] == "redo" and ctx["user"] == "alice"
+        assert (ctx["release_tag"], ctx["state"], ctx["short_type"], ctx["meta_release"]) == ("r1.4", "snapshot-active", "rc", "Sync26")
+        assert ctx["base_branch"] == "maintenance/r1"
+        assert ctx["release_plan_url"] == f"{REPO_URL}/blob/maintenance/r1/release-plan.yaml"
+        assert ctx["snapshot_branch_url"] == f"{REPO_URL}/tree/release-snapshot/r1.4-abc1234"
+        assert ctx["release_review_branch_url"] == f"{REPO_URL}/tree/release-review/r1.4-abc1234"
+        assert (ctx["release_pr_number"], ctx["release_pr_url"]) == ("41", f"{REPO_URL}/pull/41")
+        assert ctx["src_commit_sha_short"] == "abc1234"
+        assert ctx["apis"] == [{"api_name": "qod", "api_version": "1.0.1"}]
+        assert ctx["workflow_run_url"] == f"{REPO_URL}/actions/runs/999"
+        assert ctx["common_cache_stale"] is True and ctx["has_common_sync_pr"] is True
+        assert ctx["valid_actions"].startswith("**Valid actions:**<br>→ **Update, review, and merge [Release PR]")
+
+    def test_planned_plan_has_empty_artifact_fields(self):
+        ctx = bot_context(make_plan(release_tag="r1.4", state="planned", base_branch="main"))
+
+        assert (ctx["snapshot_branch_url"], ctx["release_pr_url"], ctx["release_pr_number"]) == ("", "", "")
+        assert ctx["state_snapshot_active"] is False
+        assert ctx["valid_actions"] == "**Valid actions:**<br>→ **`/create-snapshot` — begin the release process**"
+
+    def test_errors_are_not_part_of_the_base_context(self):
+        # A rejection's or config error's text is the response comment's delta
+        plan = make_plan(allowed=False, error_message="bad", error_type="malformed_yaml", response="config_error")
+
+        ctx = bot_context(plan)
+
+        assert ctx["error_message"] == "" and ctx["error_type"] == ""
+
+    def test_renders_every_template(self):
+        from release_automation.scripts.bot_responder import BotResponder
+
+        responder = BotResponder()
+        ctx = bot_context(make_plan(release_tag="r1.4", state="planned"))
+        for template in responder.list_templates():
+            assert isinstance(responder.render(template, ctx), str)

@@ -10,6 +10,7 @@ from release_automation.scripts import draft_release
 from release_automation.scripts.act import act, snapshot_outcome
 from release_automation.scripts.commands import COMMANDS, JOB_ACT
 from release_automation.tests.fake_github import REPO_URL, FakeGitHub, gh_error
+from release_automation.tests.plans import make_plan
 
 SNAPSHOT = "release-snapshot/r1.4-abc1234"
 REVIEW = "release-review/r1.4-abc1234"
@@ -24,7 +25,7 @@ def no_sleep(monkeypatch):
 
 
 def plan(action, **kw):
-    return {
+    return make_plan(**{
         "action": action,
         "trigger_type": "slash_command",
         "command": action,
@@ -38,9 +39,8 @@ def plan(action, **kw):
         "release_pr_number": "41",
         "release_issue_number": "40",
         "src_commit_sha": "abc1234def",
-        "base_context": {"release_tag": "r1.4", "state": "snapshot-active"},
         **kw,
-    }
+    })
 
 
 def repo(**kw):
@@ -104,6 +104,9 @@ def test_create_draft_posts_draft_created():
         "draft_release_url": url,
         "candidate_block_stripped": "true",
         "error_message": "",
+        # The merged Release PR, for the issue sync
+        "release_pr_number": "41",
+        "release_pr_url": f"{REPO_URL}/pull/41",
     }
     comment = gh.comments[0]
     assert comment["issue"] == 40
@@ -197,7 +200,8 @@ def test_create_maintenance_branch():
     branch_plan = {"cycle": "r1", "branch": "maintenance/r1", "patched_release": "r1.8",
                    "patched_sha": PLAN.patched_sha, "next_tag": "r1.9"}
 
-    outcome = act(plan("create-maintenance-branch", trigger_type="workflow_dispatch", branch_plan=branch_plan), gh, {})
+    outcome = act(plan("create-maintenance-branch", trigger_type="workflow_dispatch", command="create-maintenance-branch",
+                       branch_plan=branch_plan), gh, {})
 
     assert outcome == {
         "action": "create-maintenance-branch",
@@ -207,6 +211,13 @@ def test_create_maintenance_branch():
         "warning": "",
         "error_message": "",
     }
+
+
+def test_act_reads_the_typed_plan_only():
+    # F11: no string-key access to the plan document
+    import inspect
+
+    assert 'plan["' not in inspect.getsource(act_mod)
 
 
 def test_every_act_command_has_a_case():
@@ -229,7 +240,7 @@ def test_main_writes_outcome_and_exit_code(tmp_path, monkeypatch):
     event.write_text("{}")
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
-    monkeypatch.setenv("PLAN_JSON", json.dumps(plan("discard-snapshot")))
+    monkeypatch.setenv("PLAN_JSON", plan("discard-snapshot").to_json())
     gh = repo()
     del gh.branches[SNAPSHOT]
 
@@ -246,7 +257,7 @@ def test_main_success_exit_code(tmp_path, monkeypatch):
     event.write_text("{}")
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
-    monkeypatch.setenv("PLAN_JSON", json.dumps(plan("discard-snapshot")))
+    monkeypatch.setenv("PLAN_JSON", plan("discard-snapshot").to_json())
 
     assert act_mod.main([], repo()) == 0
 

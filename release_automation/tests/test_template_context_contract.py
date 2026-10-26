@@ -10,7 +10,7 @@ GitHub Actions (pystache strict mode raises on missing keys).
 import pytest
 
 from release_automation.scripts.bot_responder import BotResponder
-from release_automation.scripts.context_builder import build_context
+from release_automation.scripts.bot_context import build_context
 
 
 KNOWN_TEMPLATES = [

@@ -97,18 +97,18 @@ def _job_steps(job: str) -> list[dict]:
     return workflow["jobs"][job]["steps"]
 
 
-def test_plan_acks_before_checkout_then_runs_trigger_module():
+def test_plan_acks_before_checkout_then_resolves_the_trigger():
     steps = _job_steps("plan")
     names = [step.get("name") for step in steps]
 
     assert names.index("Post Acknowledgment") < names.index("Checkout tooling")
-    assert names.index("Checkout tooling") < names.index("Detect Trigger Type")
+    assert names.index("Checkout tooling") < names.index("Resolve trigger and release line")
 
-    detect = _step_by_name(steps, "Detect Trigger Type")
-    assert detect["id"] == "detect"
-    assert detect["working-directory"] == "_tooling"
-    assert detect["run"].strip() == "python -m release_automation.scripts.trigger"
-    assert "uses" not in detect
+    resolve = _step_by_name(steps, "Resolve trigger and release line")
+    assert resolve["id"] == "resolve"
+    assert resolve["working-directory"] == "_tooling"
+    assert resolve["run"].strip() == "python -m release_automation.scripts.release_line"
+    assert "uses" not in resolve
 
 
 def test_ack_command_list_matches_the_commands_table():
@@ -122,41 +122,42 @@ def test_ack_command_list_matches_the_commands_table():
     assert "steps." not in script
 
 
-def test_plan_runs_policy_then_one_response():
+def test_plan_is_resolve_then_plan():
+    # 107 D3: state is derived once, in the Plan step, in Python; no composite actions in plan
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     plan = workflow["jobs"]["plan"]
     names = [step.get("name") for step in plan["steps"]]
 
-    order = [
-        "Detect Trigger Type",
-        "Derive Release State",
-        "Check common cache sync",
-        "Assemble Context",
-        "Apply Command Policy",
-        "Post Response",
-    ]
+    order = ["Resolve trigger and release line", "Checkout API repo (sparse, for cache sync check)", "Plan"]
     assert [n for n in names if n in order] == order
+    assert not [s for s in plan["steps"] if str(s.get("uses", "")).startswith("./_tooling/shared-actions")]
+    for gone in ("Derive Release State", "Check common cache sync", "Assemble Context", "Apply Command Policy",
+                 "Post Response", "Fail workflow (dispatch action refused)",
+                 "Fail workflow (config error on a non-slash-command trigger)"):
+        assert gone not in names, gone
 
-    policy = _step_by_name(plan["steps"], "Apply Command Policy")
-    assert policy["run"].strip() == "python -m release_automation.scripts.command_policy"
-    assert policy["env"]["TRIGGER_JSON"] == "${{ steps.detect.outputs.trigger }}"
-    assert policy["env"]["STATE_JSON"] == "${{ toJSON(steps.state.outputs) }}"
-    assert policy["env"]["BASE_CONTEXT"] == "${{ steps.assemble.outputs.base_context }}"
-    cache = _step_by_name(plan["steps"], "Check common cache sync")
-    assert cache["run"].strip() == "python -m release_automation.scripts.common_sync"
-    # The existing-PR lookup is part of common_sync (exact sync-common/<release> head).
-    assert policy["env"]["COMMON_SYNC_PR_URL"] == "${{ steps.cache-sync.outputs.common_sync_pr_url }}"
-    assert cache["env"]["ICM_RELEASE"] == "${{ steps.state.outputs.identity_consent_management_release }}"
-
-    respond = _step_by_name(plan["steps"], "Post Response")
-    assert respond["uses"] == "./_tooling/shared-actions/post-bot-comment"
-    assert respond["with"]["template"] == "${{ steps.policy.outputs.response }}"
-    assert respond["with"]["context"] == "${{ steps.policy.outputs.response_context }}"
-    assert plan["outputs"]["plan"] == "${{ steps.policy.outputs.plan }}"
+    step = _step_by_name(plan["steps"], "Plan")
+    assert step["id"] == "plan"
+    assert step["run"].strip() == "python -m release_automation.scripts.command_policy"
+    assert step["env"]["TRIGGER_JSON"] == "${{ steps.resolve.outputs.trigger }}"
+    assert step["env"]["BASE_BRANCH"] == "${{ steps.resolve.outputs.base_branch }}"
+    assert step["env"]["API_REPO_PATH"] == "${{ github.workspace }}/_api_repo"
+    assert step["env"]["ACK_COMMENT_ID"] == "${{ steps.ack.outputs.comment_id }}"
+    assert step["if"] == "steps.resolve.outputs.should_continue == 'true'"
+    assert plan["outputs"] == {
+        "plan": "${{ steps.plan.outputs.plan }}",
+        "action": "${{ steps.plan.outputs.action }}",
+        "finalize": "${{ steps.plan.outputs.finalize }}",
+        "result_comment_id": "${{ steps.plan.outputs.result_comment_id }}",
+    }
 
     # The ack is the only inline script left in plan.
     scripts = [s for s in plan["steps"] if str(s.get("uses", "")).startswith("actions/github-script")]
     assert [s["name"] for s in scripts] == ["Post Acknowledgment"]
+    # No shell logic left in plan besides the fork guard
+    assert [s["name"] for s in plan["steps"] if "run" in s and "python" not in s["run"] and "pip" not in s["run"]] == [
+        "Fork Guard - Check Issues Enabled"
+    ]
 
 
 def test_four_phase_jobs_and_three_job_conditions():
@@ -229,17 +230,18 @@ def test_finalize_reads_only_defined_plan_outputs():
         assert name in jobs[job]["outputs"], (job, name)
 
 
-def test_finalize_and_act_read_only_plan_document_keys():
-    from release_automation.scripts.command_policy import CommonCache, Plan, plan_document
-    from release_automation.scripts.trigger import Trigger
-
-    document = plan_document(Plan("slash_command", "sync-issue", "r1.2", "planned", ""), Trigger(), {}, CommonCache(), {})
+def test_finalize_and_act_read_the_typed_plan_document():
+    # F11: the plan travels as PlanDocument JSON; no string-key reads of it anywhere after plan
     scripts = WORKFLOW.parents[2] / "release_automation" / "scripts"
-    finalize_reads = set(re.findall(r'\.plan\("([a-z_]+)"\)', (scripts / "finalize.py").read_text(encoding="utf-8")))
-    act_reads = set(re.findall(r'plan\["([a-z_]+)"\]', (scripts / "act.py").read_text(encoding="utf-8")))
-
-    assert finalize_reads and act_reads
-    assert finalize_reads | act_reads <= set(document)
+    for name in ("finalize.py", "act.py"):
+        source = (scripts / name).read_text(encoding="utf-8")
+        assert "PlanDocument" in source, name
+        assert not re.search(r'plan\["|\.plan\("', source), name
+    jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    # The workflow reads two top-level fields of the document and one nested one
+    text = WORKFLOW.read_text(encoding="utf-8")
+    assert set(re.findall(r"fromJSON\(needs\.plan\.outputs\.plan\)\.([a-z_.]+)", text)) == {"base_branch", "release.release_tag"}
+    assert jobs["act"]["steps"][-1]["env"]["PLAN_JSON"] == "${{ needs.plan.outputs.plan }}"
 
 
 def test_snapshot_glue_runs_in_python_with_inputs_in_env():
@@ -267,15 +269,11 @@ def test_snapshot_run_bodies_hold_no_expressions():
         assert "${{" not in step.get("run", ""), step.get("name")
 
 
-def test_plan_fails_on_a_refused_dispatch_action():
-    steps = _job_steps("plan")
-    step = _step_by_name(steps, "Fail workflow (dispatch action refused)")
-
-    assert step["if"] == "steps.policy.outputs.refusal != ''"
-    assert step["env"]["REFUSAL"] == "${{ steps.policy.outputs.refusal }}"
-    assert "${{" not in step["run"]
-    names = [s.get("name") for s in steps]
-    assert names.index("Apply Command Policy") < names.index("Fail workflow (dispatch action refused)")
+def test_plan_run_bodies_hold_no_expressions():
+    """Expressions are pre-expanded into a run body; the plan job passes them through env."""
+    for step in _job_steps("plan"):
+        if step.get("name") != "Fork Guard - Check Issues Enabled":
+            assert "${{" not in step.get("run", ""), step.get("name")
 
 
 # ── caller templates (maintenance releases, 003 M5) ──────────────────────────
@@ -354,7 +352,8 @@ def test_release_issue_writes_use_github_token():
     # spec 5.7: the App token stays for branches, commits, PRs and releases
     plan = _job_steps("plan")
     assert "Generate App Token" not in [s.get("name") for s in plan]
-    assert _step_by_name(plan, "Post Response")["with"]["github_token"] == "${{ github.token }}"
+    assert _step_by_name(plan, "Plan")["env"]["GITHUB_TOKEN"] == "${{ github.token }}"
+    assert _step_by_name(plan, "Resolve trigger and release line")["env"]["GITHUB_TOKEN"] == "${{ github.token }}"
     for job in ("act", "finalize"):
         (step,) = [s for s in _job_steps(job) if "release_automation.scripts" in s.get("run", "")]
         assert step["env"]["GITHUB_TOKEN"] == "${{ steps.app-token.outputs.token || github.token }}"
@@ -378,10 +377,23 @@ def test_validation_checks_tooling_out_at_its_own_commit():
 
 
 def test_cache_detection_uses_the_base_branch():
-    # M10: detection on the base branch's checkout, sync PR looked up within the line
+    # M10: detection on the base branch's checkout (in the Plan step), sync PR looked up within the line
     steps = _job_steps("plan")
     checkout = _step_by_name(steps, "Checkout API repo (sparse, for cache sync check)")
-    cache = _step_by_name(steps, "Check common cache sync")
 
-    assert checkout["with"]["ref"] == "${{ steps.line.outputs.base_branch }}"
-    assert cache["env"]["BASE_BRANCH"] == "${{ steps.line.outputs.base_branch }}"
+    assert checkout["with"]["ref"] == "${{ steps.resolve.outputs.base_branch }}"
+    assert checkout["with"]["path"] == "_api_repo"
+    assert checkout["if"] == "steps.resolve.outputs.should_continue == 'true'"
+
+
+def test_validation_resolves_the_release_state_with_the_module():
+    # The derive-release-state composite is gone; validation.yml (P-033) calls the module
+    steps = yaml.safe_load(VF_WORKFLOW.read_text(encoding="utf-8"))["jobs"]["validate"]["steps"]
+    step = _step_by_name(steps, "Resolve active release state")
+
+    assert step["id"] == "derive-release-state"
+    assert step["working-directory"] == ".tooling"
+    assert step["run"].strip() == "python -m release_automation.scripts.state_manager"
+    assert step["env"]["BASE_BRANCH"] == "${{ startsWith(github.base_ref, 'maintenance/r') && github.base_ref || 'main' }}"
+    assert not (ROOT / "shared-actions" / "derive-release-state").exists()
+    assert not (ROOT / "shared-actions" / "post-bot-comment").exists()

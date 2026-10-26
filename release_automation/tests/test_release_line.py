@@ -74,19 +74,61 @@ def test_tag_trigger_without_tag_uses_main():
     assert base_branch_for(trigger, repo(MB)) == "main"
 
 
-def test_main_writes_base_branch(tmp_path, monkeypatch):
-    output = tmp_path / "output"
-    output.write_text("")
-    monkeypatch.setenv("TRIGGER_JSON", json.dumps({"trigger_type": "pr_merge", "release_tag": "r1.8"}))
-    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-
-    assert release_line.main(client=repo(MB)) == 0
-    assert "base_branch<<" in output.read_text() and f"\n{MB}\n" in output.read_text()
-
-
 @pytest.mark.parametrize(
     "tag,version",
     [("r1.8", (1, 8)), ("r1.10", (1, 10)), ("r12.3", (12, 3)), ("", None), ("r1", None), ("v1.0", None)],
 )
 def test_tag_version(tag, version):
     assert release_line.tag_version(tag) == version
+
+
+# ── main(): the plan job's resolve step (trigger + line → GITHUB_OUTPUT) ─────
+
+from release_automation.tests.test_trigger import issue_comment_payload, push_payload, read_outputs  # noqa: E402
+
+
+def run_resolve(tmp_path, monkeypatch, event_name, payload, client=None):
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(payload))
+    output_path = tmp_path / "output"
+    output_path.write_text("")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", event_name)
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_ACTOR", "erin")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
+    assert release_line.main(client=client or repo()) == 0
+    return read_outputs(output_path)
+
+
+def test_resolve_writes_the_trigger_and_the_base_branch(tmp_path, monkeypatch):
+    payload = issue_comment_payload("/publish-release --confirm r1.8", issue_body=(
+        "<!-- release-automation:workflow-owned -->\n<!-- release-automation:release-tag:r1.8 -->\n"
+    ))
+
+    out = run_resolve(tmp_path, monkeypatch, "issue_comment", payload, client=repo(MB))
+
+    assert set(out) == {"trigger", "should_continue", "base_branch"}
+    assert Trigger(**json.loads(out["trigger"])) == Trigger(
+        trigger_type="slash_command", command="publish-release", command_args="--confirm r1.8",
+        issue_number="42", user="alice", should_continue=True, confirm_tag="r1.8", release_tag="r1.8",
+    )
+    assert (out["should_continue"], out["base_branch"]) == ("true", MB)
+
+
+def test_resolve_push_uses_the_pushed_branch(tmp_path, monkeypatch):
+    out = run_resolve(tmp_path, monkeypatch, "push", push_payload())
+
+    trigger = json.loads(out["trigger"])
+    assert (trigger["trigger_type"], trigger["command"], trigger["user"]) == ("push", "sync-issue", "erin")
+    assert out["base_branch"] == "main"
+
+
+def test_resolve_skipped_event_resolves_no_branch(tmp_path, monkeypatch):
+    class NoCalls:
+        def get_branch_sha(self, name):
+            raise AssertionError("no lookup for a skipped event")
+
+    out = run_resolve(tmp_path, monkeypatch, "issue_comment", issue_comment_payload("/create-snapshot", labels=[]), NoCalls())
+
+    assert (out["should_continue"], out["base_branch"]) == ("false", "")
+    assert json.loads(out["trigger"])["trigger_type"] == ""
