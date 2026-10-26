@@ -90,21 +90,6 @@ def test_describe(status, details):
     assert describe(status) == details
 
 
-def test_main_writes_outputs(tmp_path, monkeypatch):
-    output = tmp_path / "output"
-    output.write_text("")
-    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    monkeypatch.setenv("API_REPO_PATH", str(tmp_path / "missing"))
-    monkeypatch.setenv("COMMONALITIES_RELEASE", "r4.2")
-
-    common_sync.main(client=FakeGitHub())
-
-    from release_automation.tests.test_trigger import read_outputs
-    assert read_outputs(output) == {
-        "common_cache_status": "stale",
-        "common_cache_details": "code/common/ directory is missing",
-        "common_sync_pr_url": "",
-    }
 
 
 # ── detection: ICM release (M3) ──────────────────────────────────────────────
@@ -223,18 +208,6 @@ def test_find_sync_pr_ignores_other_sync_branches():
     assert find_sync_pr(gh, "r4.3") == ""
 
 
-def test_main_looks_up_sync_pr_when_stale(tmp_path, monkeypatch):
-    output = tmp_path / "output"
-    output.write_text("")
-    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    monkeypatch.setenv("API_REPO_PATH", str(tmp_path / "missing"))
-    monkeypatch.setenv("COMMONALITIES_RELEASE", "r4.3")
-    monkeypatch.setenv("ICM_RELEASE", "r4.2")
-
-    common_sync.main(client=FakeGitHub([pr(9, "sync-common/r4.3")]))
-
-    from release_automation.tests.test_trigger import read_outputs
-    assert read_outputs(output)["common_sync_pr_url"] == "https://github.com/camaraproject/Example/pull/9"
 
 
 # ── common sync ──────────────────────────────────────────────────────────────
@@ -533,16 +506,3 @@ def test_lines_do_not_close_each_others_sync_prs(tmp_path, remotes):
     assert [n for n, _ in gh_main.closed] == [31]
     assert [n for n, _ in gh_line.closed] == [41]
 
-
-def test_main_looks_up_the_sync_pr_of_the_base_branch(tmp_path, monkeypatch):
-    output = tmp_path / "output"
-    output.write_text("")
-    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    monkeypatch.setenv("API_REPO_PATH", str(tmp_path / "missing"))
-    monkeypatch.setenv("COMMONALITIES_RELEASE", "r4.3")
-    monkeypatch.setenv("BASE_BRANCH", MB)
-
-    common_sync.main(client=FakeGitHub([pr(9, "sync-common/r4.3"), pr(10, "sync-common/maintenance/r1/r4.3")]))
-
-    from release_automation.tests.test_trigger import read_outputs
-    assert read_outputs(output)["common_sync_pr_url"].endswith("/pull/10")

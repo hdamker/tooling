@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 import pystache
 
-from .context_builder import build_context
+from .bot_context import build_context
 
 
 class BotResponderError(Exception):

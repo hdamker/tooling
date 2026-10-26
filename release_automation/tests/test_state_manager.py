@@ -6,10 +6,9 @@ and edge cases.
 """
 
 import pytest
-from datetime import datetime
 from unittest.mock import Mock, patch
 
-from release_automation.scripts.github_client import Branch
+from release_automation.scripts.github_client import Branch, Release
 from release_automation.scripts.state_manager import (
     ConfigurationError,
     ReleaseInfoResult,
@@ -570,37 +569,6 @@ repository:
         assert result.release_tag == "r4.1"
         assert result.source == "release-plan.yaml"
 
-    def test_to_dict_on_error_result(self, state_manager, mock_github_client):
-        """to_dict() returns proper structure for error results."""
-        mock_github_client.get_file_content.return_value = None
-
-        result = state_manager.derive_state()
-        result_dict = result.to_dict()
-
-        assert result_dict["release_tag"] is None
-        assert result_dict["state"] is None
-        assert result_dict["config_error"] is not None
-        assert result_dict["config_error_type"] == "missing_file"
-
-    def test_to_dict_on_success_result(self, state_manager, mock_github_client):
-        """to_dict() returns proper structure for success results."""
-        mock_github_client.get_file_content.return_value = """
-repository:
-  target_release_tag: r4.1
-  target_release_type: initial
-"""
-        mock_github_client.list_branches.return_value = []
-        mock_github_client.tag_exists.return_value = False
-        mock_github_client.search_issues.return_value = []
-
-        result = state_manager.derive_state()
-        result_dict = result.to_dict()
-
-        assert result_dict["release_tag"] == "r4.1"
-        assert result_dict["state"] == ReleaseState.PLANNED
-        assert result_dict["config_error"] is None
-        assert result_dict["config_error_type"] is None
-        assert result_dict["release_issue_number"] is None
 
 
 class TestFindReleaseIssue:
@@ -761,3 +729,121 @@ repository:
 
         assert result.success
         assert result.release_issue_number is None
+
+
+class TestDeriveStateDetails:
+    """derive_state() carries what the plan document needs: snapshot details or plan details (107 D3)."""
+
+    PLAN = (
+        "repository:\n  target_release_tag: r4.1\n  target_release_type: pre-release-rc\n"
+        "apis:\n  - api_name: qod\n    target_api_version: 1.0.0\n    target_api_status: rc\n"
+        "dependencies:\n  commonalities_release: r4.3\n  identity_consent_management_release: r4.2\n"
+    )
+    METADATA = (
+        "repository:\n  release_tag: r4.1\n  release_type: pre-release-rc\n  src_commit_sha: " + "f" * 40 + "\n"
+        "apis:\n  - api_name: qod\n    api_version: 1.0.0-rc.1\n    api_title: QoD\n"
+        "dependencies:\n  commonalities_release: r4.3\n  identity_consent_management_release: r4.2\n"
+    )
+
+    def test_planned_release_carries_the_plan_details(self, state_manager, mock_github_client):
+        mock_github_client.get_file_content.return_value = self.PLAN
+        mock_github_client.tag_exists.return_value = False
+        mock_github_client.list_branches.return_value = []
+
+        result = state_manager.derive_state()
+
+        assert result.apis == [{"api_name": "qod", "api_version": "1.0.0"}]
+        assert (result.commonalities_release, result.identity_consent_management_release) == ("r4.3", "r4.2")
+        assert (result.snapshot_id, result.release_review_branch, result.release_pr_number) == ("", "", None)
+        assert result.draft_release_url == ""
+
+    def test_snapshot_carries_the_metadata_details(self, state_manager, mock_github_client):
+        mock_github_client.get_file_content.side_effect = lambda path, ref="main", **kw: (
+            self.PLAN if path == "release-plan.yaml" else self.METADATA
+        )
+        mock_github_client.tag_exists.return_value = False
+        mock_github_client.list_branches.return_value = [Branch(name="release-snapshot/r4.1-abc1234", sha="s1")]
+        mock_github_client.draft_release_exists.return_value = False
+        mock_github_client.find_pr_for_branch.return_value = 42
+
+        result = state_manager.derive_state()
+
+        assert result.state == ReleaseState.SNAPSHOT_ACTIVE
+        assert (result.snapshot_id, result.release_review_branch) == ("r4.1-abc1234", "release-review/r4.1-abc1234")
+        assert result.release_pr_number == 42 and result.src_commit_sha == "f" * 40
+        mock_github_client.find_pr_for_branch.assert_called_once_with("release-review/r4.1-abc1234")
+        assert result.apis == [{"api_name": "qod", "api_version": "1.0.0-rc.1", "api_title": "QoD"}]
+        assert result.draft_release_url == ""
+
+    def test_draft_ready_carries_the_draft_url(self, state_manager, mock_github_client):
+        mock_github_client.get_file_content.side_effect = lambda path, ref="main", **kw: (
+            self.PLAN if path == "release-plan.yaml" else self.METADATA
+        )
+        mock_github_client.tag_exists.return_value = False
+        mock_github_client.list_branches.return_value = [Branch(name="release-snapshot/r4.1-abc1234", sha="s1")]
+        mock_github_client.draft_release_exists.return_value = True
+        mock_github_client.find_pr_for_branch.return_value = None
+        mock_github_client.get_draft_release.return_value = Release(
+            tag_name="r4.1", name="r4.1", draft=True, prerelease=True, html_url="https://github.com/o/r/releases/untagged-1",
+        )
+
+        result = state_manager.derive_state()
+
+        assert result.state == ReleaseState.DRAFT_READY
+        assert result.draft_release_url == "https://github.com/o/r/releases/untagged-1"
+        assert result.release_pr_number is None
+
+    def test_snapshot_without_metadata_falls_back_to_the_branch(self, state_manager, mock_github_client):
+        mock_github_client.get_file_content.side_effect = lambda path, ref="main", **kw: (
+            self.PLAN if path == "release-plan.yaml" else None
+        )
+        mock_github_client.tag_exists.return_value = False
+        mock_github_client.list_branches.return_value = [Branch(name="release-snapshot/r4.1-abc1234", sha="s1")]
+        mock_github_client.draft_release_exists.return_value = False
+        mock_github_client.find_pr_for_branch.return_value = None
+
+        result = state_manager.derive_state()
+
+        assert (result.src_commit_sha, result.apis, result.commonalities_release) == ("s1", [], "")
+
+
+# ── main(): the validation.yml step (P-033 reads the active release state) ───
+
+
+def run_main(tmp_path, monkeypatch, client, base_branch=""):
+    from release_automation.scripts import state_manager as module
+    from release_automation.tests.test_trigger import read_outputs
+
+    output = tmp_path / "output"
+    output.write_text("")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "camaraproject/Example")
+    monkeypatch.setenv("BASE_BRANCH", base_branch)
+    assert module.main(client=client) == 0
+    return read_outputs(output)
+
+
+def test_main_writes_the_active_release_state(tmp_path, monkeypatch, mock_github_client):
+    mock_github_client.get_file_content.side_effect = lambda path, ref="main", **kw: (
+        TestDeriveStateDetails.PLAN if path == "release-plan.yaml" else None
+    )
+    mock_github_client.tag_exists.return_value = False
+    mock_github_client.list_branches.return_value = [Branch(name="release-snapshot/r4.1-abc1234", sha="s1")]
+    mock_github_client.draft_release_exists.return_value = False
+    mock_github_client.find_pr_for_branch.return_value = None
+    mock_github_client.search_issues.return_value = [{
+        "number": 7, "body": "<!-- release-automation:workflow-owned -->\n<!-- release-automation:release-tag:r4.1 -->",
+    }]
+
+    out = run_main(tmp_path, monkeypatch, mock_github_client, base_branch="main")
+
+    assert out == {"state": "snapshot-active", "snapshot_branch": "release-snapshot/r4.1-abc1234", "release_issue_number": "7"}
+
+
+def test_main_config_error_writes_empty_outputs(tmp_path, monkeypatch, mock_github_client, capsys):
+    mock_github_client.get_file_content.return_value = None
+
+    out = run_main(tmp_path, monkeypatch, mock_github_client)
+
+    assert out == {"state": "", "snapshot_branch": "", "release_issue_number": ""}
+    assert "::warning::Configuration error: No release-plan.yaml found on main branch" in capsys.readouterr().out

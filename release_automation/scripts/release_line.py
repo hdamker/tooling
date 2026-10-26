@@ -6,6 +6,10 @@ once that branch exists, otherwise on `main` (line_of). The base branch of a
 workflow run is the ref's branch for push and dispatch, and the line of the
 tag the event names for slash commands, issue events and Release PR merges.
 
+main() is the plan job's resolve step: it classifies the event (trigger) and
+resolves its base branch; outputs trigger (JSON), should_continue and
+base_branch.
+
 Usage (workflow step):
     python3 -m release_automation.scripts.release_line
 """
@@ -14,10 +18,11 @@ import json
 import os
 import re
 import sys
+from dataclasses import asdict
 from typing import Optional, Tuple
 
 from .github_client import GitHubClient
-from .trigger import Trigger, write_outputs
+from .trigger import Trigger, parse_trigger, write_outputs
 
 MAIN_BRANCH = "main"
 MAINTENANCE_BRANCH_PREFIX = "maintenance/"
@@ -56,12 +61,25 @@ def base_branch_for(trigger: Trigger, gh) -> str:
 
 def main(client=None) -> int:
     env = os.environ
-    trigger = Trigger(**json.loads(env["TRIGGER_JSON"]))
-    if client is None:
-        client = GitHubClient(repo=env["GITHUB_REPOSITORY"], token=env.get("GITHUB_TOKEN"))
-    base_branch = base_branch_for(trigger, client)
-    print(f"Base branch: {base_branch}")
-    write_outputs(env["GITHUB_OUTPUT"], {"base_branch": base_branch})
+    event_name = env["GITHUB_EVENT_NAME"]
+    with open(env["GITHUB_EVENT_PATH"], encoding="utf-8") as f:
+        payload = json.load(f)
+    trigger = parse_trigger(event_name, payload, actor=env.get("GITHUB_ACTOR", ""))
+    print(f"Event: {event_name} ({payload.get('action') or 'no action'})")
+    for name, value in asdict(trigger).items():
+        print(f"  {name}: {value}")
+
+    base_branch = ""
+    if trigger.should_continue:
+        if client is None:
+            client = GitHubClient(repo=env["GITHUB_REPOSITORY"], token=env.get("GITHUB_TOKEN"))
+        base_branch = base_branch_for(trigger, client)
+        print(f"Base branch: {base_branch}")
+    write_outputs(env["GITHUB_OUTPUT"], {
+        "trigger": json.dumps(asdict(trigger)),
+        "should_continue": "true" if trigger.should_continue else "false",
+        "base_branch": base_branch,
+    })
     return 0
 
 

@@ -4,18 +4,13 @@ Trigger classification for CAMARA release automation.
 Turns the event that started the workflow into a Trigger: which path the
 workflow takes (slash command, issue event, PR merge, dispatch, push) and the
 command it carries. parse_trigger() is a pure function of the event name and
-the payload at GITHUB_EVENT_PATH.
-
-Usage (workflow step):
-    python3 -m release_automation.scripts.trigger
+the payload at GITHUB_EVENT_PATH; the plan job's resolve step
+(release_line.main) calls it.
 """
 
-import json
-import os
 import re
-import sys
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any, Dict
 
 from .commands import (  # noqa: F401  (DISPATCH_* re-exported for the workflow tests)
@@ -208,36 +203,3 @@ def write_outputs(path: str, outputs: Dict[str, str]) -> None:
         for name, value in outputs.items():
             delimiter = f"EOF-{uuid.uuid4()}"
             f.write(f"{name}<<{delimiter}\n{value}\n{delimiter}\n")
-
-
-def to_outputs(trigger: Trigger) -> Dict[str, str]:
-    """String outputs under the check-trigger job's output names, plus the Trigger as JSON."""
-    outputs = asdict(trigger)
-    outputs["trigger"] = json.dumps(asdict(trigger))
-    outputs["should_continue"] = "true" if trigger.should_continue else "false"
-    return outputs
-
-
-def main() -> int:
-    event_name = os.environ["GITHUB_EVENT_NAME"]
-    with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as f:
-        payload = json.load(f)
-
-    trigger = parse_trigger(
-        event_name,
-        payload,
-        actor=os.environ.get("GITHUB_ACTOR", ""),
-    )
-
-    outputs = to_outputs(trigger)
-    print(f"Event: {event_name}")
-    print(f"Action: {payload.get('action') or 'N/A'}")
-    for name, value in outputs.items():
-        print(f"{name}: {value}")
-
-    write_outputs(os.environ["GITHUB_OUTPUT"], outputs)
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

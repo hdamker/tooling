@@ -10,8 +10,12 @@ rejection. Other triggers are not validated.
 Policy values that are expected to change (RM#675) sit in PUBLISH_MODES and
 PUBLISHERS; the initial values reproduce the behaviour before this module.
 
-A Plan names the action the snapshot or act job executes (action_for); the
-plan job writes it with the release references as one JSON document.
+A Plan names the action the snapshot or act job executes (action_for).
+
+main() is the plan job's plan step: it derives the release state of the base
+branch (state_manager), checks the common-file cache (common_sync), applies
+the policy, posts the one response comment, writes the step summary and the
+typed plan document (plan_document.PlanDocument) the later jobs read.
 
 Usage (workflow step):
     python3 -m release_automation.scripts.command_policy
@@ -22,6 +26,7 @@ import os
 import re
 import sys
 from dataclasses import asdict, dataclass, replace
+from pathlib import Path
 from typing import Optional, Union
 
 from . import config
@@ -29,8 +34,9 @@ from .commands import ALLOWED_COMMANDS, COMMANDS
 from .github_client import GitHubClient, GitHubClientError
 from .maintenance_branch import BranchPlan
 from .maintenance_branch import check as check_maintenance_branch
+from .plan_document import CommonCache, PlanDocument  # noqa: F401  (CommonCache re-exported)
 from .release_line import MAIN_BRANCH
-from .state_manager import ConfigurationError, ReleaseInfoResult, ReleaseState
+from .state_manager import ConfigurationError, ReleaseInfoResult, ReleaseStateManager
 from .trigger import DISPATCH_CREATE_MAINTENANCE_BRANCH, TRIGGER_SLASH_COMMAND, Trigger
 
 # How a release is published once its Release PR is merged:
@@ -81,14 +87,6 @@ RESPONSE_INTERIM = "interim_processing"
 RESPONSE_PUBLISH_CONFIRMATION = "publish_confirmation"
 RESPONSE_REJECTED = "command_rejected"
 RESPONSE_CONFIG_ERROR = "config_error"
-
-
-@dataclass(frozen=True)
-class CommonCache:
-    """Common-file cache detection result (code/common/ against the declared release)."""
-    status: str = ""  # in_sync | stale | "" (not checked)
-    details: str = ""
-    sync_pr_url: str = ""
 
 
 @dataclass(frozen=True)
@@ -351,86 +349,40 @@ def finalize_due(result: Union[Plan, Rejection]) -> bool:
     return result.allowed and result.response != RESPONSE_PUBLISH_CONFIRMATION
 
 
-def release_info_from_state(state_outputs: dict) -> ReleaseInfoResult:
-    """Rebuild a ReleaseInfoResult from the derive-release-state outputs."""
-    if state_outputs.get("config_error"):
-        return ReleaseInfoResult(
-            success=False,
-            config_error=ConfigurationError(
-                error_type=state_outputs.get("config_error_type", ""),
-                message=state_outputs["config_error"],
-                file_path=config.RELEASE_PLAN_FILE,
-            ),
-        )
-    state = state_outputs.get("state", "")
-    return ReleaseInfoResult(
-        success=True,
-        release_tag=state_outputs.get("release_tag", ""),
-        state=ReleaseState(state) if state else None,
-        release_type=state_outputs.get("release_type", ""),
-        base_branch=state_outputs.get("base_branch") or MAIN_BRANCH,
-    )
-
-
-# Release references from derive-release-state that the snapshot, act and finalize jobs read
-STATE_REFS = (
-    "snapshot_branch",
-    "release_review_branch",
-    "release_pr_number",
-    "release_issue_number",
-    "src_commit_sha",
-    "commonalities_release",
-    "identity_consent_management_release",
-)
-
-
 def plan_document(
     result: Union[Plan, Rejection],
     trigger: Trigger,
-    state_outputs: dict,
+    release_info: ReleaseInfoResult,
     cache: CommonCache,
-    base_context: dict,
-) -> dict:
-    """The plan job's one output: the decision, plus for a Plan what the later jobs read."""
-    document = json.loads(result.to_json())
+    base_branch: str,
+    repo_url: str = "",
+    run_url: str = "",
+    result_comment_id: str = "",
+) -> PlanDocument:
+    """The plan job's one output: the decision plus everything the later jobs read."""
     if result.allowed:
-        document.update(
-            command_args=trigger.command_args,
-            issue_number=trigger.issue_number,
-            user=trigger.user,
-            **{name: state_outputs.get(name, "") for name in STATE_REFS},
-            common_cache_status=cache.status,
-            common_cache_details=cache.details,
-            common_sync_pr_url=cache.sync_pr_url,
-            base_context=base_context,
+        return PlanDocument(
+            trigger=trigger, release=release_info, cache=cache, base_branch=base_branch,
+            allowed=True, publish_mode=result.publish_mode, response=result.response, action=result.action,
+            branch_plan=result.branch_plan, repo_url=repo_url, run_url=run_url,
+            result_comment_id=result_comment_id,
         )
-    return document
-
-
-def response_context(result: Union[Plan, Rejection], trigger: Trigger, env, state_outputs: dict) -> dict:
-    """Template variables the plan job's bot comment needs beyond the base context."""
-    run_url = (
-        f"{env.get('GITHUB_SERVER_URL', '')}/{env.get('GITHUB_REPOSITORY', '')}"
-        f"/actions/runs/{env.get('GITHUB_RUN_ID', '')}"
+    return PlanDocument(
+        trigger=trigger, release=release_info, cache=cache, base_branch=base_branch,
+        allowed=False, response=result.response, error_message=result.error_message,
+        error_type=result.error_type, repo_url=repo_url, run_url=run_url,
     )
-    if result.response == RESPONSE_CONFIG_ERROR:
-        return {
-            "error_type": result.error_type,
-            "error_message": result.error_message,
-            "command": trigger.command,
-            "user": trigger.user,
-            "workflow_run_url": run_url,
-        }
-    if result.response == RESPONSE_REJECTED:
-        return {"error_message": result.error_message}
-    if result.response == RESPONSE_PUBLISH_CONFIRMATION:
-        return {
-            # Draft releases have no direct URL
-            "draft_release_url": (
-                f"{env.get('GITHUB_SERVER_URL', '')}/{env.get('GITHUB_REPOSITORY', '')}/releases"
-            ),
-            "src_commit_sha_short": state_outputs.get("src_commit_sha", "")[:7],
-        }
+
+
+def response_delta(plan: PlanDocument) -> dict:
+    """Template variables of the plan job's response comment beyond the base context."""
+    if plan.response == RESPONSE_CONFIG_ERROR:
+        return {"error_type": plan.error_type, "error_message": plan.error_message}
+    if plan.response == RESPONSE_REJECTED:
+        return {"error_message": plan.error_message}
+    if plan.response == RESPONSE_PUBLISH_CONFIRMATION:
+        # Draft releases have no direct URL
+        return {"draft_release_url": f"{plan.repo_url}/releases"}
     return {}
 
 
@@ -498,57 +450,114 @@ def plan_summary(result: Union[Plan, Rejection], trigger: Trigger, release_info:
     return "\n".join(lines) + "\n"
 
 
+def check_cache(api_repo: Optional[Path], release_info: ReleaseInfoResult, client) -> CommonCache:
+    """Common-file cache detection on the base branch's checkout; the sync PR of the line when stale."""
+    from .common_sync import detect, find_sync_pr
+
+    release = release_info.commonalities_release
+    if not release_info.success or not release or api_repo is None:
+        return CommonCache()
+    check = detect(api_repo, release, release_info.identity_consent_management_release)
+    sync_pr_url = ""
+    if check.status == "stale":
+        sync_pr_url = find_sync_pr(client, release, release_info.base_branch)
+        print(f"Found existing sync PR: {sync_pr_url}" if sync_pr_url else "No existing sync PR found")
+    return CommonCache(status=check.status, details=check.details, sync_pr_url=sync_pr_url)
+
+
+def config_error_help(plan: PlanDocument) -> str:
+    """The config_error template's text, for the log of a push or dispatch (no comment to post)."""
+    from .bot_context import bot_context
+    from .bot_responder import BotResponder
+
+    delta = response_delta(replace(plan, response=RESPONSE_CONFIG_ERROR))
+    return BotResponder().render_comment(RESPONSE_CONFIG_ERROR, bot_context(plan), delta, "unknown")
+
+
+def post_response(plan: PlanDocument, client) -> str:
+    """
+    Post the plan job's one comment: update the acknowledgment (plan.result_comment_id)
+    or create a new comment. Returns the comment id as a string, "" when the post failed.
+    """
+    from .bot_context import bot_context
+    from .bot_responder import post_comment
+
+    tag = "unknown" if plan.response == RESPONSE_CONFIG_ERROR else plan.release_tag
+    try:
+        comment_id = post_comment(
+            client, plan.response, plan.trigger.issue_number, bot_context(plan), response_delta(plan),
+            tag, comment_id=plan.result_comment_id,
+        )
+    except Exception as e:
+        # A failed interim post does not stop the command; finalize then
+        # posts no result comment (as before). Any other response is the
+        # whole answer, so its failure fails the job.
+        print(f"::{'warning' if plan.response == RESPONSE_INTERIM else 'error'}::Could not post {plan.response}: {e}")
+        return ""
+    return str(comment_id)
+
+
 def main(client=None) -> int:
     from .trigger import write_outputs
 
     env = os.environ
     trigger = Trigger(**json.loads(env["TRIGGER_JSON"]))
-    state_outputs = json.loads(env.get("STATE_JSON") or "{}")
-    release_info = release_info_from_state(state_outputs)
-    cache = CommonCache(
-        status=env.get("COMMON_CACHE_STATUS", ""),
-        details=env.get("COMMON_CACHE_DETAILS", ""),
-        sync_pr_url=env.get("COMMON_SYNC_PR_URL", ""),
-    )
-    try:
-        base_context = json.loads(env.get("BASE_CONTEXT") or "{}")
-    except json.JSONDecodeError:
-        print("::warning::Invalid base_context JSON, ignoring")
-        base_context = {}
+    base_branch = env["BASE_BRANCH"]
+    repo_url = f"{env.get('GITHUB_SERVER_URL', 'https://github.com')}/{env.get('GITHUB_REPOSITORY', '')}"
+    run_url = f"{repo_url}/actions/runs/{env.get('GITHUB_RUN_ID', '')}"
     if client is None:
         client = GitHubClient(repo=env["GITHUB_REPOSITORY"], token=env.get("GITHUB_TOKEN"))
 
-    print(f"Validating command: /{trigger.command}")
-    print(f"Current state: {_state_value(release_info)}")
-    print(f"User: {trigger.user}")
+    print(f"Base branch: {base_branch}")
+    release_info = ReleaseStateManager(client).derive_state(base_branch=base_branch)
+    if release_info.success:
+        print(f"Release {release_info.release_tag}: {_state_value(release_info)} (from {release_info.source})")
+    else:
+        print(f"::warning::Configuration error: {release_info.config_error.message}")
+    api_repo = Path(env["API_REPO_PATH"]) if env.get("API_REPO_PATH") else None
+    cache = check_cache(api_repo, release_info, client)
+    if cache.status:
+        print(f"Common cache: {cache.status}" + (f" ({cache.details})" if cache.details else ""))
 
+    print(f"Validating command: /{trigger.command}")
+    print(f"User: {trigger.user}")
     result = evaluate(trigger, release_info, cache, client=client)
     if result.allowed:
         print(f"Command validated successfully; action: {result.action or 'none'}")
     else:
         print(f"Rejected: {result.error_message}")
 
+    plan = plan_document(
+        result, trigger, release_info, cache, base_branch, repo_url=repo_url, run_url=run_url,
+        result_comment_id=env.get("ACK_COMMENT_ID", ""),
+    )
+    exit_code = 0
+    if plan.response:
+        comment_id = post_response(plan, client)
+        if plan.response == RESPONSE_INTERIM:
+            plan = replace(plan, result_comment_id=comment_id)
+        elif not comment_id:
+            exit_code = 1
+    if not result.allowed and not result.response:
+        # No comment to update: the summary says why, the failed job shows it
+        if result.error_type:
+            print(f"::error::Configuration Error: {result.error_message}")
+            print(config_error_help(plan))
+        else:
+            print(f"::error title=Refused::{result.error_message}")
+        exit_code = 1
+
     if env.get("GITHUB_STEP_SUMMARY"):
         with open(env["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
             f.write(plan_summary(result, trigger, release_info, cache))
 
     write_outputs(env["GITHUB_OUTPUT"], {
-        "plan": json.dumps(plan_document(result, trigger, state_outputs, cache, base_context)),
-        "action": result.action if result.allowed else "",
+        "plan": plan.to_json(),
+        "action": plan.action,
         "finalize": "true" if finalize_due(result) else "false",
-        "response": result.response,
-        "response_release_tag": (
-            "unknown" if result.response == RESPONSE_CONFIG_ERROR else (release_info.release_tag or "")
-        ),
-        "response_context": json.dumps(response_context(result, trigger, env, state_outputs)),
-        # A refused dispatch action fails the plan job
-        "refusal": (
-            result.error_message
-            if not result.allowed and not result.response and not result.error_type
-            else ""
-        ),
+        "result_comment_id": plan.result_comment_id if plan.response == RESPONSE_INTERIM else "",
     })
-    return 0
+    return exit_code
 
 
 if __name__ == "__main__":

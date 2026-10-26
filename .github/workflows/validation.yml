@@ -194,7 +194,7 @@ jobs:
 
       # ── Step 6c: Resolve active release state for P-033 ───────────
       #
-      # Reuse the release automation state resolver and pass its compact
+      # Reuse the release automation state derivation and pass its compact
       # outputs into the offline Python orchestrator. P-033 blocks
       # release-plan.yaml edits while a release snapshot is active.
       - name: Resolve active release state
@@ -202,11 +202,13 @@ jobs:
         if: >-
           github.event_name == 'pull_request'
           && steps.detect-changes.outputs.release_plan_changed == 'true'
-        uses: ./.tooling/shared-actions/derive-release-state
-        with:
+        working-directory: .tooling
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
           # P-033 per line: a PR into maintenance/rX is checked against that
           # line's release, any other PR against main's
-          base_branch: ${{ startsWith(github.base_ref, 'maintenance/r') && github.base_ref || 'main' }}
+          BASE_BRANCH: ${{ startsWith(github.base_ref, 'maintenance/r') && github.base_ref || 'main' }}
+        run: python -m release_automation.scripts.state_manager
 
       # ── Step 6d: Resolve published release history for P-035 ──────
       #

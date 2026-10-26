@@ -1,16 +1,18 @@
 """
 Bot message context for CAMARA release automation.
 
-Provides the unified BotContext dataclass that carries all workflow data
-needed by bot message templates, issue sync, and other consumers.
-See technical-architecture.md Section 2.9 for the authoritative schema.
+BotContext is the schema every bot message template, the issue sync and the
+other consumers render from (technical-architecture.md section 2.9). Each job
+derives the run's base context from the plan document with bot_context(); a
+comment adds its delta on top (bot_responder.merge_comment_context).
 """
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List
 
 from . import config
 from .commands import actions_for
+from .plan_document import PlanDocument
 
 
 @dataclass
@@ -40,6 +42,7 @@ class BotContext:
     release_type: str = ""
     meta_release: str = ""
     short_type: str = ""  # Derived: alpha, rc, public, maintenance
+    base_branch: str = ""  # Branch the release is cut from: main or maintenance/rX
 
     # Snapshot fields
     snapshot_id: str = ""
@@ -67,6 +70,7 @@ class BotContext:
     is_missing_file: bool = False
     is_malformed_yaml: bool = False
     is_missing_field: bool = False
+    is_release_line: bool = False
     state_snapshot_active: bool = False
     state_draft_ready: bool = False
     state_published: bool = False
@@ -115,6 +119,7 @@ class BotContext:
         self.is_missing_file = self.error_type == "missing_file"
         self.is_malformed_yaml = self.error_type == "malformed_yaml"
         self.is_missing_field = self.error_type == "missing_field"
+        self.is_release_line = self.error_type == "release_line"
         self.state_snapshot_active = self.state == config.STATE_SNAPSHOT_ACTIVE
         self.state_draft_ready = self.state == config.STATE_DRAFT_READY
         self.state_published = self.state == config.STATE_PUBLISHED
@@ -128,6 +133,8 @@ class BotContext:
         self.common_cache_stale = self.common_cache_status == "stale"
         self.has_common_sync_pr = bool(self.common_sync_pr_url)
         self.valid_actions = actions_for(self.state, self.release_tag, self.release_pr_url)
+        if not self.src_commit_sha_short:
+            self.src_commit_sha_short = self.src_commit_sha[:7]
         if not self.short_type:
             self.short_type = config.SHORT_TYPE_MAP.get(
                 self.release_type, self.release_type
@@ -135,82 +142,51 @@ class BotContext:
 
     def to_dict(self) -> Dict[str, Any]:
         """
-        Convert to a dict suitable for pystache rendering.
-
-        Guarantees:
-        - All BotContext fields are present as keys
-        - No None values
-        - Boolean fields remain as bool (pystache treats False as falsy)
-        - apis list entries are preserved as dicts
+        The context for pystache rendering: every field, no None values,
+        booleans kept as bool (pystache treats False as falsy).
         """
-        return {
-            # Trigger fields
-            "command": self.command,
-            "command_args": self.command_args,
-            "user": self.user,
-            "trigger_type": self.trigger_type,
-            # Issue creation fields
-            "closed_issue_number": self.closed_issue_number,
-            "closed_issue_url": self.closed_issue_url,
-            "release_plan_url": self.release_plan_url,
-            # State fields
-            "release_tag": self.release_tag,
-            "state": self.state,
-            "release_type": self.release_type,
-            "meta_release": self.meta_release,
-            "short_type": self.short_type,
-            # Snapshot fields
-            "snapshot_id": self.snapshot_id,
-            "snapshot_branch": self.snapshot_branch,
-            "snapshot_branch_url": self.snapshot_branch_url,
-            "release_review_branch": self.release_review_branch,
-            "release_review_branch_url": self.release_review_branch_url,
-            "src_commit_sha": self.src_commit_sha,
-            "release_pr_number": self.release_pr_number,
-            "release_pr_url": self.release_pr_url,
-            # API fields
-            "apis": self.apis,
-            # Dependency fields
-            "commonalities_release": self.commonalities_release,
-            "identity_consent_management_release": self.identity_consent_management_release,
-            # Error fields
-            "error_message": self.error_message,
-            "error_type": self.error_type,
-            # Derived boolean flags
-            "is_missing_file": self.is_missing_file,
-            "is_malformed_yaml": self.is_malformed_yaml,
-            "is_missing_field": self.is_missing_field,
-            "state_snapshot_active": self.state_snapshot_active,
-            "state_draft_ready": self.state_draft_ready,
-            "state_published": self.state_published,
-            "trigger_workflow_dispatch": self.trigger_workflow_dispatch,
-            "trigger_issue_close": self.trigger_issue_close,
-            "has_meta_release": self.has_meta_release,
-            "has_reason": self.has_reason,
-            # Display fields
-            "workflow_run_url": self.workflow_run_url,
-            "draft_release_url": self.draft_release_url,
-            "candidate_block_stripped": self.candidate_block_stripped,
-            "reason": self.reason,
-            # Publication fields
-            "release_url": self.release_url,
-            "reference_tag": self.reference_tag,
-            "reference_tag_url": self.reference_tag_url,
-            "sync_pr_number": self.sync_pr_number,
-            "sync_pr_url": self.sync_pr_url,
-            "main_sync_pr_number": self.main_sync_pr_number,
-            "main_sync_pr_url": self.main_sync_pr_url,
-            "src_commit_sha_short": self.src_commit_sha_short,
-            "confirm_tag": self.confirm_tag,
-            "publish_warnings": self.publish_warnings,
-            "has_sync_pr": self.has_sync_pr,
-            "has_main_sync_pr": self.has_main_sync_pr,
-            "has_publish_warnings": self.has_publish_warnings,
-            # Common file cache sync fields
-            "common_cache_status": self.common_cache_status,
-            "common_cache_details": self.common_cache_details,
-            "common_sync_pr_url": self.common_sync_pr_url,
-            "common_cache_stale": self.common_cache_stale,
-            "has_common_sync_pr": self.has_common_sync_pr,
-            "valid_actions": self.valid_actions,
-        }
+        return asdict(self)
+
+
+def build_context(**fields: Any) -> Dict[str, Any]:
+    """
+    A complete context from BotContext fields: all keys, defaults filled,
+    flags derived. A field name outside the schema is an error.
+    """
+    ctx = BotContext(**fields)
+    ctx.derive_flags()
+    return ctx.to_dict()
+
+
+def bot_context(plan: PlanDocument) -> Dict[str, Any]:
+    """The run's base context, derived from the plan document."""
+    release = plan.release
+    return build_context(
+        command=plan.trigger.command,
+        command_args=plan.trigger.command_args,
+        user=plan.trigger.user,
+        trigger_type=plan.trigger.trigger_type,
+        confirm_tag=plan.trigger.confirm_tag,
+        release_plan_url=plan.release_plan_url,
+        release_tag=plan.release_tag,
+        state=plan.state,
+        release_type=plan.release_type,
+        meta_release=release.meta_release or "",
+        base_branch=plan.base_branch,
+        snapshot_id=release.snapshot_id,
+        snapshot_branch=plan.snapshot_branch,
+        snapshot_branch_url=plan.tree_url(plan.snapshot_branch),
+        release_review_branch=release.release_review_branch,
+        release_review_branch_url=plan.tree_url(release.release_review_branch),
+        src_commit_sha=release.src_commit_sha,
+        release_pr_number=plan.release_pr_number,
+        release_pr_url=plan.pr_url(plan.release_pr_number),
+        draft_release_url=release.draft_release_url,
+        apis=list(release.apis),
+        commonalities_release=release.commonalities_release,
+        identity_consent_management_release=release.identity_consent_management_release,
+        workflow_run_url=plan.run_url,
+        common_cache_status=plan.cache.status,
+        common_cache_details=plan.cache.details,
+        common_sync_pr_url=plan.cache.sync_pr_url,
+    )

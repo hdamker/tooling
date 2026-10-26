@@ -95,14 +95,19 @@ class ConfigurationError:
 @dataclass
 class ReleaseInfoResult:
     """
-    Result of derive_state() call.
+    Result of derive_state(): the release of a base branch.
 
     Distinguishes between:
     - Success: Valid state derived from repository artifacts
     - Error: Configuration problem that prevents state derivation
 
-    The key insight: configuration errors are NOT a state. They are a
-    failure mode that should be surfaced to the user for correction.
+    Configuration errors are NOT a state. They are a failure mode that is
+    surfaced to the user for correction.
+
+    With a snapshot (SNAPSHOT_ACTIVE, DRAFT_READY) the snapshot fields come
+    from the snapshot branch and its release-metadata.yaml; without one, apis
+    and the dependency releases come from release-plan.yaml (api_version is
+    then the target version).
     """
     success: bool
     release_tag: Optional[str] = None
@@ -114,38 +119,16 @@ class ReleaseInfoResult:
     release_type: Optional[str] = None  # Release type if available
     meta_release: Optional[str] = None  # Meta-release name (e.g., "Sync26")
     base_branch: str = MAIN_BRANCH  # Branch whose release-plan.yaml was read
-
-    def to_dict(self) -> Dict[str, Any]:
-        """
-        Convert to dict for backward compatibility and workflow outputs.
-
-        Returns:
-            Dict with release info or error details
-        """
-        if self.success:
-            return {
-                "release_tag": self.release_tag,
-                "state": self.state,
-                "snapshot_branch": self.snapshot_branch,
-                "source": self.source,
-                "config_error": None,
-                "config_error_type": None,
-                "release_issue_number": self.release_issue_number,
-                "release_type": self.release_type,
-                "meta_release": self.meta_release,
-            }
-        else:
-            return {
-                "release_tag": None,
-                "state": None,  # NOT NOT_PLANNED - this is an error, not a state
-                "snapshot_branch": None,
-                "source": None,
-                "config_error": self.config_error.message if self.config_error else "Unknown error",
-                "config_error_type": self.config_error.error_type if self.config_error else "unknown",
-                "release_issue_number": None,
-                "release_type": None,
-                "meta_release": None,
-            }
+    # Snapshot details (release-metadata.yaml of the snapshot branch)
+    snapshot_id: str = ""
+    release_review_branch: str = ""
+    release_pr_number: Optional[int] = None
+    src_commit_sha: str = ""
+    draft_release_url: str = ""  # DRAFT_READY only
+    # API and dependency details (release-metadata.yaml, else release-plan.yaml)
+    apis: List[Dict[str, str]] = field(default_factory=list)
+    commonalities_release: str = ""
+    identity_consent_management_release: str = ""
 
 
 class ReleaseStateManager:
@@ -230,6 +213,7 @@ class ReleaseStateManager:
                 release_type=plan_release_type,
                 meta_release=meta_release,
                 base_branch=base_branch,
+                **self._plan_details(plan),
             )
 
         # Step 3: Check for snapshot branches
@@ -269,6 +253,10 @@ class ReleaseStateManager:
             else:
                 state = ReleaseState.SNAPSHOT_ACTIVE
 
+            snapshot_id = snapshot_branch[len(config.SNAPSHOT_BRANCH_PREFIX):]
+            review_branch = f"{config.RELEASE_REVIEW_BRANCH_PREFIX}{snapshot_id}"
+            repo_section = (metadata or {}).get("repository") or {}
+            deps = (metadata or {}).get("dependencies") or {}
             return ReleaseInfoResult(
                 success=True,
                 release_tag=effective_tag,
@@ -279,6 +267,14 @@ class ReleaseStateManager:
                 release_type=metadata_release_type,
                 meta_release=meta_release,
                 base_branch=base_branch,
+                snapshot_id=snapshot_id,
+                release_review_branch=review_branch,
+                release_pr_number=self.gh.find_pr_for_branch(review_branch),
+                src_commit_sha=repo_section.get("src_commit_sha") or snapshot_branches[0].sha,
+                draft_release_url=self._draft_release_url(effective_tag) if state == ReleaseState.DRAFT_READY else "",
+                apis=list((metadata or {}).get("apis") or []),
+                commonalities_release=deps.get("commonalities_release", "") or "",
+                identity_consent_management_release=deps.get("identity_consent_management_release", "") or "",
             )
 
         # Step 4: No snapshot — use release-plan.yaml state
@@ -297,7 +293,25 @@ class ReleaseStateManager:
             release_type=plan_release_type,
             meta_release=meta_release,
             base_branch=base_branch,
+            **self._plan_details(plan),
         )
+
+    @staticmethod
+    def _plan_details(plan: dict) -> Dict[str, Any]:
+        """apis and dependency releases of a release-plan.yaml (no snapshot)."""
+        deps = plan.get("dependencies") or {}
+        return {
+            "apis": [
+                {"api_name": api.get("api_name", ""), "api_version": api.get("target_api_version", "")}
+                for api in plan.get("apis") or []
+            ],
+            "commonalities_release": deps.get("commonalities_release", "") or "",
+            "identity_consent_management_release": deps.get("identity_consent_management_release", "") or "",
+        }
+
+    def _draft_release_url(self, release_tag: str) -> str:
+        release = self.gh.get_draft_release(release_tag)
+        return release.html_url if release else ""
 
     def _draft_release_exists(self, release_tag: str, retry: bool = False) -> bool:
         """
@@ -533,3 +547,40 @@ class ReleaseStateManager:
         except yaml.YAMLError as e:
             print(f"Warning: Failed to parse {config.RELEASE_METADATA_FILE} from {ref}: {e}")
             return None
+
+
+def main(client=None) -> int:
+    """
+    Workflow step of validation.yml (P-033): the active release state of a branch.
+
+    Outputs state, snapshot_branch and release_issue_number; all empty on a
+    configuration error, which is logged as a warning (validation decides).
+
+    Usage:
+        python3 -m release_automation.scripts.state_manager
+    """
+    import os
+
+    from .trigger import write_outputs
+
+    env = os.environ
+    if client is None:
+        client = GitHubClient(repo=env["GITHUB_REPOSITORY"], token=env.get("GITHUB_TOKEN"))
+    base_branch = env.get("BASE_BRANCH") or MAIN_BRANCH
+    info = ReleaseStateManager(client).derive_state(base_branch=base_branch)
+    if not info.success:
+        print(f"::warning::Configuration error: {info.config_error.message}")
+    else:
+        print(f"Release {info.release_tag}: {info.state.value} on {base_branch}")
+    write_outputs(env["GITHUB_OUTPUT"], {
+        "state": info.state.value if info.state else "",
+        "snapshot_branch": info.snapshot_branch or "",
+        "release_issue_number": str(info.release_issue_number or ""),
+    })
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())

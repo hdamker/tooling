@@ -1,7 +1,9 @@
-"""Tests for command_policy.py: Trigger × ReleaseInfoResult → Plan | Rejection.
+"""Tests for command_policy.py: Trigger × ReleaseInfoResult → Plan | Rejection, and the plan step.
 
 Expected messages and check order reproduce the former inline `Validate Command`
-github-script step of release-automation-reusable.yml.
+github-script step of release-automation-reusable.yml. main() is the plan
+job's plan step: it derives the state from a (fake) repository, so its tests
+describe the repository rather than the derived state.
 """
 
 import json
@@ -15,6 +17,7 @@ from release_automation.scripts.command_policy import (
     Rejection,
     evaluate,
 )
+from release_automation.scripts.plan_document import PlanDocument
 from release_automation.scripts.github_client import GitHubClientError
 from release_automation.scripts.maintenance_branch import BranchPlan
 from release_automation.scripts.state_manager import (
@@ -525,7 +528,7 @@ def test_base_branch_reaches_the_plan_document(tmp_path, monkeypatch):
         FakeClient(),
     )
 
-    assert json.loads(out["plan"])["base_branch"] == MB
+    assert plan_of(out).base_branch == MB and plan_of(out).release.base_branch == MB
 
 
 # ── configuration errors ─────────────────────────────────────────────────────
@@ -592,30 +595,93 @@ def test_plan_and_rejection_serialise_to_json():
     }
 
 
-# ── main(): env → GITHUB_OUTPUT ──────────────────────────────────────────────
+# ── main(): the plan step (repository → plan document, response, summary) ───
 
 
-STATE_KEYS = ("STATE", "RELEASE_TAG", "RELEASE_TYPE", "CONFIG_ERROR", "CONFIG_ERROR_TYPE", "SRC_COMMIT_SHA",
-              "SNAPSHOT_BRANCH", "RELEASE_REVIEW_BRANCH", "RELEASE_PR_NUMBER", "RELEASE_ISSUE_NUMBER",
-              "COMMONALITIES_RELEASE", "IDENTITY_CONSENT_MANAGEMENT_RELEASE", "BASE_BRANCH")
+MARKER = "<!-- release-automation:workflow-owned -->\n<!-- release-automation:release-tag:{tag} -->"
 
 
-def run_main(tmp_path, monkeypatch, trigger, env, client):
+def repo_from(env, client=None):
+    """A FakeGitHub holding the repository state the test describes (the former STATE_* values)."""
+    permissions = dict(getattr(client, "permissions", {}) or {})
+    gh = FakeGitHub(permissions=permissions)
+    base = env.get("BASE_BRANCH", "main")
+    gh.branches["main"] = "m1"
+    if base != "main":
+        gh.branches[base] = "b1"
+    codeowners = getattr(client, "codeowners", None)
+    if codeowners is not None:
+        gh.files[("main", "CODEOWNERS")] = codeowners
+    plan_file = (base, "release-plan.yaml")
+    error = env.get("CONFIG_ERROR_TYPE")
+    if error == "missing_file":
+        return gh
+    if error == "malformed_yaml":
+        gh.files[plan_file] = "a: ["
+        return gh
+    if error == "missing_field":
+        gh.files[plan_file] = "repository: {}\n"
+        return gh
+    if error == "release_line":
+        gh.files[plan_file] = plan_yaml("r1.9", "maintenance-release")
+        gh.branches[MB] = "b1"
+        return gh
+    tag = env.get("RELEASE_TAG", "r1.2")
+    release_type = env.get("RELEASE_TYPE", "pre-release-alpha")
+    state = env.get("STATE", "planned")
+    gh.files[plan_file] = plan_yaml(tag, "none" if state == "not-planned" else release_type)
+    if state == "published":
+        gh.tags[tag] = "t1"
+    if state in ("snapshot-active", "draft-ready"):
+        snapshot = env.get("SNAPSHOT_BRANCH") or f"release-snapshot/{tag}-abcdef0"
+        review = env.get("RELEASE_REVIEW_BRANCH") or snapshot.replace("release-snapshot/", "release-review/")
+        gh.branches[snapshot] = "s1"
+        gh.branches[review] = "v1"
+        gh.files[(snapshot, "release-metadata.yaml")] = (
+            f"repository:\n  release_tag: {tag}\n  release_type: {release_type}\n"
+            f"  src_commit_sha: {env.get('SRC_COMMIT_SHA', 'a' * 40)}\n"
+            f"dependencies:\n  commonalities_release: {env.get('COMMONALITIES_RELEASE', '')}\n"
+            f"  identity_consent_management_release: {env.get('IDENTITY_CONSENT_MANAGEMENT_RELEASE', '')}\n"
+        )
+        if env.get("RELEASE_PR_NUMBER"):
+            gh.prs.append({"number": int(env["RELEASE_PR_NUMBER"]), "head": review, "base": snapshot})
+        if state == "draft-ready":
+            gh.releases.append({"id": 1, "tag": tag, "target": snapshot, "draft": True, "prerelease": True,
+                                "html_url": "https://github.com/camaraproject/ReleaseTest2/releases/untagged-1"})
+    if env.get("RELEASE_ISSUE_NUMBER"):
+        gh.issues.append({"number": int(env["RELEASE_ISSUE_NUMBER"]), "body": MARKER.format(tag=tag),
+                          "label_names": ["release-issue"], "labels": [{"name": "release-issue"}]})
+    return gh
+
+
+def run_main(tmp_path, monkeypatch, trigger, env, client, gh=None):
+    """Run the plan step; env describes the repository (repo_from, unless client is one) and the cache check (COMMON_*)."""
+    gh = gh or (client if isinstance(client, FakeGitHub) else repo_from(env, client))
     output_path = tmp_path / "output"
     output_path.write_text("")
     monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
     monkeypatch.setenv("TRIGGER_JSON", json.dumps(trigger.__dict__))
-    # STATE_JSON is toJSON(steps.state.outputs) of the derive-release-state step
-    monkeypatch.setenv("STATE_JSON", json.dumps({k.lower(): env[k] for k in STATE_KEYS if k in env}))
-    for name in ("COMMON_CACHE_STATUS", "COMMON_CACHE_DETAILS", "COMMON_SYNC_PR_URL", "BASE_CONTEXT", "ACK_COMMENT_ID"):
-        monkeypatch.setenv(name, env.get(name, ""))
+    monkeypatch.setenv("BASE_BRANCH", env.get("BASE_BRANCH", "main"))
+    monkeypatch.setenv("ACK_COMMENT_ID", env.get("ACK_COMMENT_ID", ""))
+    monkeypatch.delenv("API_REPO_PATH", raising=False)
+    monkeypatch.setattr(policy, "check_cache", lambda api_repo, info, client: CommonCache(
+        status=env.get("COMMON_CACHE_STATUS", ""), details=env.get("COMMON_CACHE_DETAILS", ""),
+        sync_pr_url=env.get("COMMON_SYNC_PR_URL", ""),
+    ))
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
     monkeypatch.setenv("GITHUB_REPOSITORY", "camaraproject/ReleaseTest2")
     monkeypatch.setenv("GITHUB_RUN_ID", "123")
-    policy.main(client=client)
+    exit_code = policy.main(client=gh)
 
     from release_automation.tests.test_trigger import read_outputs
-    return read_outputs(output_path)
+    out = read_outputs(output_path)
+    out["exit_code"] = exit_code
+    out["comments"] = gh.comments
+    return out
+
+
+def plan_of(out) -> PlanDocument:
+    return PlanDocument.from_json(out["plan"])
 
 
 def test_main_writes_allowed_plan(tmp_path, monkeypatch):
@@ -625,10 +691,10 @@ def test_main_writes_allowed_plan(tmp_path, monkeypatch):
         FakeClient(permissions={"alice": "write"}),
     )
 
-    plan = json.loads(out["plan"])
-    assert plan["allowed"] is True
-    assert plan["response"] == "publish_confirmation"
-    assert out["action"] == ""
+    plan = plan_of(out)
+    assert plan.allowed is True
+    assert plan.response == "publish_confirmation"
+    assert (out["action"], out["exit_code"]) == ("", 0)
 
 
 def test_main_writes_rejection_with_cache_inputs(tmp_path, monkeypatch):
@@ -639,25 +705,21 @@ def test_main_writes_rejection_with_cache_inputs(tmp_path, monkeypatch):
         FakeClient(permissions={"alice": "write"}),
     )
 
-    plan = json.loads(out["plan"])
-    assert plan["allowed"] is False
-    assert plan["error_message"] == "Common file cache is stale: d. Merge the sync PR: https://x/pull/1"
+    plan = plan_of(out)
+    assert plan.allowed is False
+    assert plan.error_message == "Common file cache is stale: d. Merge the sync PR: https://x/pull/1"
+    assert plan.cache == CommonCache(status="stale", details="d", sync_pr_url="https://x/pull/1")
     assert (out["action"], out["finalize"]) == ("", "false")
 
 
 def test_main_config_error_plan(tmp_path, monkeypatch):
-    out = run_main(
-        tmp_path, monkeypatch, slash("sync-issue"),
-        {"CONFIG_ERROR": "release-plan.yaml not found", "CONFIG_ERROR_TYPE": "missing_file"},
-        FakeClient(),
-    )
+    out = run_main(tmp_path, monkeypatch, slash("sync-issue"), {"CONFIG_ERROR_TYPE": "missing_file"}, FakeClient())
 
-    assert json.loads(out["plan"]) == {
-        "allowed": False,
-        "error_message": "release-plan.yaml not found",
-        "response": "config_error",
-        "error_type": "missing_file",
-    }
+    plan = plan_of(out)
+    assert (plan.allowed, plan.response, plan.error_type) == (False, "config_error", "missing_file")
+    assert plan.error_message == "No release-plan.yaml found on main branch"
+    assert not plan.release.success and plan.release.config_error.error_type == "missing_file"
+    assert (out["action"], out["finalize"]) == ("", "false")
 
 
 def test_main_publish_confirmation_response(tmp_path, monkeypatch):
@@ -667,12 +729,12 @@ def test_main_publish_confirmation_response(tmp_path, monkeypatch):
         FakeClient(permissions={"alice": "write"}),
     )
 
-    assert out["response"] == "publish_confirmation"
-    assert out["response_release_tag"] == "r1.2"
-    assert json.loads(out["response_context"]) == {
-        "draft_release_url": "https://github.com/camaraproject/ReleaseTest2/releases",
-        "src_commit_sha_short": "abcdef0",
-    }
+    assert plan_of(out).response == "publish_confirmation"
+    (comment,) = out["comments"]
+    assert comment["issue"] == 42
+    assert comment["body"].startswith("<!-- release-bot:r1.2 -->\n**⚠️ Confirmation required — State: `draft-ready`**")
+    assert "[`r1.2`](https://github.com/camaraproject/ReleaseTest2/releases) · Source: `abcdef0`" in comment["body"]
+    assert out["result_comment_id"] == "" and out["finalize"] == "false"
 
 
 def test_main_rejection_response_context_is_valid_json(tmp_path, monkeypatch):
@@ -682,37 +744,74 @@ def test_main_rejection_response_context_is_valid_json(tmp_path, monkeypatch):
         FakeClient(permissions={"alice": "write"}),
     )
 
-    assert out["response"] == "command_rejected"
-    assert json.loads(out["response_context"]) == {"error_message": json.loads(out["plan"])["error_message"]}
+    assert plan_of(out).response == "command_rejected"
+    (comment,) = out["comments"]
+    assert comment["body"].startswith("<!-- release-bot:r1.2 -->\n**❌ Command rejected: `/publish-release` — State: `draft-ready`**")
+    assert plan_of(out).error_message in comment["body"]
 
 
-def test_main_interim_response(tmp_path, monkeypatch):
+def test_main_interim_response_updates_the_ack(tmp_path, monkeypatch):
+    out = run_main(
+        tmp_path, monkeypatch, slash("sync-issue"), {"STATE": "planned", "RELEASE_TAG": "r1.2", "ACK_COMMENT_ID": "555"},
+        FakeClient(permissions={"alice": "write"}),
+    )
+
+    assert plan_of(out).response == "interim_processing"
+    (comment,) = out["comments"]
+    assert comment["id"] == 555 and comment["issue"] is None  # updated, not created
+    assert comment["body"].startswith("<!-- release-bot:r1.2 -->\n**⏳ Processing: `/sync-issue`**")
+    assert "@alice · [View workflow run](https://github.com/camaraproject/ReleaseTest2/actions/runs/123)" in comment["body"]
+    assert out["result_comment_id"] == "555" and plan_of(out).result_comment_id == "555"
+
+
+def test_main_interim_response_without_ack_creates_a_comment(tmp_path, monkeypatch):
     out = run_main(
         tmp_path, monkeypatch, slash("sync-issue"), {"STATE": "planned", "RELEASE_TAG": "r1.2"},
         FakeClient(permissions={"alice": "write"}),
     )
 
-    assert (out["response"], out["response_context"], out["response_release_tag"]) == (
-        "interim_processing", "{}", "r1.2"
-    )
+    (comment,) = out["comments"]
+    assert comment["issue"] == 42
+    assert out["result_comment_id"] == str(comment["id"])
+
+
+def test_main_failed_interim_post_does_not_stop_the_command(tmp_path, monkeypatch, capsys):
+    from release_automation.tests.fake_github import gh_error
+
+    env = {"STATE": "planned", "RELEASE_TAG": "r1.2", "ACK_COMMENT_ID": "555"}
+    gh = repo_from(env, FakeClient(permissions={"alice": "write"}))
+    gh.fail["update_comment"] = [gh_error("HTTP 502")]
+
+    out = run_main(tmp_path, monkeypatch, slash("sync-issue"), env, None, gh=gh)
+
+    assert (out["exit_code"], out["finalize"], out["result_comment_id"]) == (0, "true", "")
+    assert "::warning::Could not post interim_processing" in capsys.readouterr().out
+
+
+def test_main_failed_rejection_post_fails_the_job(tmp_path, monkeypatch, capsys):
+    from release_automation.tests.fake_github import gh_error
+
+    env = {"STATE": "planned", "RELEASE_TAG": "r1.2"}
+    gh = repo_from(env, FakeClient(permissions={"alice": "write"}))
+    gh.fail["create_comment"] = [gh_error("HTTP 502")]
+
+    out = run_main(tmp_path, monkeypatch, slash("delete-draft"), env, None, gh=gh)
+
+    assert out["exit_code"] == 1
+    assert "::error::Could not post command_rejected" in capsys.readouterr().out
 
 
 def test_main_config_error_response(tmp_path, monkeypatch):
-    out = run_main(
-        tmp_path, monkeypatch, slash("create-snapshot"),
-        {"CONFIG_ERROR": "release-plan.yaml not found", "CONFIG_ERROR_TYPE": "missing_file"},
-        FakeClient(),
-    )
+    out = run_main(tmp_path, monkeypatch, slash("create-snapshot"), {"CONFIG_ERROR_TYPE": "missing_file"}, FakeClient())
 
-    assert out["response"] == "config_error"
-    assert out["response_release_tag"] == "unknown"
-    assert json.loads(out["response_context"]) == {
-        "error_type": "missing_file",
-        "error_message": "release-plan.yaml not found",
-        "command": "create-snapshot",
-        "user": "alice",
-        "workflow_run_url": "https://github.com/camaraproject/ReleaseTest2/actions/runs/123",
-    }
+    assert plan_of(out).response == "config_error"
+    (comment,) = out["comments"]
+    body = comment["body"]
+    assert body.startswith("<!-- release-bot:unknown -->\n**❌ Configuration error**")
+    assert "No release-plan.yaml found on main branch" in body
+    assert "Fix on `main`: create `release-plan.yaml`" in body
+    assert "[View workflow logs](https://github.com/camaraproject/ReleaseTest2/actions/runs/123)" in body
+    assert out["exit_code"] == 0
 
 
 @pytest.mark.parametrize(
@@ -725,19 +824,35 @@ def test_main_config_error_response(tmp_path, monkeypatch):
 def test_main_non_slash_trigger_has_no_response(tmp_path, monkeypatch, trigger):
     out = run_main(tmp_path, monkeypatch, trigger, {"STATE": "planned", "RELEASE_TAG": "r1.2"}, FakeClient())
 
-    assert out["response"] == ""
-    assert json.loads(out["plan"])["allowed"] is True
+    assert plan_of(out).response == "" and out["comments"] == []
+    assert plan_of(out).allowed is True
 
 
-def test_main_non_slash_config_error(tmp_path, monkeypatch):
+def test_main_non_slash_config_error_fails_with_the_help_in_the_log(tmp_path, monkeypatch, capsys):
     out = run_main(
         tmp_path, monkeypatch,
         Trigger(trigger_type="push", command="sync-issue", should_continue=True),
-        {"CONFIG_ERROR": "bad", "CONFIG_ERROR_TYPE": "malformed_yaml"}, FakeClient(),
+        {"CONFIG_ERROR_TYPE": "malformed_yaml"}, FakeClient(),
     )
 
-    assert (out["response"], out["action"], out["finalize"]) == ("", "", "false")
-    assert json.loads(out["plan"])["error_type"] == "malformed_yaml"
+    assert (plan_of(out).response, out["action"], out["finalize"], out["exit_code"]) == ("", "", "false", 1)
+    assert plan_of(out).error_type == "malformed_yaml" and out["comments"] == []
+    log = capsys.readouterr().out
+    assert "::error::Configuration Error: Invalid YAML syntax in release-plan.yaml" in log
+    # F10: the help comes from the config_error template, not from a bash case
+    assert "Fix on `main`: correct the YAML syntax in `release-plan.yaml`" in log
+
+
+def test_main_release_line_config_error_help(tmp_path, monkeypatch, capsys):
+    run_main(
+        tmp_path, monkeypatch,
+        Trigger(trigger_type="push", command="sync-issue", should_continue=True, ref="main"),
+        {"CONFIG_ERROR_TYPE": "release_line"}, FakeClient(),
+    )
+
+    log = capsys.readouterr().out
+    assert "release-plan.yaml on main targets r1.9, which is released from maintenance/r1" in log
+    assert "A cycle with a `maintenance/rX` branch is released from that branch only" in log
 
 
 # ── finalize gate ────────────────────────────────────────────────────────────
@@ -816,47 +931,63 @@ def test_pr_merge_publishes_on_merge_when_the_policy_says_so(monkeypatch):
 
 
 def test_main_writes_the_plan_document(tmp_path, monkeypatch):
-    base = {"release_tag": "r1.2", "state": "snapshot-active", "user": "alice"}
+    # 107 D3: the typed plan is the only derivation; act and finalize read it back with from_json
+    trigger = slash("discard-snapshot", args="redo")
     out = run_main(
-        tmp_path, monkeypatch, slash("discard-snapshot", args="redo"),
+        tmp_path, monkeypatch, trigger,
         {"STATE": "snapshot-active", "RELEASE_TAG": "r1.2", "RELEASE_TYPE": "pre-release-rc",
          "SRC_COMMIT_SHA": "abcdef0123", "SNAPSHOT_BRANCH": "release-snapshot/r1.2-abcdef0",
          "RELEASE_REVIEW_BRANCH": "release-review/r1.2-abcdef0", "RELEASE_PR_NUMBER": "24",
          "RELEASE_ISSUE_NUMBER": "23", "COMMONALITIES_RELEASE": "r4.3",
          "IDENTITY_CONSENT_MANAGEMENT_RELEASE": "r4.3",
-         "COMMON_CACHE_STATUS": "in_sync", "BASE_CONTEXT": json.dumps(base), "ACK_COMMENT_ID": "555"},
+         "COMMON_CACHE_STATUS": "in_sync", "ACK_COMMENT_ID": "555"},
         FakeClient(permissions={"alice": "write"}),
     )
 
     assert (out["action"], out["finalize"]) == ("discard-snapshot", "true")
-    assert json.loads(out["plan"]) == {
-        "allowed": True,
-        "trigger_type": "slash_command",
-        "command": "discard-snapshot",
-        "release_tag": "r1.2",
-        "state": "snapshot-active",
-        "release_type": "pre-release-rc",
-        "confirm_tag": "",
-        "base_branch": "main",
-        "publish_mode": "draft",
-        "response": "interim_processing",
-        "action": "discard-snapshot",
-        "branch_plan": None,
-        "command_args": "redo",
-        "issue_number": "42",
-        "user": "alice",
-        "snapshot_branch": "release-snapshot/r1.2-abcdef0",
-        "release_review_branch": "release-review/r1.2-abcdef0",
-        "release_pr_number": "24",
-        "release_issue_number": "23",
-        "src_commit_sha": "abcdef0123",
-        "commonalities_release": "r4.3",
-        "identity_consent_management_release": "r4.3",
-        "common_cache_status": "in_sync",
-        "common_cache_details": "",
-        "common_sync_pr_url": "",
-        "base_context": base,
-    }
+    plan = plan_of(out)
+    assert plan == PlanDocument(
+        trigger=trigger,
+        release=ReleaseInfoResult(
+            success=True, release_tag="r1.2", state=ReleaseState.SNAPSHOT_ACTIVE,
+            snapshot_branch="release-snapshot/r1.2-abcdef0", source="release-metadata.yaml",
+            release_issue_number=23, release_type="pre-release-rc", meta_release=None, base_branch="main",
+            snapshot_id="r1.2-abcdef0", release_review_branch="release-review/r1.2-abcdef0", release_pr_number=24,
+            src_commit_sha="abcdef0123", apis=[], commonalities_release="r4.3",
+            identity_consent_management_release="r4.3",
+        ),
+        cache=CommonCache(status="in_sync"),
+        base_branch="main",
+        allowed=True,
+        publish_mode="draft",
+        response="interim_processing",
+        action="discard-snapshot",
+        repo_url="https://github.com/camaraproject/ReleaseTest2",
+        run_url="https://github.com/camaraproject/ReleaseTest2/actions/runs/123",
+        result_comment_id="555",
+    )
+    assert PlanDocument.from_json(plan.to_json()) == plan
+
+
+def test_plan_document_round_trips_a_config_error_and_a_branch_plan():
+    documents = [
+        PlanDocument(
+            trigger=Trigger(trigger_type="push", command="sync-issue", should_continue=True, ref="main"),
+            release=ReleaseInfoResult(success=False, config_error=ConfigurationError(
+                error_type="release_line", message="m", file_path="release-plan.yaml", field_path="repository.target_release_tag",
+            )),
+            base_branch="main", allowed=False, error_message="m", error_type="release_line",
+        ),
+        PlanDocument(
+            trigger=create_mb(), release=ReleaseInfoResult(success=True, release_tag="r2.1", state=ReleaseState.PLANNED),
+            base_branch="main", action="create-maintenance-branch", publish_mode="draft",
+            branch_plan=BranchPlan(cycle="r1", branch=MB, patched_release="r1.8", patched_sha="a" * 40, next_tag="r1.9"),
+        ),
+    ]
+    for document in documents:
+        assert PlanDocument.from_json(document.to_json()) == document
+    assert documents[0].state == "" and documents[0].release_tag == ""
+    assert documents[1].release_issue_number == "" and documents[1].release_pr_number == ""
 
 
 # ── create-maintenance-branch (spec 3.1-3.5) ─────────────────────────────────
@@ -940,8 +1071,8 @@ def test_main_writes_the_refusal_of_a_dispatch(tmp_path, monkeypatch):
         cycle_one(main_plan=("r1.9", "maintenance-release")),
     )
 
-    assert (out["action"], out["finalize"], out["response"]) == ("", "false", "")
-    assert "main has not left cycle r1" in out["refusal"]
+    assert (out["action"], out["finalize"], plan_of(out).response, out["exit_code"]) == ("", "false", "", 1)
+    assert "main has not left cycle r1" in plan_of(out).error_message and out["comments"] == []
 
 
 def test_main_has_no_refusal_for_a_plan_or_a_slash_rejection(tmp_path, monkeypatch):
@@ -950,8 +1081,8 @@ def test_main_has_no_refusal_for_a_plan_or_a_slash_rejection(tmp_path, monkeypat
     rejected = run_main(tmp_path, monkeypatch, slash("delete-draft"),
                         {"STATE": "planned", "RELEASE_TAG": "r1.2"}, WRITE)
 
-    assert allowed["refusal"] == "" and rejected["refusal"] == ""
-    assert json.loads(allowed["plan"])["branch_plan"]["next_tag"] == "r1.9"
+    assert allowed["exit_code"] == 0 and rejected["exit_code"] == 0
+    assert plan_of(allowed).branch_plan.next_tag == "r1.9"
 
 
 # ── plan job step summary (tooling#154) ──────────────────────────────────────
@@ -1003,11 +1134,11 @@ def test_summary_of_a_confirmation_request(tmp_path, monkeypatch):
 def test_summary_of_a_config_error(tmp_path, monkeypatch):
     text = summary_of(
         tmp_path, monkeypatch, Trigger(trigger_type="push", command="sync-issue", user="erin", should_continue=True, ref="main"),
-        {"CONFIG_ERROR": "release-plan.yaml on main targets r1.9", "CONFIG_ERROR_TYPE": "release_line"}, WRITE,
+        {"CONFIG_ERROR_TYPE": "release_line"}, WRITE,
     )
 
     assert "| Trigger | push by @erin, ref main |" in text
-    assert "| Plan | configuration error (release_line): release-plan.yaml on main targets r1.9 |" in text
+    assert "| Plan | configuration error (release_line): release-plan.yaml on main targets r1.9, which is released from maintenance/r1." in text
 
 
 def test_summary_of_a_sync_without_action(tmp_path, monkeypatch):
@@ -1063,3 +1194,30 @@ def test_no_summary_without_the_variable(tmp_path, monkeypatch):
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
 
     run_main(tmp_path, monkeypatch, slash("sync-issue"), {"STATE": "planned", "RELEASE_TAG": "r1.2"}, WRITE)
+
+
+# ── check_cache: the plan step's common-file cache check (M10) ──────────────
+
+
+def _stale_info(base_branch="main", release="r4.3"):
+    return ReleaseInfoResult(success=True, release_tag="r1.2", state=ReleaseState.PLANNED, base_branch=base_branch,
+                             commonalities_release=release, identity_consent_management_release="r4.2")
+
+
+def test_check_cache_detects_a_missing_common_dir_and_finds_the_lines_sync_pr(tmp_path):
+    gh = FakeGitHub()
+    gh.prs.append({"number": 9, "head": "sync-common/r4.3", "base": "main"})
+    gh.prs.append({"number": 10, "head": f"sync-common/{MB}/r4.3", "base": MB})
+
+    main = policy.check_cache(tmp_path / "missing", _stale_info(), gh)
+    line = policy.check_cache(tmp_path / "missing", _stale_info(base_branch=MB), gh)
+
+    assert main == CommonCache(status="stale", details="code/common/ directory is missing",
+                               sync_pr_url="https://github.com/camaraproject/Example/pull/9")
+    assert line.sync_pr_url == "https://github.com/camaraproject/Example/pull/10"
+
+
+def test_check_cache_is_skipped_without_a_declared_release_or_a_checkout(tmp_path):
+    assert policy.check_cache(tmp_path, _stale_info(release=""), FakeGitHub()) == CommonCache()
+    assert policy.check_cache(None, _stale_info(), FakeGitHub()) == CommonCache()
+    assert policy.check_cache(tmp_path, CONFIG_ERROR, FakeGitHub()) == CommonCache()

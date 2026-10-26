@@ -32,9 +32,11 @@ import sys
 from dataclasses import asdict
 from typing import Any, Dict, List, Tuple
 
+from .bot_context import bot_context
 from .bot_responder import post_comment
 from .config import STATE_DRAFT_READY
 from .github_client import GitHubClientError
+from .plan_document import PlanDocument
 
 SNAPSHOT_FIELDS = (
     "success", "snapshot_id", "snapshot_branch", "release_review_branch",
@@ -54,37 +56,40 @@ def _outcome(action: str, result) -> Dict[str, str]:
     return {"action": action, **values}
 
 
-def act(plan: Dict[str, Any], gh, event: Dict[str, Any], issues=None) -> Dict[str, str]:
+def act(plan: PlanDocument, gh, event: Dict[str, Any], issues=None) -> Dict[str, str]:
     from .draft_release import create_draft, delete_draft, discard_snapshot, publish_on_merge
     from .issue_events import reopen_release_issue
-    from .maintenance_branch import BranchPlan, create
+    from .maintenance_branch import create
     from .release_publisher import publish_draft
 
     issues = issues or gh
-    action = plan["action"]
-    tag = plan["release_tag"]
-    snapshot = plan["snapshot_branch"]
-    review = plan["release_review_branch"]
+    action = plan.action
+    tag = plan.release_tag
+    snapshot = plan.snapshot_branch
+    review = plan.release_review_branch
     print(f"Action: {action} ({tag})")
 
     match action:
         case "discard-snapshot":
-            return _outcome(action, discard_snapshot(gh, plan["release_pr_number"], snapshot, review))
+            return _outcome(action, discard_snapshot(gh, plan.release_pr_number, snapshot, review))
         case "delete-draft":
             return _outcome(action, delete_draft(gh, tag, snapshot, review))
         case "publish-release":
-            return _outcome(action, publish_draft(gh, tag, snapshot, review, plan["src_commit_sha"]))
+            return _outcome(action, publish_draft(gh, tag, snapshot, review, plan.src_commit_sha))
         case "create-draft":
-            result = create_draft(gh, tag, snapshot, plan["release_type"])
+            result = create_draft(gh, tag, snapshot, plan.release_type)
             outcome = _outcome(action, result)
-            if result.success and plan["release_issue_number"]:
-                pr = event.get("pull_request") or {}
+            # The merged Release PR, for the comment and the issue sync
+            pr = event.get("pull_request") or {}
+            outcome["release_pr_number"] = str(pr.get("number", ""))
+            outcome["release_pr_url"] = pr.get("html_url", "")
+            if result.success and plan.release_issue_number:
                 try:
-                    post_comment(issues, "draft_created", plan["release_issue_number"], plan["base_context"], {
+                    post_comment(issues, "draft_created", plan.release_issue_number, bot_context(plan), {
                         "state": STATE_DRAFT_READY,
                         "draft_release_url": result.draft_release_url,
-                        "release_pr_number": str(pr.get("number", "")),
-                        "release_pr_url": pr.get("html_url", ""),
+                        "release_pr_number": outcome["release_pr_number"],
+                        "release_pr_url": outcome["release_pr_url"],
                         "candidate_block_stripped": outcome["candidate_block_stripped"],
                     }, tag)
                 except GitHubClientError as e:
@@ -93,12 +98,12 @@ def act(plan: Dict[str, Any], gh, event: Dict[str, Any], issues=None) -> Dict[st
             return outcome
         case "publish-on-merge":
             return _outcome(action, publish_on_merge(
-                gh, tag, snapshot, review, plan["release_type"], plan["src_commit_sha"]
+                gh, tag, snapshot, review, plan.release_type, plan.src_commit_sha
             ))
         case "reopen-issue":
-            return _outcome(action, reopen_release_issue(issues, int(plan["issue_number"]), tag, plan["base_context"]))
+            return _outcome(action, reopen_release_issue(issues, int(plan.trigger.issue_number), tag, bot_context(plan)))
         case "create-maintenance-branch":
-            return _outcome(action, create(gh, BranchPlan(**plan["branch_plan"])))
+            return _outcome(action, create(gh, plan.branch_plan))
         case _:
             raise ValueError(f"unknown action: {action}")
 
@@ -135,7 +140,7 @@ def main(argv: List[str], gh=None, issues=None) -> int:
         write_outputs(env["GITHUB_OUTPUT"], {"outcome": json.dumps(outcome)})
         return 0
 
-    plan = json.loads(env["PLAN_JSON"])
+    plan = PlanDocument.from_json(env["PLAN_JSON"])
     with open(env["GITHUB_EVENT_PATH"], encoding="utf-8") as f:
         event = json.load(f)
     if gh is None:
