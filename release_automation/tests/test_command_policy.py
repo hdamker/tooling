@@ -162,7 +162,7 @@ def test_stale_cache_without_sync_pr():
 
     assert result.error_message == (
         "Common file cache is stale: code/common/ directory is missing. "
-        "Run workflow_dispatch to trigger sync, or close and reopen the Release Issue."
+        "Run /sync-issue to trigger the sync, or close and reopen the Release Issue."
     )
 
 
@@ -1022,7 +1022,8 @@ def test_create_maintenance_branch_plan(main_plan):
     assert result.branch_plan == BranchPlan(
         cycle="r1", branch=MB, patched_release="r1.8", patched_sha="a" * 40, next_tag="r1.9"
     )
-    assert policy.finalize_due(result)
+    # act writes the summary; no Release Issue of the new line exists for finalize to sync
+    assert not policy.finalize_due(result)
 
 
 def test_create_maintenance_branch_refused_while_main_is_on_the_cycle():
@@ -1174,8 +1175,9 @@ def test_summary_of_a_maintenance_branch_plan(tmp_path, monkeypatch):
         {"STATE": "planned", "RELEASE_TAG": "r2.1", "RELEASE_TYPE": "public-release"}, cycle_one(),
     )
 
+    # finalize is skipped: act writes the summary, no Release Issue of the new line exists yet
     assert ("| Plan | create-maintenance-branch: maintenance/r1 at r1.8 (aaaaaaa), plan parked at r1.9; "
-            "runs act, finalize |") in text
+            "runs act |") in text
 
 
 def test_summary_of_a_pr_merge_and_an_issue_event(tmp_path, monkeypatch):

@@ -303,7 +303,8 @@ class TestReleaseIssuesPerLine:
             {"repository": {"target_release_tag": "r1.9", "target_release_type": "maintenance-release"}}
         )
 
-        assert gh.create_issue.call_args.kwargs["title"] == "Release r1.9 (maintenance) (maintenance/r1)"
+        assert gh.create_issue.call_args.kwargs["title"] == "Release r1.9 (maintenance) on maintenance/r1"
+        assert "verify on `maintenance/r1`:" in gh.create_issue.call_args.kwargs["body"]
 
 
 class TestCreateReleaseIssue:

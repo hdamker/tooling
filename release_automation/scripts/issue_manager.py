@@ -97,12 +97,13 @@ class IssueManager:
         Generate a standardized issue title for a release.
 
         Format: "Release {tag} ({type}) — {meta_release}", followed by
-        " ({base_branch})" for a release from a maintenance branch
+        " on {base_branch}" for a release from a maintenance branch
 
         Examples:
             - "Release r4.1 (RC) — Sync26"
             - "Release r4.1 (alpha)"
             - "Release r4.1 (public)"
+            - "Release r1.9 (maintenance) on maintenance/r1"
 
         Args:
             release_tag: Release tag (e.g., "r4.1")
@@ -125,7 +126,7 @@ class IssueManager:
             title += f" — {meta_release}"
 
         if base_branch != MAIN_BRANCH:
-            title += f" ({base_branch})"
+            title += f" on {base_branch}"
 
         return title
 
@@ -288,7 +289,7 @@ class IssueManager:
             else:
                 lines.append(
                     f"\u26a0\ufe0f **Common file cache stale**{detail}. "
-                    f"Run `workflow_dispatch` to trigger sync."
+                    f"Run `/sync-issue` to trigger the sync."
                 )
 
         return "\n".join(lines)
@@ -297,7 +298,8 @@ class IssueManager:
         self,
         release_tag: str,
         release_type: str,
-        meta_release: Optional[str] = None
+        meta_release: Optional[str],
+        base_branch: str,
     ) -> str:
         """
         Generate a complete issue body template for a new Release Issue.
@@ -308,6 +310,7 @@ class IssueManager:
             release_tag: Release tag (e.g., "r4.1")
             release_type: Release type
             meta_release: Optional meta-release name
+            base_branch: Branch the release is prepared on (main or maintenance/rX)
 
         Returns:
             Complete issue body with empty sections
@@ -318,6 +321,7 @@ class IssueManager:
 
         return render_template("release_issue", {
             "release_tag": release_tag,
+            "base_branch": base_branch,
             "timestamp": timestamp,
             "readiness_url": (
                 "https://github.com/camaraproject/ReleaseManagement"

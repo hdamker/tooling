@@ -307,10 +307,11 @@ def test_result_template(command, jobs, template):
 
 
 @pytest.mark.parametrize("issue_action,template", [
-    ("updated", "issue_synced"), ("unchanged", "issue_synced"), ("error", "internal_error"),
+    ("updated", "issue_synced"), ("unchanged", "issue_synced"), ("error", "issue_sync_failed"),
 ])
 def test_sync_issue_result_follows_the_issue_sync(issue_action, template):
-    # F7 (#499): /sync-issue reports a result instead of staying at "Processing"
+    # F7 (#499): /sync-issue reports a result instead of staying at "Processing";
+    # a failed sync is not a workflow bug, so it gets its own template, not internal_error
     sync = WorkflowSync(issue_number="42", issue_action=issue_action)
 
     assert result_template(make_run({"command": "sync-issue"}), sync) == template
@@ -757,49 +758,6 @@ def test_summary(stubs, tmp_path):
     assert "| Post-release sync PR | created https://github.com/camaraproject/Example/pull/20 |" in text
     assert "| Result comment | release_published |" in text
     assert "| Published issue | updated |" in text
-
-
-BRANCH_PLAN = {"cycle": "r1", "branch": "maintenance/r1", "patched_release": "r1.8", "patched_sha": "a" * 40,
-               "next_tag": "r1.9"}
-
-
-def test_create_maintenance_branch_is_reported_in_the_summary_only(stubs, tmp_path):
-    summary = tmp_path / "summary"
-    gh = FakeGitHub()
-    run = make_run(
-        {"trigger_type": "workflow_dispatch", "command": "create-maintenance-branch", "release_tag": "r2.1",
-         "state": "planned", "result_comment_id": "", "branch_plan": BRANCH_PLAN},
-        {"create-maintenance-branch": ok(
-            branch="maintenance/r1", setup_commit_sha="c1d2e3f4", warning="source/r1.8 points to fffffff",
-            error_message="",
-        )},
-    )
-
-    report = run_finalize(run, clients(gh, tmp_path), str(summary))
-
-    # No Release Issue sync, no comment: main's issue is not concerned
-    assert gh.events == [] and "issue_sync" not in stubs and not report.errors
-    text = summary.read_text()
-    # spec 3.5 (107 D1): branch, source commit, the next step
-    assert ("| Maintenance branch | maintenance/r1 created at aaaaaaa, the source commit of r1.8; "
-            "set-up commit c1d2e3f |") in text
-    assert "| Release plan | parked at r1.9, target_release_type: none |" in text
-    assert ("| Next step | Open a PR into maintenance/r1 that sets target_release_type: maintenance-release "
-            "and raises the patch version of each API the release fixes; its merge creates the Release Issue "
-            "for r1.9. |") in text
-    assert "| Warning | source/r1.8 points to fffffff |" in text
-
-
-def test_failed_create_maintenance_branch_is_reported(stubs, tmp_path):
-    summary = tmp_path / "summary"
-    run = make_run(
-        {"trigger_type": "workflow_dispatch", "command": "create-maintenance-branch", "result_comment_id": ""},
-        {"create-maintenance-branch": ("failure", {"success": "false", "branch": "", "error_message": "Nothing created: x"})},
-    )
-
-    run_finalize(run, clients(FakeGitHub(), tmp_path), str(summary))
-
-    assert "| Maintenance branch | failed: Nothing created: x |" in summary.read_text()
 
 
 def test_main_exit_code(stubs, tmp_path, monkeypatch):

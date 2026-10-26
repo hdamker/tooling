@@ -578,6 +578,25 @@ class TestCheckReleasePlanMaintenanceLine:
         assert findings[0]["engine_rule"] == "check-release-plan-maintenance-line"
         assert "release cycle r1 already has a public release" in findings[0]["message"]
         assert f"'{release_type}'" in findings[0]["message"]
+        # The message starts from the branch and the patched release; the suggestion names the alternative on main
+        assert findings[0]["message"].startswith("on 'main', which maintains release cycle r1 from r1.6: ")
+        assert findings[0]["suggestion"] == (
+            "Use maintenance-release or pre-release-rc for a fix of release cycle r1 here; "
+            "new work is released from main in the next release cycle (r2.1)."
+        )
+
+    def test_skipped_tag_on_a_maintenance_branch_names_the_branch(self, tmp_path: Path):
+        history = _cycle_one_history(
+            _published_release("r1.7", release_type="maintenance-release", apis=[_published_api("1.2.1")]),
+            base_ref="maintenance/r1", maintenance_branches=["maintenance/r1"],
+        )
+        findings = self._findings(tmp_path, _maintenance_plan("r1.9", version="1.2.2"), history)
+
+        assert len(findings) == 1
+        assert findings[0]["message"].startswith(
+            "on 'maintenance/r1', which maintains release cycle r1 from r1.7: target_release_tag 'r1.9' skips tags"
+        )
+        assert findings[0]["suggestion"] == "Set target_release_tag: r1.8."
 
     # Spec 1.8
     def test_tag_must_be_next_in_cycle(self, tmp_path: Path):
@@ -753,6 +772,29 @@ class TestCheckReleasePlanMaintenanceApiVersions:
         assert findings[0]["api_name"] == "quality-on-demand"
         assert "minor version" in findings[0]["message"]
         assert "'1.2.0' in r1.6" in findings[0]["message"]
+        # 107 F15: the branch, the patched release, and the alternative on main
+        assert findings[0]["message"].startswith("on 'main', which maintains release cycle r1 from r1.6: API ")
+        assert findings[0]["suggestion"] == (
+            "Keep '1.2.0' or raise only its patch version for a maintenance release of r1.6; a new minor or "
+            "major version of 'quality-on-demand' is released from main in a later release cycle (r2.y)."
+        )
+
+    def test_minor_bump_on_a_maintenance_branch_names_the_branch(self, tmp_path: Path):
+        _write_release_plan(
+            tmp_path,
+            _make_plan(target_release_type="maintenance-release", target_release_tag="r1.7", apis=[_api("0.2.0")]),
+        )
+        history = _release_history(
+            _published_release("r1.6", apis=[_published_api("0.1.2")]),
+            base_ref="maintenance/r1", maintenance_branches=["maintenance/r1"],
+        )
+        findings = check_release_plan_maintenance_api_versions(tmp_path, _context_with_release_history(history))
+
+        assert len(findings) == 1
+        assert findings[0]["message"].startswith(
+            "on 'maintenance/r1', which maintains release cycle r1 from r1.6: API 'quality-on-demand' changes "
+            "'0.1.2' in r1.6 to '0.2.0'; for 0.y.z versions the minor version is breaking"
+        )
 
     # Spec 4.4
     def test_minor_bump_ok_when_later_cycle_published_higher_major(self, tmp_path: Path):
@@ -1382,6 +1424,35 @@ class TestCheckReleasePlanPublishedHistory:
         assert len(findings) == 1
         assert "cannot start a new release" in findings[0]["message"]
         assert "Change at least one API entry in a valid way" in findings[0]["suggestion"]
+
+    # Spec 3.8: on a maintenance line the message names the branch, the patched release and the alternative
+    def test_no_new_content_on_a_maintenance_line_names_the_branch(self, tmp_path: Path):
+        _write_release_plan(
+            tmp_path,
+            _make_plan(target_release_type="maintenance-release", target_release_tag="r1.9",
+                       apis=[_api("1.2.1")]),
+        )
+        history = _release_history(
+            _published_release("r1.6", apis=[_published_api("1.2.0")]),
+            _published_release("r1.8", release_type="maintenance-release", apis=[_published_api("1.2.1")]),
+            _published_release("r2.1", apis=[_published_api("2.0.0")]),
+            base_ref="maintenance/r1",
+            maintenance_branches=["maintenance/r1"],
+        )
+        context = _context_with_release_history(history)
+
+        findings = check_release_plan_published_history(tmp_path, context)
+
+        assert len(findings) == 1
+        assert findings[0]["message"].startswith(
+            "on 'maintenance/r1', which maintains release cycle r1 from r1.8, target_release_type "
+            "'maintenance-release' cannot start a new release"
+        )
+        assert findings[0]["message"].endswith("(no new content).")
+        assert findings[0]["suggestion"] == (
+            "Raise the patch version of each API the release fixes, keeping the API list of r1.8; "
+            "new content is released from main in a later release cycle (r2.y)."
+        )
 
     def test_pre_release_rc_after_rc_history_counts_as_new_content(
         self, tmp_path: Path

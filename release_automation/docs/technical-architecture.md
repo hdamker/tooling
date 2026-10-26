@@ -276,13 +276,14 @@ Renders bot messages from Mustache templates using pystache with strict mode (`m
 | `command_rejected.md` | Command not allowed in current state or insufficient permissions |
 | `config_error.md` | Invalid `release-plan.yaml` (missing, malformed, or incomplete) |
 | `snapshot_created.md` | Snapshot and Release PR created successfully |
-| `snapshot_failed.md` | Snapshot creation failed |
+| `snapshot_failed.md` | `/create-snapshot`, `/discard-snapshot` or `/delete-draft` failed (title names the command and the state) |
 | `snapshot_discarded.md` | Snapshot discarded by user |
 | `draft_created.md` | Draft release created from merged Release PR |
 | `draft_revoked.md` | Draft release deleted by user |
 | `issue_created.md` | Release Issue auto-created (posted on first sync) |
 | `issue_reopened.md` | Issue auto-reopened because active artifacts exist |
 | `issue_synced.md` | Result of `/sync-issue` |
+| `issue_sync_failed.md` | `/sync-issue` could not update the Release Issue |
 | `state_not_planned.md` | Release set to NOT_PLANNED (`target_release_type: none`) |
 | `publish_confirmation.md` | Confirmation prompt before publication |
 | `release_published.md` | Release published successfully |
@@ -850,7 +851,7 @@ release-metadata.yaml (snapshot branch, if exists)
 | Category | Example | Response Template | Recovery |
 |----------|---------|-------------------|----------|
 | Configuration | Invalid release-plan.yaml | `config_error` | Fix config, re-trigger |
-| Validation | Missing test file | `snapshot_failed` | Fix on main, retry |
+| Validation | Missing test file | `snapshot_failed` | Fix on the base branch, retry |
 | Permission | Non-maintainer / non-codeowner | `command_rejected` | Contact codeowner |
 | State | `/create-snapshot` when snapshot active | `command_rejected` | Discard first |
 | GitHub API | Branch creation fails | `internal_error` | Retry or escalate |

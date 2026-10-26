@@ -58,7 +58,7 @@ COMMANDS: Tuple[Command, ...] = (
             config.STATE_PLANNED, usage="<reason>", purpose="discard and return to `planned`"),
     Command("delete-draft", True, JOB_ACT, "draft_revoked", "snapshot_failed",
             config.STATE_PLANNED, usage="<reason>", purpose="delete draft and return to `planned`"),
-    Command("sync-issue", False, "", "issue_synced", "internal_error", hidden=True),
+    Command("sync-issue", False, "", "issue_synced", "issue_sync_failed", hidden=True),
     Command("publish-release", True, JOB_ACT, "release_published", "publish_failed",
             config.STATE_PUBLISHED, usage="--confirm {release_tag}", purpose="publish the release"),
 )

@@ -186,7 +186,7 @@ class TestIssueManagerGenerateTitle:
             base_branch="maintenance/r1",
         )
 
-        assert title == "Release r1.8 (maintenance) — Sync26 (maintenance/r1)"
+        assert title == "Release r1.8 (maintenance) — Sync26 on maintenance/r1"
 
     def test_generate_title_on_main_has_no_line(self):
         title = IssueManager().generate_title(
@@ -204,6 +204,10 @@ class TestIssueManagerShouldUpdateTitle:
 
         assert IssueManager().should_update_title("Release r1.8 (maintenance)", plan, base_branch="maintenance/r1")
         assert not IssueManager().should_update_title(
+            "Release r1.8 (maintenance) on maintenance/r1", plan, base_branch="maintenance/r1"
+        )
+        # The former double-parenthesis title is updated to the new shape
+        assert IssueManager().should_update_title(
             "Release r1.8 (maintenance) (maintenance/r1)", plan, base_branch="maintenance/r1"
         )
 
@@ -373,7 +377,7 @@ class TestIssueManagerGenerateConfigSection:
 
         assert "\u26a0\ufe0f **Common file cache stale**" in content
         assert "modified since last sync" in content
-        assert "workflow_dispatch" in content
+        assert "Run `/sync-issue` to trigger the sync." in content
 
     def test_generate_config_in_sync_no_warning(self):
         """In-sync cache shows no warning."""
@@ -421,8 +425,10 @@ class TestIssueManagerGenerateIssueBodyTemplate:
         body = manager.generate_issue_body_template(
             release_tag="r4.1",
             release_type="pre-release-rc",
-            meta_release="Sync26"
+            meta_release="Sync26",
+            base_branch="main",
         )
+        assert "verify on `main`:" in body
 
         # No redundant heading — title carries release info
         assert "## Release:" not in body
@@ -461,8 +467,12 @@ class TestIssueManagerGenerateIssueBodyTemplate:
 
         body = manager.generate_issue_body_template(
             release_tag="r4.1",
-            release_type="pre-release-alpha"
+            release_type="pre-release-alpha",
+            meta_release=None,
+            base_branch="maintenance/r4",
         )
+        # The checklist names the line the release is prepared on
+        assert "verify on `maintenance/r4`:" in body
 
         # No redundant heading
         assert "## Release:" not in body

@@ -67,7 +67,10 @@ def act(plan: PlanDocument, gh, event: Dict[str, Any], issues=None) -> Dict[str,
     tag = plan.release_tag
     snapshot = plan.snapshot_branch
     review = plan.release_review_branch
-    print(f"Action: {action} ({tag})")
+    if action == "create-maintenance-branch":
+        print(f"Action: {action} ({plan.branch_plan.branch} from {plan.branch_plan.patched_release})")
+    else:
+        print(f"Action: {action} ({tag})")
 
     match action:
         case "discard-snapshot":
@@ -106,6 +109,35 @@ def act(plan: PlanDocument, gh, event: Dict[str, Any], issues=None) -> Dict[str,
             return _outcome(action, create(gh, plan.branch_plan))
         case _:
             raise ValueError(f"unknown action: {action}")
+
+
+def maintenance_branch_summary(plan: PlanDocument, outcome: Dict[str, str]) -> str:
+    """
+    Step summary of create-maintenance-branch: the branch, its parked plan and
+    the next step, or what failed. The summary is the only feedback: no Release
+    Issue exists yet for the line, and finalize does not run.
+    """
+    bp = plan.branch_plan
+    if outcome.get("success") == "true":
+        branch = outcome.get("branch", "")
+        rows = [
+            ("Maintenance branch", (
+                f"{branch} created at {bp.patched_sha[:7]}, the source commit of "
+                f"{bp.patched_release}; set-up commit {outcome.get('setup_commit_sha', '')[:7]}"
+            )),
+            ("Release plan", f"parked at {bp.next_tag}, target_release_type: none"),
+            ("Next step", (
+                f"Open a PR into {branch} that sets target_release_type: maintenance-release and raises the "
+                f"patch version of each API the release fixes; its merge creates the Release Issue for {bp.next_tag}."
+            )),
+        ]
+    else:
+        rows = [("Maintenance branch", f"failed: {outcome.get('error_message') or 'no outcome'}")]
+    if outcome.get("warning"):
+        rows.append(("Warning", outcome["warning"]))
+    lines = ["## Release Automation: create-maintenance-branch", "", "| | |", "|---|---|"]
+    lines += [f"| {name} | {value.replace('|', chr(92) + '|').replace(chr(10), ' ')} |" for name, value in rows]
+    return "\n".join(lines) + "\n"
 
 
 def snapshot_outcome(create: Dict[str, str], gate: Dict[str, str]) -> Dict[str, str]:
@@ -149,6 +181,9 @@ def main(argv: List[str], gh=None, issues=None) -> int:
     outcome = act(plan, gh, event, issues)
     write_outputs(env["GITHUB_OUTPUT"], {"outcome": json.dumps(outcome)})
     print(f"Outcome: {json.dumps(outcome)}")
+    if plan.action == "create-maintenance-branch" and env.get("GITHUB_STEP_SUMMARY"):
+        with open(env["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+            f.write(maintenance_branch_summary(plan, outcome))
     # A failed action fails the job; finalize runs regardless and reports it.
     return 0 if outcome["success"] == "true" and not outcome.get("comment_failed") else 1
 
