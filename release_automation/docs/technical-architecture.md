@@ -528,7 +528,8 @@ Keeps `code/common/` in sync with the Commonalities release declared under `depe
 | `SNAPSHOT_ACTIVE` / `DRAFT_READY` | Drift warning in Release Issue only | n/a | Create / update sync PR | Create / update sync PR |
 
 **Sync PR model:**
-- Branch: `sync-common/{tag}` (e.g., `sync-common/r4.2`)
+- Per release line: detection checks out the base branch (`main` or `maintenance/rX`) and its plan's `commonalities_release`; the PR targets that branch
+- Branch: `sync-common/{tag}` on `main` (e.g., `sync-common/r4.2`), `sync-common/{base_branch}/{tag}` on a maintenance branch (e.g., `sync-common/maintenance/r1/r4.2`); lookup and superseded-PR cleanup stay within the line
 - Author: `camara-release-automation` App bot
 - No force-push — codeowners may push fix commits to the PR before merge
 - Stale PRs (wrong tag after a dependency bump) are closed automatically when a new sync is needed

@@ -164,13 +164,14 @@ jobs:
         with:
           base_branch: ${{ steps.line.outputs.base_branch }}
 
-      # ── Common file cache sync detection ──────────────────────────────
+      # ── Common file cache sync detection (on the base branch) ─────────
       - name: Checkout API repo (sparse, for cache sync check)
         if: |
           steps.state.outputs.config_error == '' &&
           steps.state.outputs.commonalities_release != ''
         uses: actions/checkout@v7
         with:
+          ref: ${{ steps.line.outputs.base_branch }}
           path: _api_repo
           sparse-checkout: |
             code/common
@@ -186,6 +187,7 @@ jobs:
           API_REPO_PATH: ${{ github.workspace }}/_api_repo
           COMMONALITIES_RELEASE: ${{ steps.state.outputs.commonalities_release }}
           ICM_RELEASE: ${{ steps.state.outputs.identity_consent_management_release }}
+          BASE_BRANCH: ${{ steps.line.outputs.base_branch }}
           GITHUB_TOKEN: ${{ github.token }}
         run: python -m release_automation.scripts.common_sync
 

@@ -358,6 +358,7 @@ class IssueManager:
         repo: str,
         sync_pr_url: str = "",
         warnings: str = "",
+        main_sync_pr_url: str = "",
     ) -> str:
         """
         Generate content for the STATE section in published state.
@@ -369,6 +370,7 @@ class IssueManager:
             repo: Repository "owner/name" for the reference tag link
             sync_pr_url: URL of the post-release sync PR, if one was created
             warnings: "; "-joined post-publish warnings (post_publish_warnings())
+            main_sync_pr_url: Case B: URL of the sync PR into main
 
         Returns:
             Formatted state section content
@@ -381,6 +383,8 @@ class IssueManager:
         ]
         if sync_pr_url:
             lines.append(f"🔄 **Sync PR:** [View PR]({sync_pr_url})")
+        if main_sync_pr_url:
+            lines.append(f"🔄 **Sync PR into main:** [View PR]({main_sync_pr_url})")
         if warnings:
             lines.append(f"⚠️ **Warnings:** {warnings}")
         return "\n".join(lines)

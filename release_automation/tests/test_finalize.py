@@ -344,6 +344,8 @@ def test_context_after_publish():
         "reference_tag_url": "https://github.com/camaraproject/Example/tree/src/r4.1",
         "sync_pr_url": "https://github.com/camaraproject/Example/pull/20",
         "sync_pr_number": "20",
+        "main_sync_pr_url": "",
+        "main_sync_pr_number": "",
         "src_commit_sha_short": "abc1234",
     }
 
@@ -436,13 +438,16 @@ class FakeGitHub:
 def stubs(monkeypatch):
     calls = {}
 
-    def fake_sync_pr(gh, git, tag, bot_name, bot_email):
+    def fake_sync_pr(gh, git, tag, bot_name, bot_email, base_branch="main", readme=True):
         calls["sync_pr"] = dict(work_dir=git.work_dir, tag=tag, bot=(bot_name, bot_email))
-        gh.events.append(("sync-pr", tag, None))
-        return calls.get("sync_pr_outcome", SyncPrOutcome(status="created", pr_url="https://github.com/camaraproject/Example/pull/20", pr_number="20"))
+        calls.setdefault("sync_prs", []).append(dict(work_dir=git.work_dir, base_branch=base_branch, readme=readme))
+        gh.events.append(("sync-pr", tag, base_branch))
+        default = SyncPrOutcome(status="created", pr_url="https://github.com/camaraproject/Example/pull/20", pr_number="20")
+        return calls.get("sync_pr_outcomes", {}).get(base_branch) or calls.get("sync_pr_outcome", default)
 
-    def fake_common(api_git, commonalities_git, gh, release, bot_name, bot_email):
+    def fake_common(api_git, commonalities_git, gh, release, bot_name, bot_email, base_branch="main"):
         calls["common"] = dict(api=api_git.work_dir, commonalities=(commonalities_git.repo, commonalities_git.token), release=release)
+        calls["common_base_branch"] = base_branch
         gh.events.append(("common-sync", release, None))
         return calls.get("common_outcome", CommonSyncOutcome(status="created", pr_url="https://github.com/camaraproject/Example/pull/40", pr_number="40"))
 
@@ -492,6 +497,71 @@ def test_publish_runs_sync_pr_then_result_then_closes(stubs, tmp_path):
     assert "🔄 **Sync PR:** [View PR](https://github.com/camaraproject/Example/pull/20)" in gh.events[2][2]
     assert gh.events[5] == ("close", 42, "completed")
     assert report.errors == [] and report.issue_finalized is True
+
+
+LINE_PR = SyncPrOutcome(status="created", pr_url="https://github.com/camaraproject/Example/pull/21", pr_number="21")
+
+
+def test_case_a_publish_syncs_readme_and_changelog_into_main(stubs, tmp_path):
+    run_finalize(make_run(PUBLISH_PLAN, publish()), clients(FakeGitHub(), tmp_path))
+
+    assert stubs["sync_prs"] == [{"work_dir": str(tmp_path / "api-repo"), "base_branch": "main", "readme": True}]
+
+
+def test_case_b_publish_syncs_the_changelog_into_both_lines_then_closes(stubs, tmp_path):
+    # spec 7.1/7.2
+    stubs["sync_pr_outcomes"] = {"maintenance/r1": LINE_PR}
+    gh = FakeGitHub()
+    summary = tmp_path / "summary"
+    run = make_run({**PUBLISH_PLAN, "base_branch": "maintenance/r1", "release_tag": "r1.10"}, publish())
+
+    report = run_finalize(run, clients(gh, tmp_path), str(summary))
+
+    assert stubs["sync_prs"] == [
+        {"work_dir": str(tmp_path / "api-repo-maintenance-r1"), "base_branch": "maintenance/r1", "readme": False},
+        {"work_dir": str(tmp_path / "api-repo"), "base_branch": "main", "readme": False},
+    ]
+    assert report.sync_pr == SyncPrOutcome(
+        status="created", pr_url=LINE_PR.pr_url, pr_number="21",
+        main_pr_url="https://github.com/camaraproject/Example/pull/20", main_pr_number="20",
+    )
+    body = gh.events[2][2]
+    assert "[#21](https://github.com/camaraproject/Example/pull/21)" in body
+    assert "[#20](https://github.com/camaraproject/Example/pull/20) into main" in body
+    issue_body = gh.events[3][2]
+    assert "🔄 **Sync PR:** [View PR](https://github.com/camaraproject/Example/pull/21)" in issue_body
+    assert "🔄 **Sync PR into main:** [View PR](https://github.com/camaraproject/Example/pull/20)" in issue_body
+    assert ("close", 42, "completed") in gh.events
+    text = summary.read_text()
+    assert ("| Post-release sync PR | created https://github.com/camaraproject/Example/pull/21, "
+            "into main https://github.com/camaraproject/Example/pull/20 |") in text
+
+
+@pytest.mark.parametrize("failing", ["maintenance/r1", "main"])
+def test_case_b_with_one_failed_sync_pr_leaves_the_issue_open(stubs, tmp_path, failing):
+    # spec 7.3: the publication is not failed
+    stubs["sync_pr_outcomes"] = {"maintenance/r1": LINE_PR, failing: SyncPrOutcome(status="failed")}
+    gh = FakeGitHub()
+    run = make_run({**PUBLISH_PLAN, "base_branch": "maintenance/r1", "release_tag": "r1.10"}, publish())
+
+    report = run_finalize(run, clients(gh, tmp_path))
+
+    assert report.sync_pr.status == "failed"
+    assert not any(e[0] == "close" for e in gh.events)
+    assert report.errors == []
+
+
+@pytest.mark.parametrize("base_branch", ["main", "maintenance/r1"])
+def test_common_sync_runs_on_the_base_branch(stubs, tmp_path, base_branch):
+    # spec 7.4
+    run = make_run({
+        "trigger_type": "push", "command": "sync-issue", "result_comment_id": "", "base_branch": base_branch,
+        "common_cache_status": "stale", "common_cache_details": "stale", "common_sync_pr_url": "",
+    })
+
+    run_finalize(run, clients(FakeGitHub(), tmp_path))
+
+    assert stubs["common_base_branch"] == base_branch
 
 
 def test_publish_with_failed_sync_pr_leaves_the_issue_open(stubs, tmp_path):

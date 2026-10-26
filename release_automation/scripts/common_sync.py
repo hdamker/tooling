@@ -7,8 +7,9 @@ the result to block /create-snapshot on a stale cache and to show the cache
 state on the Release Issue.
 
 Sync: copy artifacts/common/*.yaml of that release into code/common/, write
-the sync manifest, rebuild the sync-common/<release> branch from main and
-open (or reuse) its PR.
+the sync manifest, rebuild the sync branch from the base branch and open (or
+reuse) its PR into it. Each release line syncs on its own: main uses
+sync-common/<release>, a maintenance branch sync-common/<base_branch>/<release>.
 
 The interface takes a git client and a GitHub client and no release-automation
 types, so the module can move to a repository-reconcile workflow; the
@@ -44,6 +45,7 @@ FIRST_CHECKED_RELEASE = (4, 2)
 COMMONALITIES = "Commonalities"
 ICM = "IdentityAndConsentManagement"
 SYNC_BRANCH_PREFIX = "sync-common/"
+MAIN_BRANCH = "main"
 PR_LABELS = ["common-sync", "automated"]
 
 
@@ -125,13 +127,27 @@ def detect(api_repo: Path, commonalities_release: str, icm_release: str = "") ->
     return CacheCheck(status="stale", details=details)
 
 
-def sync_branch(release: str) -> str:
-    return f"{SYNC_BRANCH_PREFIX}{release}"
+def sync_branch(release: str, base_branch: str = MAIN_BRANCH) -> str:
+    """sync-common/<release> for main, sync-common/<base_branch>/<release> for other lines."""
+    if not base_branch or base_branch == MAIN_BRANCH:
+        return f"{SYNC_BRANCH_PREFIX}{release}"
+    return f"{SYNC_BRANCH_PREFIX}{base_branch}/{release}"
 
 
-def find_sync_pr(gh, release: str) -> str:
-    """URL of the open sync PR for exactly this release's branch, or ""."""
-    found = gh.find_open_pr(sync_branch(release))
+def _sync_branch_line(head: str) -> str:
+    """The base branch a sync branch belongs to, "" for other branches."""
+    if not head.startswith(SYNC_BRANCH_PREFIX):
+        return ""
+    rest = head[len(SYNC_BRANCH_PREFIX):]
+    parts = rest.split("/")
+    if parts[0] == "maintenance" and len(parts) >= 3:
+        return "/".join(parts[:2])
+    return MAIN_BRANCH
+
+
+def find_sync_pr(gh, release: str, base_branch: str = MAIN_BRANCH) -> str:
+    """URL of the open sync PR for exactly this release's branch on this line, or ""."""
+    found = gh.find_open_pr(sync_branch(release, base_branch))
     return found[1] if found else ""
 
 
@@ -186,10 +202,10 @@ def copy_common_files(source_dir: Path, api_repo: Path, release: str) -> Dict[st
     return files
 
 
-def pr_body(release: str, unexpected: Tuple[str, ...] = ()) -> str:
+def pr_body(release: str, unexpected: Tuple[str, ...] = (), base_branch: str = MAIN_BRANCH) -> str:
     body = (
         "> [!WARNING]\n"
-        "> This branch is owned by Release Automation and is rebuilt from `main` on every run.\n"
+        f"> This branch is owned by Release Automation and is rebuilt from `{base_branch}` on every run.\n"
         "> **Do not commit fixes to this branch** — any commits here are overwritten the next time the sync runs.\n"
         "\n"
         f"Automated sync of `code/common/` files from `camaraproject/Commonalities` at release tag `{release}`.\n"
@@ -204,9 +220,9 @@ def pr_body(release: str, unexpected: Tuple[str, ...] = ()) -> str:
         "**How to handle this PR:**\n"
         "- **Validation green** — review and merge.\n"
         "- **Validation red** — choose one:\n"
-        "  - *(recommended)* fix the errors on `main`, then re-trigger the sync; this PR is rebuilt from "
-        "the new `main` HEAD with the corrected content.\n"
-        "  - merge this PR with the errors and fix them on `main` afterwards.\n"
+        f"  - *(recommended)* fix the errors on `{base_branch}`, then re-trigger the sync; this PR is rebuilt from "
+        f"the new `{base_branch}` HEAD with the corrected content.\n"
+        f"  - merge this PR with the errors and fix them on `{base_branch}` afterwards.\n"
         "\n"
         "To re-trigger the sync, run the **CAMARA Release Automation** workflow from the repository's "
         "**Actions** tab.\n"
@@ -217,19 +233,20 @@ def pr_body(release: str, unexpected: Tuple[str, ...] = ()) -> str:
         names = ", ".join(f"`{name}`" for name in unexpected)
         body += (
             f"\n\n**Not provided by Commonalities {release}:** {names} in `code/common/` — "
-            "remove them on `main` if they are no longer needed."
+            f"remove them on `{base_branch}` if they are no longer needed."
         )
     return body
 
 
-def _close_superseded_prs(gh, branch: str, release: str) -> None:
+def _close_superseded_prs(gh, branch: str, release: str, base_branch: str) -> None:
+    """Close the open sync PRs of other releases on the same line."""
     try:
         prs = gh.list_open_prs()
     except Exception as e:
         print(f"Could not list open PRs: {e}")
         return
     for pr in prs:
-        if pr["head"].startswith(SYNC_BRANCH_PREFIX) and pr["head"] != branch:
+        if pr["head"] != branch and _sync_branch_line(pr["head"]) == (base_branch or MAIN_BRANCH):
             print(f"Closing stale sync PR #{pr['number']}")
             try:
                 gh.close_pr(pr["number"], comment=f"Superseded by sync to Commonalities {release}")
@@ -237,26 +254,31 @@ def _close_superseded_prs(gh, branch: str, release: str) -> None:
                 print(f"Could not close #{pr['number']}: {e}")
 
 
-def sync_common(api_git, commonalities_git, gh, release: str, bot_name: str, bot_email: str) -> CommonSyncOutcome:
+def sync_common(
+    api_git, commonalities_git, gh, release: str, bot_name: str, bot_email: str,
+    base_branch: str = MAIN_BRANCH,
+) -> CommonSyncOutcome:
     """
     Rebuild code/common/ from the Commonalities release and open or reuse its sync PR.
 
     Args:
-        api_git: Git client of the API repository; main is cloned into its work_dir
+        api_git: Git client of the API repository; base_branch is cloned into its work_dir
         commonalities_git: Git client of camaraproject/Commonalities; the release
             tag is cloned into its work_dir
         gh: GitHub client of the API repository
         release: Declared Commonalities release, e.g. "r4.3"
         bot_name: Commit author and committer name
         bot_email: Commit author and committer email
+        base_branch: Branch of the release line whose cache is synced; the PR targets it
 
     Returns:
         CommonSyncOutcome; every failed step is status "failed", nothing raises
     """
-    branch = sync_branch(release)
+    base_branch = base_branch or MAIN_BRANCH
+    branch = sync_branch(release, base_branch)
     api_repo = Path(api_git.work_dir)
     try:
-        api_git.clone("main", depth=1)
+        api_git.clone(base_branch, depth=1)
     except GitOperationsError as e:
         print(f"::error::Could not clone the API repository: {e}")
         return CommonSyncOutcome(status="failed")
@@ -267,7 +289,7 @@ def sync_common(api_git, commonalities_git, gh, release: str, bot_name: str, bot
         return CommonSyncOutcome(status="failed")
 
     try:
-        # Reset the RA-owned branch to main first, then copy onto it.
+        # Reset the RA-owned branch to the base branch first, then copy onto it.
         api_git.create_branch(branch, reset=True)
         synced = copy_common_files(Path(commonalities_git.work_dir) / "artifacts" / "common", api_repo, release)
     except (GitOperationsError, CommonSyncError) as e:
@@ -284,7 +306,7 @@ def sync_common(api_git, commonalities_git, gh, release: str, bot_name: str, bot
             f"{', '.join(unexpected)}"
         )
 
-    _close_superseded_prs(gh, branch, release)
+    _close_superseded_prs(gh, branch, release, base_branch)
 
     try:
         if not api_git.has_changes(COMMON_DIR):
@@ -292,7 +314,7 @@ def sync_common(api_git, commonalities_git, gh, release: str, bot_name: str, bot
             return CommonSyncOutcome(status="no_changes", unexpected_files=unexpected)
         api_git.configure_user(bot_name, bot_email)
         api_git.commit_all(f"chore: sync common files from Commonalities {release}")
-        # Force: the branch is rebuilt from main each run; RA is its only owner.
+        # Force: the branch is rebuilt from the base branch each run; RA is its only owner.
         api_git.push(branch, set_upstream=False, force=True)
     except GitOperationsError as e:
         print(f"::error::Could not push {branch}: {e}")
@@ -307,9 +329,9 @@ def sync_common(api_git, commonalities_git, gh, release: str, bot_name: str, bot
     try:
         number, url = gh.create_pr(
             title=f"Sync common files from Commonalities {release}",
-            body=pr_body(release, unexpected),
+            body=pr_body(release, unexpected, base_branch),
             head=branch,
-            base="main",
+            base=base_branch,
         )
     except Exception as e:
         print(f"::error::Failed to create sync PR: {e}")
@@ -329,7 +351,7 @@ def main(client=None) -> int:
         if client is None:
             from .github_client import GitHubClient
             client = GitHubClient(repo=os.environ["GITHUB_REPOSITORY"], token=os.environ.get("GITHUB_TOKEN"))
-        sync_pr_url = find_sync_pr(client, release)
+        sync_pr_url = find_sync_pr(client, release, os.environ.get("BASE_BRANCH") or MAIN_BRANCH)
         print(f"Found existing sync PR: {sync_pr_url}" if sync_pr_url else "No existing sync PR found")
     write_outputs(os.environ["GITHUB_OUTPUT"], {
         "common_cache_status": check.status,

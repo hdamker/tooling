@@ -1,9 +1,11 @@
 """
 Post-release sync PR for CAMARA release automation.
 
-After a publication, main receives the README release-information block and
-the release-cycle CHANGELOG from the release tag through a pr-to-main/<tag>
-PR. The outcome's status (created | failed | no_changes) is the boundary
+After a publication from main (case A), main receives the README
+release-information block and the release-cycle CHANGELOG from the release
+tag through a pr-to-main/<tag> PR. After a publication from maintenance/rX
+(case B), the release-cycle CHANGELOG alone goes into both maintenance/rX
+(pr-to-maintenance/rX/<tag>) and main (pr-to-main/<tag>). The outcome's status (created | failed | no_changes) is the boundary
 between the published release and this follow-up: it decides whether the
 Release Issue closes, and a failure here never fails the publication.
 
@@ -22,16 +24,39 @@ from .labels import add_pr_labels
 
 RELEASE_INFO_START = "<!-- CAMARA:RELEASE-INFO:START -->"
 RELEASE_INFO_END = "<!-- CAMARA:RELEASE-INFO:END -->"
-SYNC_BRANCH_PREFIX = "pr-to-main/"
+SYNC_BRANCH_PREFIX = "pr-to-"
+MAIN_BRANCH = "main"
 PR_LABELS = ["post-release", "automated"]
 
 
 @dataclass(frozen=True)
 class SyncPrOutcome:
-    """Result of the post-release sync; pr_url/pr_number are set when created."""
+    """
+    Result of the post-release sync; pr_url/pr_number are set when created.
+
+    In case B, pr_url/pr_number are the PR into the maintenance branch and
+    main_pr_url/main_pr_number the PR into main (combine_case_b).
+    """
     status: str
     pr_url: str = ""
     pr_number: str = ""
+    main_pr_url: str = ""
+    main_pr_number: str = ""
+
+
+def combine_case_b(line: "SyncPrOutcome", main: "SyncPrOutcome") -> "SyncPrOutcome":
+    """One outcome for the two case-B PRs: created only when both were created."""
+    statuses = {line.status, main.status}
+    if "failed" in statuses:
+        status = "failed"
+    elif statuses == {"created"}:
+        status = "created"
+    else:
+        status = "no_changes"
+    return SyncPrOutcome(
+        status=status, pr_url=line.pr_url, pr_number=line.pr_number,
+        main_pr_url=main.pr_url, main_pr_number=main.pr_number,
+    )
 
 
 def _warning(message: str) -> None:
@@ -99,13 +124,18 @@ def sync_changelog(gh, work_dir: Path, tag: str) -> str:
     return ""
 
 
-def pr_body(tag: str) -> str:
+def sync_branch(tag: str, base_branch: str = MAIN_BRANCH) -> str:
+    """pr-to-<base_branch>/<tag>: pr-to-main/r1.3, pr-to-maintenance/r1/r1.10."""
+    return f"{SYNC_BRANCH_PREFIX}{base_branch}/{tag}"
+
+
+def pr_body(tag: str, readme: bool = True) -> str:
     return (
         f"Automated post-release sync PR for {tag}.\n"
         "\n"
         "This PR updates:\n"
-        "- README.md Release Information section (copied from release tag)\n"
-        "- CHANGELOG for the release cycle\n"
+        + ("- README.md Release Information section (copied from release tag)\n" if readme else "")
+        + "- CHANGELOG for the release cycle\n"
         "\n"
         "Created by release automation workflow."
     )
@@ -116,29 +146,34 @@ def _failed() -> SyncPrOutcome:
     return SyncPrOutcome(status="failed")
 
 
-def create_sync_pr(gh, git, tag: str, bot_name: str, bot_email: str) -> SyncPrOutcome:
+def create_sync_pr(
+    gh, git, tag: str, bot_name: str, bot_email: str,
+    base_branch: str = MAIN_BRANCH, readme: bool = True,
+) -> SyncPrOutcome:
     """
-    Open the post-release sync PR for a published release.
+    Open the post-release sync PR of a published release into one branch.
 
     Args:
         gh: GitHub client of the API repository
-        git: Git client whose work_dir receives a clone of main
+        git: Git client whose work_dir receives a clone of base_branch
         tag: Published release tag, e.g. "r4.1"
         bot_name: Commit author and committer name
         bot_email: Commit author and committer email
+        base_branch: Branch the PR targets
+        readme: Also copy the README release-information block (case A only)
 
     Returns:
         SyncPrOutcome; never raises for git or GitHub errors
     """
-    branch = f"{SYNC_BRANCH_PREFIX}{tag}"
+    branch = sync_branch(tag, base_branch)
     work_dir = Path(git.work_dir)
     try:
-        git.clone("main", depth=1)
+        git.clone(base_branch, depth=1)
     except GitOperationsError as e:
         print(f"Clone failed: {e}")
         return _failed()
 
-    readme_changed = sync_readme(gh, work_dir, tag)
+    readme_changed = sync_readme(gh, work_dir, tag) if readme else False
     changelog_path = sync_changelog(gh, work_dir, tag)
     if not readme_changed and not changelog_path:
         _warning("No content changes to sync")
@@ -165,10 +200,10 @@ def create_sync_pr(gh, git, tag: str, bot_name: str, bot_email: str) -> SyncPrOu
 
     try:
         number, url = gh.create_pr(
-            title=f"Release Automation: Post-release sync ({tag})",
-            body=pr_body(tag),
+            title=f"Release Automation: Post-release sync ({tag})" + ("" if readme else f" into {base_branch}"),
+            body=pr_body(tag, readme),
             head=branch,
-            base="main",
+            base=base_branch,
         )
     except GitHubClientError as e:
         print(f"PR creation failed: {e}")

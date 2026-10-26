@@ -85,12 +85,15 @@ class BotContext:
     reference_tag_url: str = ""
     sync_pr_number: str = ""
     sync_pr_url: str = ""
+    main_sync_pr_number: str = ""  # Case B: the sync PR into main
+    main_sync_pr_url: str = ""
     src_commit_sha_short: str = ""  # First 7 chars of src_commit_sha
     confirm_tag: str = ""  # Tag from --confirm argument
     publish_warnings: str = ""  # Semicolon-separated warnings from non-critical post-publish steps
 
     # Derived publication flags (set by derive_flags())
     has_sync_pr: bool = False
+    has_main_sync_pr: bool = False
     has_publish_warnings: bool = False
 
     # Common file cache sync fields
@@ -115,6 +118,7 @@ class BotContext:
         self.has_meta_release = bool(self.meta_release)
         self.has_reason = bool(self.reason)
         self.has_sync_pr = bool(self.sync_pr_url)
+        self.has_main_sync_pr = bool(self.main_sync_pr_url)
         self.has_publish_warnings = bool(self.publish_warnings)
         self.common_cache_stale = self.common_cache_status == "stale"
         self.has_common_sync_pr = bool(self.common_sync_pr_url)
@@ -188,10 +192,13 @@ class BotContext:
             "reference_tag_url": self.reference_tag_url,
             "sync_pr_number": self.sync_pr_number,
             "sync_pr_url": self.sync_pr_url,
+            "main_sync_pr_number": self.main_sync_pr_number,
+            "main_sync_pr_url": self.main_sync_pr_url,
             "src_commit_sha_short": self.src_commit_sha_short,
             "confirm_tag": self.confirm_tag,
             "publish_warnings": self.publish_warnings,
             "has_sync_pr": self.has_sync_pr,
+            "has_main_sync_pr": self.has_main_sync_pr,
             "has_publish_warnings": self.has_publish_warnings,
             # Common file cache sync fields
             "common_cache_status": self.common_cache_status,

@@ -203,9 +203,9 @@ class TestBotContext:
             "workflow_run_url", "draft_release_url", "candidate_block_stripped", "reason",
             # Publication fields
             "release_url", "reference_tag", "reference_tag_url",
-            "sync_pr_number", "sync_pr_url",
+            "sync_pr_number", "sync_pr_url", "main_sync_pr_number", "main_sync_pr_url",
             "src_commit_sha_short", "confirm_tag",
-            "publish_warnings", "has_sync_pr", "has_publish_warnings",
+            "publish_warnings", "has_sync_pr", "has_main_sync_pr", "has_publish_warnings",
             # Common cache sync fields
             "common_cache_status", "common_cache_details", "common_sync_pr_url",
             "common_cache_stale", "has_common_sync_pr",
@@ -283,9 +283,9 @@ class TestBuildContext:
             "workflow_run_url", "draft_release_url", "candidate_block_stripped", "reason",
             # Publication fields
             "release_url", "reference_tag", "reference_tag_url",
-            "sync_pr_number", "sync_pr_url",
+            "sync_pr_number", "sync_pr_url", "main_sync_pr_number", "main_sync_pr_url",
             "src_commit_sha_short", "confirm_tag",
-            "publish_warnings", "has_sync_pr", "has_publish_warnings",
+            "publish_warnings", "has_sync_pr", "has_main_sync_pr", "has_publish_warnings",
             # Common cache sync fields
             "common_cache_status", "common_cache_details", "common_sync_pr_url",
             "common_cache_stale", "has_common_sync_pr",
