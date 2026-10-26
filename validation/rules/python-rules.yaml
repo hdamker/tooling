@@ -669,9 +669,8 @@
   release_plan_check_only_safe: true
   conditional_level:
     default: error
-  suggestion: >-
-    Plan a maintenance-release or pre-release-rc with the next tag of the
-    release cycle, on the branch that maintains that cycle.
+  # No rule-level suggestion: each finding carries its own (the later-cycle
+  # case says how to create the maintenance branch).
 
 # P-042: check-release-plan-maintenance-api-versions
 # API versions on a maintenance line are compared with the patched release

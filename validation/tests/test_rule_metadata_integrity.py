@@ -335,8 +335,8 @@ class TestMetadataQuality:
         """
         with_suggestions = [r.id for r in all_rules if r.suggestion is not None]
         with_overrides = [r.id for r in all_rules if r.message_override is not None]
-        assert len(with_suggestions) == 32, (
-            f"Expected 30 explicit suggestions (update test if adding "
+        assert len(with_suggestions) == 31, (
+            f"Expected 31 explicit suggestions (update test if adding "
             f"suggestions): {with_suggestions}"
         )
         assert len(with_overrides) == 0, (

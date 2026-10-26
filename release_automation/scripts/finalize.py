@@ -457,11 +457,23 @@ def finalize(run: Run, clients: Clients, summary_path: str = "") -> Report:
 
 
 def maintenance_branch_rows(run: Run) -> List[Tuple[str, str]]:
-    """create-maintenance-branch: the branch, the plan PR, or what failed (no Release Issue exists yet)."""
+    """create-maintenance-branch: the branch, its parked plan and the next step, or what failed.
+
+    The summary is the only feedback: no Release Issue exists yet for the line.
+    """
     if run.succeeded("create-maintenance-branch"):
+        bp = run._json("plan", "plan").get("branch_plan") or {}
+        branch, next_tag = run.out("branch"), bp.get("next_tag", "")
         rows = [
-            ("Maintenance branch", f"{run.out('branch')} created, set-up commit {run.out('setup_commit_sha')}"),
-            ("Plan PR", run.out("plan_pr_url")),
+            ("Maintenance branch", (
+                f"{branch} created at {bp.get('patched_sha', '')[:7]}, the source commit of "
+                f"{bp.get('patched_release', '')}; set-up commit {run.out('setup_commit_sha')[:7]}"
+            )),
+            ("Release plan", f"parked at {next_tag}, target_release_type: none"),
+            ("Next step", (
+                f"Open a PR into {branch} that sets target_release_type: maintenance-release and raises the "
+                f"patch version of each API the release fixes; its merge creates the Release Issue for {next_tag}."
+            )),
         ]
     else:
         rows = [("Maintenance branch", f"failed: {run.out('error_message') or run.result or 'no outcome'}")]

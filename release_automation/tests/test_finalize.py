@@ -692,16 +692,19 @@ def test_summary(stubs, tmp_path):
     assert "| Published issue | updated |" in text
 
 
+BRANCH_PLAN = {"cycle": "r1", "branch": "maintenance/r1", "patched_release": "r1.8", "patched_sha": "a" * 40,
+               "next_tag": "r1.9"}
+
+
 def test_create_maintenance_branch_is_reported_in_the_summary_only(stubs, tmp_path):
     summary = tmp_path / "summary"
     gh = FakeGitHub()
     run = make_run(
         {"trigger_type": "workflow_dispatch", "command": "create-maintenance-branch", "release_tag": "r2.1",
-         "state": "planned", "result_comment_id": ""},
+         "state": "planned", "result_comment_id": "", "branch_plan": BRANCH_PLAN},
         {"create-maintenance-branch": ok(
-            branch="maintenance/r1", setup_commit_sha="c1", plan_pr_number="12",
-            plan_pr_url="https://github.com/camaraproject/Example/pull/12",
-            warning="source/r1.8 points to fffffff", error_message="",
+            branch="maintenance/r1", setup_commit_sha="c1d2e3f4", warning="source/r1.8 points to fffffff",
+            error_message="",
         )},
     )
 
@@ -710,8 +713,13 @@ def test_create_maintenance_branch_is_reported_in_the_summary_only(stubs, tmp_pa
     # No Release Issue sync, no comment: main's issue is not concerned
     assert gh.events == [] and "issue_sync" not in stubs and not report.errors
     text = summary.read_text()
-    assert "| Maintenance branch | maintenance/r1 created, set-up commit c1 |" in text
-    assert "| Plan PR | https://github.com/camaraproject/Example/pull/12 |" in text
+    # spec 3.5 (107 D1): branch, source commit, the next step
+    assert ("| Maintenance branch | maintenance/r1 created at aaaaaaa, the source commit of r1.8; "
+            "set-up commit c1d2e3f |") in text
+    assert "| Release plan | parked at r1.9, target_release_type: none |" in text
+    assert ("| Next step | Open a PR into maintenance/r1 that sets target_release_type: maintenance-release "
+            "and raises the patch version of each API the release fixes; its merge creates the Release Issue "
+            "for r1.9. |") in text
     assert "| Warning | source/r1.8 points to fffffff |" in text
 
 

@@ -750,6 +750,12 @@ _MAINTENANCE_LINE_TYPES = ("maintenance-release", "pre-release-rc")
 _MAINTENANCE_BRANCH_RE = re.compile(r"^maintenance/r([1-9]\d*)$")
 
 
+_MAINTENANCE_RELEASES_URL = (
+    "https://github.com/camaraproject/ReleaseManagement/blob/main/"
+    "documentation/release-process/maintenance-releases.md"
+)
+
+
 def _maintenance_line_finding(
     context: ValidationContext, message: str, suggestion: str
 ) -> dict:
@@ -842,8 +848,11 @@ def check_release_plan_maintenance_line(
                     f"cycle, so main can no longer release in cycle "
                     f"r{cycle}; maintenance releases of r{cycle} need the "
                     f"branch '{branch}'.",
-                    f"Ask the codeowners to create '{branch}' and plan "
-                    f"'{target_tag}' there, or plan a later release on main.",
+                    f"Create '{branch}' from main: Actions → CAMARA Release "
+                    "Automation → Run workflow, action "
+                    f"create-maintenance-branch, cycle r{cycle}. Then plan "
+                    f"'{target_tag}' there, or plan a later release on main. "
+                    f"See {_MAINTENANCE_RELEASES_URL}",
                 )
             ]
 

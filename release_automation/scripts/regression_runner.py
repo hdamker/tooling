@@ -5,7 +5,9 @@ CAMARA Release Automation — Regression Runner
 Exercises the release-automation-reusable.yml workflow on a persistent
 test repository (default: camaraproject/ReleaseTest) via publish-free paths:
 
-    planned:          sync-issue via workflow_dispatch, /sync-issue,
+    planned:          sync-issue via workflow_dispatch,
+                      create-maintenance-branch via workflow_dispatch
+                      (expected to be refused), /sync-issue,
                       /discard-snapshot (expected to be rejected)
     round trip:       /create-snapshot, Release Issue close in
                       snapshot-active (expected auto-reopen),
@@ -642,9 +644,12 @@ def get_issue_open_state(repo: str, issue_number: int) -> str:
     ).strip()
 
 
-def dispatch_workflow(repo: str, workflow_file: str) -> None:
+def dispatch_workflow(repo: str, workflow_file: str, inputs: dict[str, str] | None = None) -> None:
     """Trigger *workflow_file* on *repo* via workflow_dispatch (default branch)."""
-    gh(["workflow", "run", workflow_file, "--repo", repo])
+    args = ["workflow", "run", workflow_file, "--repo", repo]
+    for name, value in (inputs or {}).items():
+        args += ["-f", f"{name}={value}"]
+    gh(args)
 
 
 def find_job_conclusion(repo: str, run_id: str, job_name: str) -> str | None:
@@ -978,6 +983,65 @@ def phase_dispatch_sync_issue(
 
     report.passed = True
     report.detail = f"caller run and {_SYNC_ISSUE_JOB} job succeeded"
+    return report
+
+
+# A cycle without a public release: create-maintenance-branch is refused in
+# the plan job and can never create a branch (cycle r1 would create
+# maintenance/r1 whenever it does not exist).
+_REFUSED_BRANCH_CYCLE = "r2"
+
+
+def phase_dispatch_refused_branch(
+    repo: str,
+    *,
+    poll_timeout: int,
+    dry_run: bool,
+) -> PhaseReport:
+    """Dispatch create-maintenance-branch for a cycle it must refuse.
+
+    A refusal fails the plan job (the run concludes failure) and skips the
+    act job, so nothing is created.
+    """
+    report = PhaseReport(name="dispatch refused create-maintenance-branch")
+    inputs = {"action": "create-maintenance-branch", "cycle": _REFUSED_BRANCH_CYCLE}
+    if dry_run:
+        report.passed = True
+        report.detail = f"DRY-RUN: would dispatch {_RA_CALLER_WORKFLOW} on {repo} with {inputs}"
+        return report
+
+    marker = datetime.now(timezone.utc).replace(microsecond=0)
+    try:
+        dispatch_workflow(repo, _RA_CALLER_WORKFLOW, inputs)
+        run = find_recent_caller_run(
+            repo,
+            workflow_file=_RA_CALLER_WORKFLOW,
+            since=marker,
+            event="workflow_dispatch",
+        )
+    except InfrastructureError as exc:
+        report.detail = f"could not dispatch {_RA_CALLER_WORKFLOW}: {exc}"
+        return report
+
+    run_id = str(run["databaseId"])
+    report.run_url = run.get("url")
+    try:
+        conclusion = poll_run(repo, run_id, interval=15, timeout=poll_timeout)
+        act = find_job_conclusion(repo, run_id, "act")
+    except InfrastructureError as exc:
+        report.detail = f"run {run_id} error: {exc}"
+        return report
+
+    report.run_conclusion = conclusion
+    if conclusion != "failure":
+        report.detail = f"caller run concluded {conclusion!r}, expected 'failure' (refusal)"
+        return report
+    if act not in (None, "skipped"):
+        report.detail = f"act job concluded {act!r}, expected 'skipped'"
+        return report
+
+    report.passed = True
+    report.detail = f"cycle {_REFUSED_BRANCH_CYCLE} refused in the plan job; act skipped"
     return report
 
 
@@ -1555,6 +1619,9 @@ def run_phases(
     # below gates /create-snapshot.
     reports.append(
         phase_dispatch_sync_issue(repo, poll_timeout=poll_timeout, dry_run=dry_run)
+    )
+    reports.append(
+        phase_dispatch_refused_branch(repo, poll_timeout=poll_timeout, dry_run=dry_run)
     )
     sync_report, _sync_run_id = phase_fire_sync_issue(
         repo, issue_number,

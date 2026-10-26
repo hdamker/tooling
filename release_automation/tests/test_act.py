@@ -197,14 +197,11 @@ def test_create_maintenance_branch():
 
     outcome = act(plan("create-maintenance-branch", trigger_type="workflow_dispatch", branch_plan=branch_plan), gh, {})
 
-    pr = gh.prs[0]
     assert outcome == {
         "action": "create-maintenance-branch",
         "success": "true",
         "branch": "maintenance/r1",
         "setup_commit_sha": gh.commits[0]["sha"],
-        "plan_pr_number": str(pr["number"]),
-        "plan_pr_url": f"{REPO_URL}/pull/{pr['number']}",
         "warning": "",
         "error_message": "",
     }

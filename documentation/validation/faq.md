@@ -138,6 +138,8 @@ The rule is evaluated against the branch the pull request targets. Already-publi
 
 **What you do:** for a fix of a published release, plan `maintenance-release` (or `pre-release-rc`) with the next tag of the cycle on the branch that maintains the cycle. For new features, plan the next release cycle on `main`.
 
+If the cycle needs `maintenance/rX` and the branch does not exist yet, a codeowner creates it from `main`: Actions → CAMARA Release Automation → Run workflow, action `create-maintenance-branch`, cycle `rX`. The branch starts at the source commit of the patched release, with `release-plan.yaml` parked at the next tag and `target_release_type: none`; the first PR into the branch plans the release. See [Maintenance releases](https://github.com/camaraproject/ReleaseManagement/blob/main/documentation/release-process/maintenance-releases.md).
+
 </details>
 
 <a name="p-042-maintenance-api-versions"></a>
