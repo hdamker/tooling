@@ -52,8 +52,9 @@ tag called `v1-rc`. That tag only moves after the gates in
 pass.
 
 `camaraproject/ReleaseTest` is different on purpose. Its caller workflow
-pins `tooling_ref_override: main` — that is, **`main` HEAD**, not the
-stable tag. `main` is this project's only long-lived branch; there is no
+calls the validation workflow at `@main` — that is, **`main` HEAD**, not
+the stable tag. The workflow checks tooling out at the commit it runs
+from, so workflow and tooling are always the same `main` commit. `main` is this project's only long-lived branch; there is no
 separate development branch to point at. Every push to `main`, from any
 merged PR, is exercised against ReleaseTest's regression fixtures
 **before** `v1-rc` is moved for the rest of the org. If a change
@@ -182,12 +183,11 @@ workflow summary). The runner reads it directly from there — but only
 accepts a 40-character SHA; anything else is dropped, with a warning,
 before the fixture is written.
 
-On dark / production repos this is always a real SHA: `v1-rc`'s resolved
-commit, or whatever the OIDC-resolved workflow SHA is. On ReleaseTest,
-though, `tooling_ref_override` is pinned to the literal name `main`, not a
-SHA — so `context.json`'s `tooling_ref` comes through as the string
-`"main"`, fails the 40-character check, and the runner omits the field
-from ReleaseTest fixtures entirely. That's expected, not a bug.
+This is always a real SHA: the commit the validation workflow ran from
+(`job.workflow_sha`) — `v1-rc`'s commit on production repos, `main` HEAD
+on ReleaseTest. Fixtures captured before the workflow took its checkout
+from the job context may lack the field on ReleaseTest, where the caller
+used to pass the literal ref name `main`; a recapture adds it.
 
 ## Day-to-day usage
 
@@ -396,9 +396,9 @@ rename on minor bumps, preserve across majors.
 
 - **Tooling-ref pinning is set by the caller workflow.** A local
   `gh workflow run` cannot override which tooling SHA runs server-side.
-  ReleaseTest pins to `main` HEAD by design (canary), via a literal
-  `tooling_ref_override: main` — not a resolved SHA; see "How
-  `tooling_ref` is recorded" above. Production API repos pin to `@v1-rc`.
+  ReleaseTest pins to `main` HEAD by design (canary), by calling the
+  validation workflow at `@main`; see "How `tooling_ref` is recorded"
+  above. Production API repos pin to `@v1-rc`.
   There is currently no way to test an un-published developer SHA against
   the runner — that's a separate piece of design work.
 - **Dispatch → run-id race.** `gh workflow run` does not return a run

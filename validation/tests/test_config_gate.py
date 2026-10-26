@@ -269,7 +269,7 @@ class TestResolveStage:
     def test_fork_owner_no_special_treatment(self, sample_config):
         """Forks no longer receive an automatic stage override.  A fork PR
         falls under the same default stage as upstream; fork developers
-        use workflow_dispatch (or tooling_ref_override) to run validation."""
+        use workflow_dispatch to run validation."""
         result = resolve_stage(
             sample_config,
             "hdamker/QualityOnDemand",
