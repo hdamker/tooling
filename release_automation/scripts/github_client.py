@@ -1103,7 +1103,10 @@ class GitHubClient:
             return None
 
     def generate_release_notes(
-        self, tag_name: str, previous_tag_name: Optional[str] = None
+        self,
+        tag_name: str,
+        previous_tag_name: Optional[str] = None,
+        target_commitish: Optional[str] = None,
     ) -> Optional[str]:
         """
         Generate release notes using GitHub's auto-generated release notes API.
@@ -1114,6 +1117,8 @@ class GitHubClient:
         Args:
             tag_name: Target tag for the release notes
             previous_tag_name: Previous tag for comparison (optional)
+            target_commitish: Commit the notes run up to while the tag does
+                not exist yet (GitHub otherwise uses the default branch)
 
         Returns:
             Markdown body with PR-level changes, or None on error.
@@ -1125,6 +1130,8 @@ class GitHubClient:
         ]
         if previous_tag_name:
             args.extend(["-f", f"previous_tag_name={previous_tag_name}"])
+        if target_commitish:
+            args.extend(["-f", f"target_commitish={target_commitish}"])
         try:
             output = self._run_gh(args)
             return output.strip() if output.strip() else None

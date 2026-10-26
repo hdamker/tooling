@@ -36,6 +36,16 @@ class TestGitHubClient(unittest.TestCase):
         self.assertIn("gh command failed", str(context.exception))
 
     @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_generate_release_notes_targets_the_given_commit(self, mock_run_gh):
+        mock_run_gh.return_value = "## What's Changed\n"
+
+        self.client.generate_release_notes("r1.9", "r1.8", target_commitish="8a0a203")
+
+        args = mock_run_gh.call_args[0][0]
+        self.assertIn("target_commitish=8a0a203", args)
+        self.assertIn("previous_tag_name=r1.8", args)
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
     def test_tag_exists(self, mock_run_gh):
         mock_run_gh.return_value = "refs/tags/r1.0"
         self.assertTrue(self.client.tag_exists("r1.0"))

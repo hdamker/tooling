@@ -1407,7 +1407,7 @@ class TestReleaseDocumentation:
         mock_github_client.generate_release_notes.return_value = "## What's Changed\n"
         result = snapshot_creator._get_candidate_changes("r4.1", None)
         assert result is not None
-        mock_github_client.generate_release_notes.assert_called_once_with("r4.1", None)
+        mock_github_client.generate_release_notes.assert_called_once_with("r4.1", None, target_commitish=None)
 
     def test_get_candidate_changes_returns_body_on_success(
         self, snapshot_creator, mock_github_client
@@ -1418,7 +1418,7 @@ class TestReleaseDocumentation:
         )
         result = snapshot_creator._get_candidate_changes("r4.1", "r3.2")
         assert "What's Changed" in result
-        mock_github_client.generate_release_notes.assert_called_once_with("r4.1", "r3.2")
+        mock_github_client.generate_release_notes.assert_called_once_with("r4.1", "r3.2", target_commitish=None)
 
     def test_get_candidate_changes_returns_none_on_api_error(
         self, snapshot_creator, mock_github_client
@@ -1717,7 +1717,7 @@ class TestReleaseDocumentation:
         )
 
         # Should compare against r3.2 (last public), not r4.1 (previous alpha)
-        mock_github_client.generate_release_notes.assert_called_once_with("r4.2", "r3.2")
+        mock_github_client.generate_release_notes.assert_called_once_with("r4.2", "r3.2", target_commitish=None)
 
     @patch("release_automation.scripts.snapshot_creator.ChangelogGenerator")
     def test_generate_changelog_alpha_uses_previous_release_as_base(
@@ -1742,7 +1742,36 @@ class TestReleaseDocumentation:
         )
 
         # Should compare against r4.1 (previous release), not r3.2 (last public)
-        mock_github_client.generate_release_notes.assert_called_once_with("r4.2", "r4.1")
+        mock_github_client.generate_release_notes.assert_called_once_with("r4.2", "r4.1", target_commitish=None)
+
+    @patch("release_automation.scripts.snapshot_creator.ChangelogGenerator")
+    def test_generate_changelog_lists_changes_up_to_the_source_commit(
+        self, mock_gen_cls, snapshot_creator, mock_github_client, tmp_path
+    ):
+        """generate-notes runs up to the snapshot's source commit, not the
+        default branch: the release tag does not exist yet, and on a
+        maintenance line main's PRs are not part of the release."""
+        mock_github_client.get_releases.return_value = []
+        mock_github_client.generate_release_notes.return_value = "## What's Changed\n"
+
+        mock_instance = Mock()
+        mock_instance.generate_draft.return_value = "# r1.9\n\nContent\n"
+        mock_instance.write_changelog.return_value = "CHANGELOG/CHANGELOG-r1.md"
+        mock_gen_cls.return_value = mock_instance
+
+        config = SnapshotConfig(release_tag="r1.9", base_branch="maintenance/r1")
+        metadata = {
+            "repository": {"release_type": "pre-release-rc", "src_commit_sha": "8a0a203abc"},
+            "apis": [],
+            "dependencies": {},
+        }
+        snapshot_creator._generate_changelog(
+            str(tmp_path), config, {}, {}, metadata, "ReleaseTest2", compare_base="r1.8"
+        )
+
+        mock_github_client.generate_release_notes.assert_called_once_with(
+            "r1.9", "r1.8", target_commitish="8a0a203abc"
+        )
 
     def test_readme_update_uses_shared_release_metadata_loader(
         self, snapshot_creator, mock_github_client

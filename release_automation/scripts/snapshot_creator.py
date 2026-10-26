@@ -801,13 +801,22 @@ class SnapshotCreator:
         return None
 
     def _get_candidate_changes(
-        self, release_tag: str, previous_release: Optional[str]
+        self,
+        release_tag: str,
+        previous_release: Optional[str],
+        src_commit_sha: Optional[str] = None,
     ) -> Optional[str]:
         """Use GitHub's generate-notes API to get PR-level change descriptions.
 
+        The notes run up to the snapshot's source commit: the release tag does
+        not exist yet, and GitHub would otherwise take the default branch,
+        which is the wrong line for a release from maintenance/rX.
+
         Falls back to None on API errors (non-fatal).
         """
-        return self.gh.generate_release_notes(release_tag, previous_release)
+        return self.gh.generate_release_notes(
+            release_tag, previous_release, target_commitish=src_commit_sha
+        )
 
     def _get_api_comparison_baselines(
         self, metadata: Dict[str, Any], compare_base: Optional[str]
@@ -961,7 +970,9 @@ class SnapshotCreator:
         if compare_base is COMPARE_BASE_UNSET:
             compare_base = self._get_compare_base(release_type, config.release_tag)
         candidate_changes = self._get_candidate_changes(
-            config.release_tag, compare_base
+            config.release_tag,
+            compare_base,
+            metadata.get("repository", {}).get("src_commit_sha"),
         )
         changelog_metadata = deepcopy(metadata)
         if api_comparison_baselines is None:
