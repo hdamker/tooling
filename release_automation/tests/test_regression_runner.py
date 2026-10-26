@@ -825,6 +825,38 @@ class TestFindReleaseIssue:
             with pytest.raises(InfrastructureError, match="multiple open Release Issues.*#90.*#93"):
                 find_release_issue("o/r")
 
+    def test_issues_of_a_maintenance_line_are_skipped(self):
+        # main's Release Issue (r2.1) and maintenance/r1's (r1.9) are open side by side
+        issues = [
+            {"number": 94, "body": f"{MARKER}\n<!-- release-automation:release-tag:r2.1 -->"},
+            {"number": 96, "body": f"{MARKER}\n<!-- release-automation:release-tag:r1.9 -->"},
+        ]
+
+        def fake_gh(args, parse_json=False):
+            if "repos/o/r/issues" in args:
+                return issues
+            if args[1] == "repos/o/r/branches/maintenance/r1":
+                return {"name": "maintenance/r1"}
+            raise InfrastructureError("gh failed: HTTP 404: Branch not found")
+
+        with patch("release_automation.scripts.regression_runner.gh", side_effect=fake_gh):
+            assert find_release_issue("o/r") == 94
+
+    def test_two_issues_on_main_still_raise(self):
+        issues = [
+            {"number": 90, "body": f"{MARKER}\n<!-- release-automation:release-tag:r2.1 -->"},
+            {"number": 93, "body": f"{MARKER}\n<!-- release-automation:release-tag:r2.2 -->"},
+        ]
+
+        def fake_gh(args, parse_json=False):
+            if "repos/o/r/issues" in args:
+                return issues
+            raise InfrastructureError("gh failed: HTTP 404: Branch not found")
+
+        with patch("release_automation.scripts.regression_runner.gh", side_effect=fake_gh):
+            with pytest.raises(InfrastructureError, match="multiple open Release Issues.*#90.*#93"):
+                find_release_issue("o/r")
+
     def test_labeled_but_no_marker_is_excluded(self):
         # gh API filters by label server-side, but a maintainer could
         # hand-label an issue without the workflow-owned body marker.
