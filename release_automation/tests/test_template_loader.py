@@ -13,6 +13,7 @@ class TestRenderTemplate:
         """Test rendering the (status-independent) release review PR template."""
         context = {
             "release_tag": "r4.1",
+            "base_branch": "main",
             "snapshot_id": "r4.1-abc1234",
             "snapshot_branch_url": "https://github.com/org/repo/tree/release-snapshot/r4.1-abc1234",
             "short_type": "rc",
@@ -104,6 +105,7 @@ class TestRenderTemplate:
         """Test that release issue URL renders as a link in valid actions."""
         context = {
             "release_tag": "r4.1",
+            "base_branch": "main",
             "snapshot_id": "r4.1-abc1234",
             "short_type": "rc",
             "is_rc": True,

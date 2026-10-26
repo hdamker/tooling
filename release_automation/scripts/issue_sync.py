@@ -300,7 +300,8 @@ class IssueSyncManager:
         body = self.issue_manager.generate_issue_body_template(
             release_tag=release_tag,
             release_type=release_type,
-            meta_release=meta_release
+            meta_release=meta_release,
+            base_branch=self.base_branch,
         )
 
         # Ensure the workflow marker is in the body

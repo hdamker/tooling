@@ -166,7 +166,7 @@ def _check_cache(command: str, cache: CommonCache) -> Optional[str]:
     hint = (
         f" Merge the sync PR: {cache.sync_pr_url}"
         if cache.sync_pr_url
-        else " Run workflow_dispatch to trigger sync, or close and reopen the Release Issue."
+        else " Run /sync-issue to trigger the sync, or close and reopen the Release Issue."
     )
     return f"Common file cache is stale: {cache.details}.{hint}"
 
@@ -345,8 +345,16 @@ def _evaluate_create_maintenance_branch(trigger: Trigger, plan: Plan, client) ->
 
 
 def finalize_due(result: Union[Plan, Rejection]) -> bool:
-    """Whether the finalize job runs: a Plan whose command runs, not a rejection or confirmation request."""
-    return result.allowed and result.response != RESPONSE_PUBLISH_CONFIRMATION
+    """
+    Whether the finalize job runs: a Plan whose command runs, not a rejection
+    or confirmation request. create-maintenance-branch has nothing to finalize
+    (no Release Issue of the new line exists yet); act writes its summary.
+    """
+    return (
+        result.allowed
+        and result.response != RESPONSE_PUBLISH_CONFIRMATION
+        and result.action != ACTION_CREATE_MAINTENANCE_BRANCH
+    )
 
 
 def plan_document(

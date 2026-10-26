@@ -37,7 +37,7 @@ def test_result_templates_and_state_after_success():
         "create-snapshot": ("snapshot_created", "snapshot_failed", config.STATE_SNAPSHOT_ACTIVE),
         "discard-snapshot": ("snapshot_discarded", "snapshot_failed", config.STATE_PLANNED),
         "delete-draft": ("draft_revoked", "snapshot_failed", config.STATE_PLANNED),
-        "sync-issue": ("issue_synced", "internal_error", ""),
+        "sync-issue": ("issue_synced", "issue_sync_failed", ""),
         "publish-release": ("release_published", "publish_failed", config.STATE_PUBLISHED),
     }
     assert [c.name for c in COMMANDS if c.job] == [

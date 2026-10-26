@@ -23,6 +23,7 @@ KNOWN_TEMPLATES = [
     "interim_processing",
     "issue_created",
     "issue_reopened",
+    "issue_sync_failed",
     "issue_synced",
     "publish_confirmation",
     "snapshot_created",
@@ -184,6 +185,29 @@ class TestTemplateContextContract:
 
 
 # ── valid actions (commands.actions_for, 107 D2) ─────────────────────────────
+
+
+def test_templates_say_base_branch_not_main(responder):
+    # F4 family: a maintenance-line codeowner reads the branch of the release, never a hard-coded main
+    for template in responder.template_dir.glob("*.md"):
+        assert "`main`" not in template.read_text(encoding="utf-8"), template.name
+    body = responder.render("snapshot_failed", build_context(
+        command="create-snapshot", state="planned", release_tag="r1.9", base_branch="maintenance/r1",
+        error_message="Pre-snapshot validation failed",
+    ))
+    assert body.startswith("**❌ Command failed: `/create-snapshot` — State: `planned`**")
+    assert "Fix the cause on `maintenance/r1` and retry `/create-snapshot`" in body
+
+
+def test_failed_discard_reports_the_real_state(responder):
+    # The failure template of /discard-snapshot and /delete-draft follows the state the run reports
+    body = responder.render("snapshot_failed", build_context(
+        command="discard-snapshot", state="snapshot-active", release_tag="r1.9", base_branch="main",
+        release_pr_url="https://github.com/o/r/pull/3",
+    ))
+
+    assert body.startswith("**❌ Command failed: `/discard-snapshot` — State: `snapshot-active`**")
+    assert "`/discard-snapshot <reason>`" in body
 
 
 def test_templates_have_no_hand_written_valid_actions(responder):

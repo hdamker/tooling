@@ -220,6 +220,57 @@ def test_act_reads_the_typed_plan_only():
     assert 'plan["' not in inspect.getsource(act_mod)
 
 
+BRANCH_PLAN = {"cycle": "r1", "branch": "maintenance/r1", "patched_release": "r1.8", "patched_sha": "a" * 40,
+               "next_tag": "r1.9"}
+
+
+def test_create_maintenance_branch_summary_names_the_branch_and_the_next_step():
+    # spec 3.5 (107 D1): the summary is the only feedback; finalize does not run for this action
+    document = plan("create-maintenance-branch", trigger_type="workflow_dispatch", command="create-maintenance-branch",
+                    release_tag="r2.1", state="planned", branch_plan=BRANCH_PLAN)
+    outcome = {"action": "create-maintenance-branch", "success": "true", "branch": "maintenance/r1",
+               "setup_commit_sha": "c1d2e3f4", "warning": "source/r1.8 points to fffffff", "error_message": ""}
+
+    text = act_mod.maintenance_branch_summary(document, outcome)
+
+    assert text.startswith("## Release Automation: create-maintenance-branch\n")
+    assert ("| Maintenance branch | maintenance/r1 created at aaaaaaa, the source commit of r1.8; "
+            "set-up commit c1d2e3f |") in text
+    assert "| Release plan | parked at r1.9, target_release_type: none |" in text
+    assert ("| Next step | Open a PR into maintenance/r1 that sets target_release_type: maintenance-release "
+            "and raises the patch version of each API the release fixes; its merge creates the Release Issue "
+            "for r1.9. |") in text
+    assert "| Warning | source/r1.8 points to fffffff |" in text
+
+
+def test_failed_create_maintenance_branch_summary():
+    document = plan("create-maintenance-branch", trigger_type="workflow_dispatch", command="create-maintenance-branch",
+                    branch_plan=BRANCH_PLAN)
+
+    text = act_mod.maintenance_branch_summary(document, {"success": "false", "branch": "", "error_message": "Nothing created: x"})
+
+    assert "| Maintenance branch | failed: Nothing created: x |" in text
+
+
+def test_main_writes_the_maintenance_branch_summary(tmp_path, monkeypatch, capsys):
+    from release_automation.tests.test_maintenance_branch import PLAN, repo as cycle_one
+
+    output, event, summary = tmp_path / "output", tmp_path / "event.json", tmp_path / "summary"
+    output.write_text("")
+    event.write_text("{}")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    branch_plan = {**BRANCH_PLAN, "patched_sha": PLAN.patched_sha}
+    monkeypatch.setenv("PLAN_JSON", plan("create-maintenance-branch", trigger_type="workflow_dispatch",
+                                         command="create-maintenance-branch", branch_plan=branch_plan).to_json())
+
+    assert act_mod.main([], cycle_one()) == 0
+
+    assert "| Maintenance branch | maintenance/r1 created at" in summary.read_text()
+    assert "Action: create-maintenance-branch (maintenance/r1 from r1.8)" in capsys.readouterr().out
+
+
 def test_every_act_command_has_a_case():
     # The commands table routes these to the act job; act() dispatches them by name
     import inspect

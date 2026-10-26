@@ -666,6 +666,24 @@ def check_release_plan_published_history(
     if release_type != "none" and not target_metadata_missing:
         new_api_content = _plan_declares_new_api_content(release_plan, context)
         if new_api_content is False:
+            if line_cycle is not None:
+                # A maintenance-line plan with no new content: the patch bump
+                # was forgotten, or the content belongs to a later cycle.
+                patched = history.patched_release(line_cycle)
+                return [
+                    _release_history_finding(
+                        context,
+                        f"{_line_context(history, line_cycle)}, target_release_type "
+                        f"'{release_type}' cannot start a new release because "
+                        "every planned API entry was already published with the "
+                        "same version and status in a public or maintenance "
+                        "release (no new content).",
+                        f"Raise the patch version of each API the release fixes"
+                        f"{', keeping the API list of ' + patched.tag if patched else ''}; "
+                        f"new content is released from main in a later release cycle "
+                        f"(r{line_cycle + 1}.y).",
+                    )
+                ]
             return [
                 _release_history_finding(
                     context,
@@ -680,6 +698,15 @@ def check_release_plan_published_history(
             ]
 
     return []
+
+
+def _line_context(history, cycle: int) -> str:
+    """Where a maintenance-line plan lives: "on 'maintenance/r1', which maintains cycle r1 from r1.8"."""
+    patched = history.patched_release(cycle)
+    where = f"on '{history.base_ref}'" if history.base_ref else "on this branch"
+    if patched is None:
+        return f"{where} (release cycle r{cycle})"
+    return f"{where}, which maintains release cycle r{cycle} from {patched.tag}"
 
 
 # ---------------------------------------------------------------------------
@@ -860,13 +887,13 @@ def check_release_plan_maintenance_line(
         return [
             _maintenance_line_finding(
                 context,
-                f"release cycle r{cycle} already has a public release, so "
-                f"target_release_type '{release_type}' is not allowed for "
-                f"'{target_tag}'; use 'maintenance-release' or "
-                "'pre-release-rc'.",
+                f"{_line_context(history, cycle)}: release cycle r{cycle} "
+                f"already has a public release, so target_release_type "
+                f"'{release_type}' is not allowed for '{target_tag}'; use "
+                "'maintenance-release' or 'pre-release-rc'.",
                 f"Use maintenance-release or pre-release-rc for a fix of "
-                f"r{cycle}, or open the next release cycle "
-                f"r{cycle + 1}.1 for new work.",
+                f"release cycle r{cycle} here; new work is released from main "
+                f"in the next release cycle (r{cycle + 1}.1).",
             )
         ]
 
@@ -875,8 +902,9 @@ def check_release_plan_maintenance_line(
         return [
             _maintenance_line_finding(
                 context,
-                f"target_release_tag '{target_tag}' skips tags: the next tag "
-                f"of release cycle r{cycle} is '{next_tag}'.",
+                f"{_line_context(history, cycle)}: target_release_tag "
+                f"'{target_tag}' skips tags, the next tag of release cycle "
+                f"r{cycle} is '{next_tag}'.",
                 f"Set target_release_tag: {next_tag}.",
             )
         ]
@@ -995,6 +1023,7 @@ def check_release_plan_maintenance_api_versions(
     published = {api.api_name: api.api_version for api in patched.apis}
     added = sorted(set(planned) - set(published))
     removed = sorted(set(published) - set(planned))
+    line = _line_context(history, cycle)
     if added or removed:
         changes = "; ".join(
             part
@@ -1006,10 +1035,11 @@ def check_release_plan_maintenance_api_versions(
         )
         return [
             finding(
-                f"a maintenance release must keep the same APIs as "
+                f"{line}: a maintenance release must keep the same APIs as "
                 f"{patched.tag}, the release it patches ({changes}).",
-                "Restore the API list of the patched release; new APIs are "
-                "released on main in a later release cycle.",
+                f"Restore the API list of {patched.tag}; new or removed APIs "
+                f"are released from main in a later release cycle "
+                f"(r{cycle + 1}.y).",
             )
         ]
 
@@ -1030,11 +1060,14 @@ def check_release_plan_maintenance_api_versions(
             planned_version,
         )
         if message:
+            published_version = normalize_api_version_base(published[api_name])
             findings.append(
                 finding(
-                    message,
-                    "Keep the published version or raise only the patch "
-                    "version for a maintenance release.",
+                    f"{line}: {message}",
+                    f"Keep '{published_version}' or raise only its patch version "
+                    f"for a maintenance release of {patched.tag}; a new minor or "
+                    f"major version of '{api_name}' is released from main in a "
+                    f"later release cycle (r{cycle + 1}.y).",
                     api_name=api_name,
                 )
             )

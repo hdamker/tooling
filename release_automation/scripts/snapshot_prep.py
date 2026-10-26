@@ -72,7 +72,7 @@ def validate_settings(config_path: Path, schema_path: Path) -> int:
 
 def gate_validation(summary: str, run_url: str, output_path: str) -> int:
     """Fail the job on a pre-snapshot validation failure, with the reason for the Release Issue."""
-    print("::error::Pre-snapshot validation failed — fix issues on main before re-running /create-snapshot")
+    print("::error::Pre-snapshot validation failed — fix issues on the base branch before re-running /create-snapshot")
     write_outputs(output_path, {
         "success": "false",
         "error_message": f"Pre-snapshot validation failed: {summary}. [View workflow logs]({run_url})",

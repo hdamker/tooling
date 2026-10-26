@@ -353,6 +353,7 @@ class SnapshotCreator:
                 release_plan,
                 api_comparison_baselines,
                 release_issue_number=config.release_issue_number,
+                base_branch=config.base_branch,
             )
             result.release_pr_number = pr_info.number
             result.release_pr_url = pr_info.url
@@ -593,6 +594,7 @@ class SnapshotCreator:
         release_plan: Dict[str, Any],
         api_comparison_baselines: Optional[Dict[str, str]] = None,
         release_issue_number: Optional[int] = None,
+        base_branch: str = "",
     ) -> PullRequestInfo:
         """
         Create the Release PR.
@@ -605,6 +607,7 @@ class SnapshotCreator:
             release_plan: Release plan dict
             api_comparison_baselines: Previous API version by api_name
             release_issue_number: The Release Issue the PR body links, if one exists
+            base_branch: Branch the snapshot was cut from, named in the PR body
 
         Returns:
             PullRequestInfo with PR number and URL
@@ -674,6 +677,7 @@ class SnapshotCreator:
 
         body = render_template("release_review_pr", {
             "release_tag": release_tag,
+            "base_branch": base_branch,
             "snapshot_id": snapshot_id,
             "snapshot_branch_url": snapshot_branch_url,
             "release_issue_url": release_issue_url,

@@ -73,7 +73,7 @@ def test_gate_fails_with_summary_and_run_link(tmp_path, capsys):
     code = gate_validation("2 errors", "https://github.com/o/r/actions/runs/9", str(out_file))
 
     assert code == 1
-    assert "::error::Pre-snapshot validation failed — fix issues on main before re-running /create-snapshot" in capsys.readouterr().out
+    assert "::error::Pre-snapshot validation failed — fix issues on the base branch before re-running /create-snapshot" in capsys.readouterr().out
     assert parse_outputs(out_file) == {
         "success": "false",
         "error_message": "Pre-snapshot validation failed: 2 errors. [View workflow logs](https://github.com/o/r/actions/runs/9)",

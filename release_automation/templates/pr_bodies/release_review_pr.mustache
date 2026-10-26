@@ -56,7 +56,7 @@ _The following actions and checks are done by a Release Management reviewer befo
 - [ ] Breaking changes are documented and version updates follow SemVer rules
 - [ ] Mandatory release assets are present for each API according to its status
 - [ ] All remaining validation warnings are documented in issues and the reasons for deferral are defensible
-- [ ] Content findings needing a `main` PR are collected as sub-issues of one issue titled `Release {{release_tag}} review findings` (see [Recording review findings](https://github.com/camaraproject/ReleaseManagement/blob/main/documentation/readiness/api-readiness-checklist.md#recording-review-findings))
+- [ ] Content findings needing a `{{base_branch}}` PR are collected as sub-issues of one issue titled `Release {{release_tag}} review findings` (see [Recording review findings](https://github.com/camaraproject/ReleaseManagement/blob/main/documentation/readiness/api-readiness-checklist.md#recording-review-findings))
 
 <details>
 <summary><b>Required release assets per API status</b></summary>
@@ -79,7 +79,7 @@ M = Mandatory, O = Optional — [Full documentation](https://github.com/camarapr
 ### Valid next actions for codeowners
 
 - **Merge this PR** when all Codeowner Actions and Release Management Actions are complete and the required approvals are present — creates the draft release
-- Use **`/discard-snapshot <reason>`** in the {{#release_issue_url}}[Release Issue]({{release_issue_url}}){{/release_issue_url}}{{^release_issue_url}}Release Issue{{/release_issue_url}} to discard this snapshot, return to `planned`, and update content on `main`
+- Use **`/discard-snapshot <reason>`** in the {{#release_issue_url}}[Release Issue]({{release_issue_url}}){{/release_issue_url}}{{^release_issue_url}}Release Issue{{/release_issue_url}} to discard this snapshot, return to `planned`, and update content on `{{base_branch}}`
 
 ---
 Snapshot: [`{{snapshot_id}}`]({{snapshot_branch_url}})

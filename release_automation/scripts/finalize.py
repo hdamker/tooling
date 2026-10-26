@@ -452,32 +452,6 @@ def finalize(run: Run, clients: Clients, summary_path: str = "") -> Report:
     return report
 
 
-def maintenance_branch_rows(run: Run) -> List[Tuple[str, str]]:
-    """create-maintenance-branch: the branch, its parked plan and the next step, or what failed.
-
-    The summary is the only feedback: no Release Issue exists yet for the line.
-    """
-    if run.succeeded("create-maintenance-branch"):
-        bp = run.plan.branch_plan
-        branch, next_tag = run.out("branch"), bp.next_tag
-        rows = [
-            ("Maintenance branch", (
-                f"{branch} created at {bp.patched_sha[:7]}, the source commit of "
-                f"{bp.patched_release}; set-up commit {run.out('setup_commit_sha')[:7]}"
-            )),
-            ("Release plan", f"parked at {next_tag}, target_release_type: none"),
-            ("Next step", (
-                f"Open a PR into {branch} that sets target_release_type: maintenance-release and raises the "
-                f"patch version of each API the release fixes; its merge creates the Release Issue for {next_tag}."
-            )),
-        ]
-    else:
-        rows = [("Maintenance branch", f"failed: {run.out('error_message') or run.result or 'no outcome'}")]
-    if run.out("warning"):
-        rows.append(("Warning", run.out("warning")))
-    return rows
-
-
 def write_summary(run: Run, report: Report, summary_path: str) -> None:
     """Step summary of the finalize job: what it changed and where."""
     if not summary_path:
@@ -495,8 +469,6 @@ def write_summary(run: Run, report: Report, summary_path: str) -> None:
         rows.append(("Common sync", f"{report.common_sync.status} {report.common_sync.pr_url}".strip()))
     if report.issue_sync:
         rows.append(("Release Issue", f"{report.issue_sync.issue_action} {report.issue_sync.issue_url}".strip()))
-    if run.action == "create-maintenance-branch":
-        rows.extend(maintenance_branch_rows(run))
     if report.result_template:
         rows.append(("Result comment", report.result_template))
     if report.issue_finalized is not None:

@@ -685,5 +685,5 @@
   release_plan_check_only_safe: true
   conditional_level:
     default: error
-  suggestion: >-
-    Keep the API list of the patched release and raise only patch versions.
+  # No rule-level suggestion: each finding carries its own (the branch, the
+  # patched release and the alternative on main).
