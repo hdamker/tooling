@@ -232,6 +232,26 @@ class TestApiSectionFormatting:
         assert "Changes documented below are compared to version" not in result
 
 
+    @pytest.mark.parametrize("release_type", ["pre-release-rc", "maintenance-release"])
+    def test_format_api_section_unchanged_api_says_unchanged(self, release_type):
+        """An API at its comparison baseline's version is neither a release
+        candidate nor a patch: one sentence, links, no change categories."""
+        api = {
+            "api_name": "sample-service-subscriptions",
+            "api_version": "0.1.2",
+            "api_file_name": "sample-service-subscriptions",
+            "comparison_baseline": "0.1.2",
+        }
+        result = ChangelogGenerator.format_api_section(
+            api, "r1.9", "ReleaseTest2", release_type=release_type
+        )
+
+        assert "**sample-service-subscriptions 0.1.2 is unchanged in this release.**" in result
+        assert "of this API" not in result
+        assert "Changes documented below are compared to version" not in result
+        assert "### " not in result
+        assert "- API definition **with inline documentation**:" in result
+
 class TestVersionSentence:
     """Tests for the generated first sentence per version + release_type.
 
