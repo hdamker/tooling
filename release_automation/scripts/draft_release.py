@@ -67,9 +67,9 @@ def is_prerelease(release_type: str) -> bool:
 
 
 def changelog_candidates(release_tag: str) -> List[str]:
-    """CHANGELOG/CHANGELOG-rX.md of the meta-release cycle first, then CHANGELOG.md."""
+    """CHANGELOG/CHANGELOG-rX.md of the release cycle."""
     match = re.match(r"(r\d+)", release_tag)
-    return ([f"CHANGELOG/CHANGELOG-{match.group(1)}.md"] if match else []) + ["CHANGELOG.md"]
+    return [f"CHANGELOG/CHANGELOG-{match.group(1)}.md"] if match else []
 
 
 def strip_candidate_block(text: str) -> Tuple[str, bool]:

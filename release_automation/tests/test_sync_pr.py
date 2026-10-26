@@ -116,23 +116,11 @@ def test_readme_block_and_cycle_changelog_from_tag(tmp_path, remote):
     assert gh.labelled == [(31, ["post-release", "automated"])]
 
 
-def test_flat_changelog_when_tag_has_no_cycle_file(tmp_path, remote):
+def test_flat_changelog_on_the_tag_is_not_synced(tmp_path, remote, capsys):
     gh = FakeGitHub(files=tag_files(**{"CHANGELOG.md": "# Changelog\n"}))
 
-    assert run(tmp_path, remote, gh).status == "created"
-    assert remote_file(remote, "pr-to-main/r1.3", "CHANGELOG.md") == "# Changelog"
-
-
-def test_cycle_changelog_is_preferred_over_flat(tmp_path, remote):
-    gh = FakeGitHub(files=tag_files(**{
-        "CHANGELOG/CHANGELOG-r1.md": "# cycle\n",
-        "CHANGELOG.md": "# flat\n",
-    }))
-
-    run(tmp_path, remote, gh)
-
-    assert remote_file(remote, "pr-to-main/r1.3", "CHANGELOG/CHANGELOG-r1.md") == "# cycle"
-    assert "CHANGELOG.md" not in git(remote, "ls-tree", "-r", "--name-only", "pr-to-main/r1.3").split("\n")
+    assert run(tmp_path, remote, gh) == SyncPrOutcome(status="no_changes")
+    assert "::warning::No CHANGELOG found at CHANGELOG/CHANGELOG-r1.md on tag r1.3" in capsys.readouterr().out
 
 
 def test_cycle_changelog_directory_is_created(tmp_path):
@@ -162,7 +150,7 @@ def test_nothing_to_copy_is_no_changes(tmp_path, remote, files, capsys):
 
 def test_main_readme_without_delimiters_is_left_alone(tmp_path, capsys):
     remote = make_remote(tmp_path, "api", {"README.md": "# Example\n"})
-    gh = FakeGitHub(files=tag_files(**{"README.md": TAG_README, "CHANGELOG.md": "# c\n"}))
+    gh = FakeGitHub(files=tag_files(**{"README.md": TAG_README, "CHANGELOG/CHANGELOG-r1.md": "# c\n"}))
 
     assert run(tmp_path, remote, gh).status == "created"
     assert "::warning::Main README missing release info delimiters" in capsys.readouterr().out

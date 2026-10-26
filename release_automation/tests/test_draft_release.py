@@ -104,8 +104,8 @@ def snapshot_repo(changelog=CHANGELOG, path="CHANGELOG/CHANGELOG-r1.md", **kw):
 
 
 def test_changelog_candidates_prefer_the_cycle_file():
-    assert changelog_candidates("r4.1") == ["CHANGELOG/CHANGELOG-r4.md", "CHANGELOG.md"]
-    assert changelog_candidates("unknown") == ["CHANGELOG.md"]
+    assert changelog_candidates("r4.1") == ["CHANGELOG/CHANGELOG-r4.md"]
+    assert changelog_candidates("unknown") == []
 
 
 def test_strip_full_block_collapses_blank_runs():
@@ -152,12 +152,12 @@ def test_prepare_changelog_commits_the_stripped_file(capsys):
     assert gh.files[(SNAPSHOT, "CHANGELOG/CHANGELOG-r1.md")] == STRIPPED
 
 
-def test_prepare_changelog_falls_back_to_flat_changelog():
+def test_prepare_changelog_ignores_a_flat_changelog():
     gh = snapshot_repo(changelog=STRIPPED, path="CHANGELOG.md")
 
     result = prepare_changelog(gh, "r1.4", SNAPSHOT)
 
-    assert result.notes == NOTES and not result.stripped
+    assert (result.notes, result.stripped) == ("", False)
     assert gh.commits == []
 
 
@@ -378,7 +378,7 @@ def test_publish_on_merge_commits_changelog_then_release_date_then_tags():
 
     assert [c["path"] for c in gh.commits] == ["CHANGELOG/CHANGELOG-r1.md", "release-metadata.yaml"]
     release = gh.releases[0]
-    assert not release["draft"] and release["prerelease"] and release["make_latest"] is None
+    assert not release["draft"] and release["prerelease"] and release["make_latest"] == "false"
     assert release["body"] == NOTES and release["target"] == SNAPSHOT
     # The tag is at the release_date commit, which follows the CHANGELOG cleanup.
     assert gh.tags["r1.4"] == gh.commits[1]["sha"]
@@ -399,6 +399,16 @@ def test_publish_on_merge_public_release_is_latest():
 
     assert gh.releases[0]["make_latest"] == "true" and not gh.releases[0]["prerelease"]
     assert outcome.pointer_branch == "release/r1.4"
+
+
+def test_publish_on_merge_keeps_latest_of_a_later_cycle():
+    gh = snapshot_repo(releases=[{
+        "id": 1, "tag": "r2.1", "draft": False, "prerelease": False, "html_url": f"{REPO_URL}/releases/tag/r2.1",
+    }])
+
+    publish_on_merge(gh, "r1.4", SNAPSHOT, REVIEW, "maintenance-release", "abc1234def")
+
+    assert gh.releases[-1]["tag"] == "r1.4" and gh.releases[-1]["make_latest"] == "false"
 
 
 def test_publish_on_merge_failure_before_tag():

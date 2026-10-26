@@ -463,220 +463,85 @@ class TestFileWriting:
         assert "best results, use the latest published release" in header
 
 
-# --- File Writing: Dual-Mode (flat vs per-cycle) ---
+# --- File Writing: per-cycle only ---
 
 
-class TestFileWritingFlatMode:
-    """Flat-mode (CHANGELOG.md at repo root) activates only for maintenance
-    releases when no per-cycle file exists yet. Every other release type
-    stays on per-cycle even if a legacy flat CHANGELOG.md is present."""
+class TestFileWritingPerCycle:
+    """Every release type writes CHANGELOG/CHANGELOG-r{cycle}.md; a flat
+    CHANGELOG.md at the repository root is never written (spec 7.7)."""
 
-    def test_maintenance_release_with_no_cycle_file_writes_flat(self, generator, tmp_path):
-        content = "# r2.3\n\n## Release Notes\n\nMaintenance patch\n"
+    def test_maintenance_release_without_cycle_file_creates_it(self, generator, tmp_path):
+        (tmp_path / "CHANGELOG.md").write_text("legacy content\n")
+
         path = generator.write_changelog(
-            str(tmp_path),
-            content,
-            "r2.3",
-            "SimpleEdgeDiscovery",
-            release_type="maintenance-release",
+            str(tmp_path), "# r2.3\n\n## Release Notes\n\nMaintenance patch\n",
+            "r2.3", "SimpleEdgeDiscovery",
         )
-        assert path == "CHANGELOG.md"
-        flat = tmp_path / "CHANGELOG.md"
-        assert flat.exists()
-        assert "# r2.3" in flat.read_text()
-        # No per-cycle directory should be created when writing flat
-        assert not (tmp_path / "CHANGELOG" / "CHANGELOG-r2.md").exists()
 
-    def test_maintenance_release_with_existing_cycle_file_uses_per_cycle(
-        self, generator, tmp_path
-    ):
-        # Pre-seed the per-cycle file
-        (tmp_path / "CHANGELOG").mkdir()
-        per_cycle = tmp_path / "CHANGELOG" / "CHANGELOG-r2.md"
-        per_cycle.write_text(
-            "# Changelog SimpleEdgeDiscovery\n\n"
-            "Recording rules...\n\n"
-            "# r2.2\n\n## Release Notes\n\nPrior public\n"
-        )
-        flat_before = "legacy content\n"
-        (tmp_path / "CHANGELOG.md").write_text(flat_before)
-
-        new_section = "# r2.3\n\n## Release Notes\n\nMaintenance patch\n"
-        path = generator.write_changelog(
-            str(tmp_path),
-            new_section,
-            "r2.3",
-            "SimpleEdgeDiscovery",
-            release_type="maintenance-release",
-        )
         assert path == "CHANGELOG/CHANGELOG-r2.md"
-        # Per-cycle file was updated (r2.3 prepended), flat file untouched
-        assert "# r2.3" in per_cycle.read_text()
-        assert (tmp_path / "CHANGELOG.md").read_text() == flat_before
+        assert "# r2.3" in (tmp_path / "CHANGELOG" / "CHANGELOG-r2.md").read_text()
+        assert (tmp_path / "CHANGELOG.md").read_text() == "legacy content\n"
 
-    def test_public_release_always_uses_per_cycle(self, generator, tmp_path):
-        # Flat CHANGELOG.md present, no CHANGELOG/ directory
-        (tmp_path / "CHANGELOG.md").write_text("legacy content\n")
+    def test_maintenance_release_prepends_to_cycle_file(self, generator, tmp_path):
+        (tmp_path / "CHANGELOG").mkdir()
+        per_cycle = tmp_path / "CHANGELOG" / "CHANGELOG-r1.md"
+        per_cycle.write_text(
+            "# Changelog ReleaseTest\n\n"
+            "# r1.7\n\n## Release Notes\n\nPrior maintenance\n\n"
+            "# r1.6\n\n## Release Notes\n\nPublic\n"
+        )
 
-        content = "# r4.2\n\n## Release Notes\n\nPublic\n"
         path = generator.write_changelog(
-            str(tmp_path),
-            content,
-            "r4.2",
-            "QualityOnDemand",
-            release_type="public-release",
-        )
-        assert path == "CHANGELOG/CHANGELOG-r4.md"
-        assert (tmp_path / "CHANGELOG" / "CHANGELOG-r4.md").exists()
-
-    def test_pre_release_rc_always_uses_per_cycle(self, generator, tmp_path):
-        (tmp_path / "CHANGELOG.md").write_text("legacy content\n")
-
-        content = "# r4.1\n\n## Release Notes\n\nRC\n"
-        path = generator.write_changelog(
-            str(tmp_path),
-            content,
-            "r4.1",
-            "QualityOnDemand",
-            release_type="pre-release-rc",
-        )
-        assert path == "CHANGELOG/CHANGELOG-r4.md"
-
-    def test_empty_release_type_defaults_to_per_cycle(self, generator, tmp_path):
-        (tmp_path / "CHANGELOG.md").write_text("legacy content\n")
-
-        content = "# r4.1\n\n## Release Notes\n\nNo type\n"
-        path = generator.write_changelog(
-            str(tmp_path), content, "r4.1", "QualityOnDemand"
-        )
-        assert path == "CHANGELOG/CHANGELOG-r4.md"
-
-    def test_flat_write_prepends_before_first_release_heading(self, generator, tmp_path):
-        # Shape mirrors SimpleEdgeDiscovery's CHANGELOG.md:
-        # title + manual TOC + NOTE + preamble + release sections
-        legacy = (
-            "# Changelog Simple Edge Discovery\n\n"
-            "NOTE: \n\n"
-            "## Table of contents\n\n"
-            "- [r2.2](#r22)\n"
-            "- [r2.1 - rc](#r21---rc)\n\n"
-            "**Please use the latest published release.**\n\n"
-            "# r2.2 - Fall25 public release\n\n"
-            "Prior public release content\n"
-        )
-        (tmp_path / "CHANGELOG.md").write_text(legacy)
-
-        new_section = "# r2.3\n\n## Release Notes\n\nMaintenance patch\n"
-        generator.write_changelog(
-            str(tmp_path),
-            new_section,
-            "r2.3",
-            "SimpleEdgeDiscovery",
-            release_type="maintenance-release",
+            str(tmp_path), "# r1.8\n\n## Release Notes\n\nPatch\n", "r1.8", "ReleaseTest"
         )
 
-        result = (tmp_path / "CHANGELOG.md").read_text()
-        r23 = result.index("# r2.3")
-        r22 = result.index("# r2.2")
-        assert r23 < r22
+        assert path == "CHANGELOG/CHANGELOG-r1.md"
+        result = per_cycle.read_text()
+        assert result.index("# r1.8") < result.index("# r1.7") < result.index("# r1.6")
+        assert not (tmp_path / "CHANGELOG.md").exists()
 
-    def test_flat_write_injects_toc_markers_on_first_run(self, generator, tmp_path):
-        # Legacy CHANGELOG.md has no automation TOC markers
-        legacy = (
+    def test_write_injects_toc_markers_into_a_file_without_them(self, generator, tmp_path):
+        (tmp_path / "CHANGELOG").mkdir()
+        (tmp_path / "CHANGELOG" / "CHANGELOG-r2.md").write_text(
             "# Changelog Simple Edge Discovery\n\n"
             "## Table of contents\n\n"
             "- [r2.2](#r22)\n\n"
             "# r2.2\n\nPrior content\n"
         )
-        (tmp_path / "CHANGELOG.md").write_text(legacy)
 
-        new_section = "# r2.3\n\nThis maintenance release contains something\n"
         generator.write_changelog(
-            str(tmp_path),
-            new_section,
-            "r2.3",
-            "SimpleEdgeDiscovery",
-            release_type="maintenance-release",
+            str(tmp_path), "# r2.3\n\nThis maintenance release contains something\n",
+            "r2.3", "SimpleEdgeDiscovery",
         )
 
-        result = (tmp_path / "CHANGELOG.md").read_text()
-        assert TOC_START_MARKER in result
-        assert TOC_END_MARKER in result
-
-    def test_flat_write_updates_toc_idempotently(self, generator, tmp_path):
-        # First maintenance write inserts markers
-        (tmp_path / "CHANGELOG.md").write_text(
-            "# Changelog Simple Edge Discovery\n\n"
-            "# r2.2\n\nPrior content\n"
-        )
-        generator.write_changelog(
-            str(tmp_path),
-            "# r2.3\n\nThis maintenance release contains A\n",
-            "r2.3",
-            "SimpleEdgeDiscovery",
-            release_type="maintenance-release",
-        )
-        # Second maintenance write (hypothetical r2.4 still before migration)
-        generator.write_changelog(
-            str(tmp_path),
-            "# r2.4\n\nThis maintenance release contains B\n",
-            "r2.4",
-            "SimpleEdgeDiscovery",
-            release_type="maintenance-release",
-        )
-
-        result = (tmp_path / "CHANGELOG.md").read_text()
+        result = (tmp_path / "CHANGELOG" / "CHANGELOG-r2.md").read_text()
         assert result.count(TOC_START_MARKER) == 1
         assert result.count(TOC_END_MARKER) == 1
-        # Both release entries present in TOC
-        assert "[r2.4](#r24)" in result
-        assert "[r2.3](#r23)" in result
 
-    def test_flat_write_end_to_end_sed_style_headings(self, generator, tmp_path):
-        """End-to-end: a repo with SED-style suffixed headings
-        (``# r2.2 - Fall25 public release``) gets a new maintenance
-        section prepended. The regenerated TOC lists every legacy
-        heading with the anchor GitHub actually renders for the full
-        heading text, not the short-tag anchor."""
-        # Simulate SimpleEdgeDiscovery's legacy CHANGELOG.md: mixed heading
-        # styles, one with a trailing descriptor, one without.
-        legacy = (
+    def test_toc_uses_full_heading_anchors_of_suffixed_headings(self, generator, tmp_path):
+        """Suffixed headings (``# r2.2 - Fall25 public release``) get the
+        anchor GitHub renders for the full heading text."""
+        (tmp_path / "CHANGELOG").mkdir()
+        (tmp_path / "CHANGELOG" / "CHANGELOG-r2.md").write_text(
             "# Changelog Simple Edge Discovery\n\n"
             "# r2.2 - Fall25 public release\n\n"
             "This public release contains the definition and documentation of\n"
             "* simple-edge-discovery v2.0.0\n\n"
             "# r2.1 - rc\n\n"
-            "This pre-release contains the definition\n\n"
-            "# r1.3\n\n"
-            "This public release contains the definition\n"
+            "This pre-release contains the definition\n"
         )
-        (tmp_path / "CHANGELOG.md").write_text(legacy)
 
-        new_section = (
-            "# r2.3\n\n## Release Notes\n\n"
-            "This maintenance release contains patches\n"
-        )
         generator.write_changelog(
             str(tmp_path),
-            new_section,
-            "r2.3",
-            "SimpleEdgeDiscovery",
-            release_type="maintenance-release",
+            "# r2.3\n\n## Release Notes\n\nThis maintenance release contains patches\n",
+            "r2.3", "SimpleEdgeDiscovery",
         )
 
-        result = (tmp_path / "CHANGELOG.md").read_text()
-
-        # New section lands before the first legacy section
+        result = (tmp_path / "CHANGELOG" / "CHANGELOG-r2.md").read_text()
         assert result.index("# r2.3") < result.index("# r2.2 - Fall25")
-
-        # TOC contains an entry for every release-tag heading, with
-        # link text and anchor both derived from the full heading text
-        # so anchors match GitHub's rendering and link labels match the
-        # underlying headings verbatim.
         assert "[r2.3](#r23)" in result
         assert "[r2.2 - Fall25 public release](#r22---fall25-public-release)" in result
         assert "[r2.1 - rc](#r21---rc)" in result
-        assert "[r1.3](#r13)" in result
 
 # --- Table of Contents ---
 
