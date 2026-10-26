@@ -1,12 +1,14 @@
 """Tests for act.py: the plan's action → module call → JSON outcome."""
 
 import json
+import re
 
 import pytest
 
 from release_automation.scripts import act as act_mod
 from release_automation.scripts import draft_release
 from release_automation.scripts.act import act, snapshot_outcome
+from release_automation.scripts.commands import COMMANDS, JOB_ACT
 from release_automation.tests.fake_github import REPO_URL, FakeGitHub, gh_error
 
 SNAPSHOT = "release-snapshot/r1.4-abc1234"
@@ -205,6 +207,14 @@ def test_create_maintenance_branch():
         "warning": "",
         "error_message": "",
     }
+
+
+def test_every_act_command_has_a_case():
+    # The commands table routes these to the act job; act() dispatches them by name
+    import inspect
+
+    cases = set(re.findall(r'case "([a-z-]+)":', inspect.getsource(act)))
+    assert {c.name for c in COMMANDS if c.job == JOB_ACT} <= cases
 
 
 def test_unknown_action_is_an_error():

@@ -73,8 +73,9 @@ jobs:
       # Post early acknowledgment for slash commands, before any checkout so it
       # lands within seconds. Later updated by Post Response with the policy's
       # template. Uses GITHUB_TOKEN (not App token) to avoid
-      # triggering extra workflow runs. The command list mirrors SLASH_COMMANDS
-      # in release_automation/scripts/trigger.py (checked by a pytest).
+      # triggering extra workflow runs. The command list mirrors COMMANDS in
+      # release_automation/scripts/commands.py, pinned by
+      # validation/tests/test_release_automation_workflow.py.
       - name: Post Acknowledgment
         id: ack
         if: |

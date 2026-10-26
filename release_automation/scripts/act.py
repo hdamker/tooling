@@ -33,6 +33,7 @@ from dataclasses import asdict
 from typing import Any, Dict, List, Tuple
 
 from .bot_responder import post_comment
+from .config import STATE_DRAFT_READY
 from .github_client import GitHubClientError
 
 SNAPSHOT_FIELDS = (
@@ -80,6 +81,7 @@ def act(plan: Dict[str, Any], gh, event: Dict[str, Any], issues=None) -> Dict[st
                 pr = event.get("pull_request") or {}
                 try:
                     post_comment(issues, "draft_created", plan["release_issue_number"], plan["base_context"], {
+                        "state": STATE_DRAFT_READY,
                         "draft_release_url": result.draft_release_url,
                         "release_pr_number": str(pr.get("number", "")),
                         "release_pr_url": pr.get("html_url", ""),

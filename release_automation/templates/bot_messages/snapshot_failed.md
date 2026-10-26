@@ -5,4 +5,6 @@
 > {{error_message}}
 {{/error_message}}
 
-**Valid actions:**<br>→ Fix issues on `main`, or contact Release Management for unexpected errors<br>→ **`/create-snapshot` — retry after fixes are merged**
+Fix issues on `main` and retry, or contact Release Management for unexpected errors.
+
+{{valid_actions}}

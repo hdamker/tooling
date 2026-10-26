@@ -18,6 +18,12 @@ import uuid
 from dataclasses import asdict, dataclass
 from typing import Any, Dict
 
+from .commands import (  # noqa: F401  (DISPATCH_* re-exported for the workflow tests)
+    COMMANDS,
+    DISPATCH_ACTIONS,
+    DISPATCH_CREATE_MAINTENANCE_BRANCH,
+    DISPATCH_SYNC_ISSUE,
+)
 from .config import SNAPSHOT_BRANCH_PREFIX
 
 RELEASE_ISSUE_LABEL = "release-issue"
@@ -28,19 +34,7 @@ TRIGGER_UNKNOWN = "unknown"
 
 # Slash commands in match order. An argument-taking command keeps what follows
 # it on the first line of the comment; the others ignore any text after them.
-SLASH_COMMANDS = (
-    ("create-snapshot", False),
-    ("discard-snapshot", True),
-    ("delete-draft", True),
-    ("sync-issue", False),
-    ("publish-release", True),
-)
-
-
-# Values of the caller's workflow_dispatch input "action"
-DISPATCH_SYNC_ISSUE = "sync-issue"
-DISPATCH_CREATE_MAINTENANCE_BRANCH = "create-maintenance-branch"
-DISPATCH_ACTIONS = (DISPATCH_SYNC_ISSUE, DISPATCH_CREATE_MAINTENANCE_BRANCH)
+SLASH_COMMANDS = tuple((c.name, c.takes_args) for c in COMMANDS)
 
 
 def _js_trim(text: str) -> str:

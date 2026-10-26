@@ -23,6 +23,7 @@ KNOWN_TEMPLATES = [
     "interim_processing",
     "issue_created",
     "issue_reopened",
+    "issue_synced",
     "publish_confirmation",
     "snapshot_created",
     "snapshot_discarded",
@@ -180,3 +181,34 @@ class TestTemplateContextContract:
             assert len(result) > 0
 
 
+
+
+# ── valid actions (commands.actions_for, 107 D2) ─────────────────────────────
+
+
+def test_templates_have_no_hand_written_valid_actions(responder):
+    for template in responder.template_dir.glob("*.md"):
+        text = template.read_text(encoding="utf-8")
+        assert "Valid actions" not in text and "→" not in text, template.name
+
+
+@pytest.mark.parametrize("state", ["published", "not-planned"])
+def test_rejection_offers_no_command_the_state_rejects(responder, state):
+    # F2: these rejections used to offer /create-snapshot
+    body = responder.render("command_rejected", build_context(
+        command="discard-snapshot", state=state, release_tag="r4.1",
+        error_message=f"Command /discard-snapshot is not allowed in state '{state}'. Valid commands: /sync-issue",
+    ))
+
+    assert "/create-snapshot" not in body
+
+
+def test_result_comment_lists_the_actions_of_the_state_after_the_command(responder):
+    body = responder.render("snapshot_created", build_context(
+        state="snapshot-active", release_tag="r4.1", release_pr_url="https://github.com/org/repo/pull/123",
+    ))
+
+    assert body.rstrip().endswith(
+        "**Valid actions:**<br>→ **Update, review, and merge [Release PR](https://github.com/org/repo/pull/123) "
+        "to create draft release**<br>→ `/discard-snapshot <reason>` — discard and return to `planned`"
+    )

@@ -209,8 +209,21 @@ class TestBotContext:
             # Common cache sync fields
             "common_cache_status", "common_cache_details", "common_sync_pr_url",
             "common_cache_stale", "has_common_sync_pr",
+            # Valid actions of the reported state (commands.actions_for)
+            "valid_actions",
         }
         assert set(d.keys()) == expected_keys
+
+    def test_derive_flags_valid_actions_of_the_state(self):
+        ctx = BotContext(state="draft-ready", release_tag="r1.4")
+        ctx.derive_flags()
+        assert ctx.valid_actions.startswith(
+            "**Valid actions:**<br>→ **`/publish-release --confirm r1.4` — publish the release**")
+
+    def test_derive_flags_valid_actions_empty_without_actions(self):
+        ctx = BotContext(state="published", release_tag="r1.4")
+        ctx.derive_flags()
+        assert ctx.valid_actions == ""
 
     def test_to_dict_no_none_values(self):
         """No None values in to_dict() output."""
@@ -288,7 +301,7 @@ class TestBuildContext:
             "publish_warnings", "has_sync_pr", "has_main_sync_pr", "has_publish_warnings",
             # Common cache sync fields
             "common_cache_status", "common_cache_details", "common_sync_pr_url",
-            "common_cache_stale", "has_common_sync_pr",
+            "common_cache_stale", "has_common_sync_pr", "valid_actions",
         }
         assert set(result.keys()) == expected_keys
 

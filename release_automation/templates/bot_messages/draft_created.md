@@ -17,4 +17,4 @@ Release notes cleaned (candidate block removed).
 {{/commonalities_release}}
 </details>
 
-**Valid actions:**<br>→ **`/publish-release --confirm {{release_tag}}` — publish the release**<br>→ `/delete-draft <reason>` — delete the draft and return to `planned`
+{{valid_actions}}

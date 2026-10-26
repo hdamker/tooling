@@ -937,7 +937,7 @@ class TestLoadExpectedCommentTitles:
         [
             ("create-snapshot", "snapshot_created", {}),
             ("discard-snapshot", "snapshot_discarded", {}),
-            ("sync-issue", "interim_processing", {"command": "sync-issue"}),
+            ("sync-issue", "issue_synced", {"state": "planned"}),
             (
                 "rejected-discard-snapshot",
                 "command_rejected",
@@ -1419,7 +1419,7 @@ class _FixedDatetime:
 
 _EXPECTED_ALL = {
     **_EXPECTED,
-    "sync-issue": "**⏳ Processing: `/sync-issue`",
+    "sync-issue": "**🔄 Release Issue synced",
     "rejected-discard-snapshot": "**❌ Command rejected: `/discard-snapshot`",
     "issue-close": "**🔄 Issue reopened",
     "issue-close-planned": "**📋 Release issue created",
@@ -1614,7 +1614,7 @@ def _slash_responses(comment_body: str, sync_conclusion: str | None = None):
 
 
 class TestPhaseFireSyncIssue:
-    _REPLY = "<!-- release-bot:ack:1 -->\n**⏳ Processing: `/sync-issue`**\n**Requested by:** @x"
+    _REPLY = "<!-- release-bot:r1.2 -->\n**🔄 Release Issue synced — State: `planned`**\n[View workflow run](u)"
 
     def test_pass_when_reply_and_sync_job_ok(self, frozen_now):
         with patch(

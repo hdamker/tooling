@@ -18,4 +18,4 @@ Created to replace closed [#{{closed_issue_number}}]({{closed_issue_url}}).
 {{/commonalities_release}}
 </details>
 
-**Valid actions (post a comment):**<br>→ **`/create-snapshot` — begin the release process**
+{{valid_actions}}

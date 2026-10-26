@@ -25,21 +25,13 @@ from dataclasses import asdict, dataclass, replace
 from typing import Optional, Union
 
 from . import config
+from .commands import ALLOWED_COMMANDS, COMMANDS
 from .github_client import GitHubClient, GitHubClientError
 from .maintenance_branch import BranchPlan
 from .maintenance_branch import check as check_maintenance_branch
 from .release_line import MAIN_BRANCH
 from .state_manager import ConfigurationError, ReleaseInfoResult, ReleaseState
 from .trigger import DISPATCH_CREATE_MAINTENANCE_BRANCH, TRIGGER_SLASH_COMMAND, Trigger
-
-# Commands a slash command may name, per release state (display order).
-ALLOWED_COMMANDS = {
-    config.STATE_PLANNED: ["create-snapshot", "sync-issue"],
-    config.STATE_SNAPSHOT_ACTIVE: ["discard-snapshot", "sync-issue"],
-    config.STATE_DRAFT_READY: ["delete-draft", "publish-release", "sync-issue"],
-    config.STATE_PUBLISHED: ["sync-issue"],
-    config.STATE_NOT_PLANNED: ["sync-issue"],
-}
 
 # How a release is published once its Release PR is merged:
 #   draft    — merge creates a draft release; /publish-release --confirm publishes it
@@ -75,7 +67,8 @@ ACTION_CREATE_DRAFT = "create-draft"
 ACTION_PUBLISH_ON_MERGE = "publish-on-merge"
 ACTION_REOPEN_ISSUE = "reopen-issue"
 ACTION_CREATE_MAINTENANCE_BRANCH = "create-maintenance-branch"
-COMMAND_ACTIONS = ("create-snapshot", "discard-snapshot", "delete-draft", "publish-release")
+# Slash commands that are actions of their own (the others: finalize alone)
+COMMAND_ACTIONS = tuple(c.name for c in COMMANDS if c.job)
 
 # App bots don't register as collaborators, so the permission API returns
 # 'none' for them; the write intent is established by the App installation on

@@ -13,15 +13,14 @@
 # Source templates:
 #   snapshot_created.md   -> "**✅ Snapshot created — State: `snapshot-active`**"
 #   snapshot_discarded.md -> "**🗑️ Snapshot discarded — State: `planned`**"
-#   interim_processing.md -> "**⏳ Processing: `/{{command}}`**"
-#     (/sync-issue has no result template; post-result renders this one)
+#   issue_synced.md       -> "**🔄 Release Issue synced — State: `{{state}}`**"
 #   command_rejected.md   -> "**❌ Command rejected: `/{{command}}` — State: `{{state}}`**"
 #   issue_reopened.md     -> "**🔄 Issue reopened — State: `{{state}}`**"
 #   issue_created.md      -> "**📋 Release issue created — State: `planned`**"
 
 create-snapshot: "**✅ Snapshot created"
 discard-snapshot: "**🗑️ Snapshot discarded"
-sync-issue: "**⏳ Processing: `/sync-issue`"
+sync-issue: "**🔄 Release Issue synced"
 # /discard-snapshot posted in `planned`
 rejected-discard-snapshot: "**❌ Command rejected: `/discard-snapshot`"
 # Release Issue closed in `snapshot-active` (issue_close auto-reopen)
