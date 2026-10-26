@@ -300,6 +300,57 @@ repository:
         assert "Failed to publish release" in result.error_message
 
 
+class TestMakeLatest:
+    """Spec 6.1-6.4 (M8): "latest" only without a later-cycle public or maintenance release."""
+
+    @staticmethod
+    def _publish(publisher, client, tag, prerelease, releases):
+        client.get_draft_release.return_value = Release(
+            tag_name=tag, name=f"Release {tag}", draft=True,
+            prerelease=prerelease, html_url=f"https://github.com/test/releases/tag/{tag}"
+        )
+        client.get_release_id.return_value = 12345
+        client.get_file_content.return_value = f"repository:\n  release_tag: {tag}\n"
+        client.update_release.return_value = {"html_url": "u", "id": 12345}
+        client.get_releases.return_value = [
+            Release(tag_name=t, name=t, draft=False, prerelease=p, html_url="")
+            for t, p in releases
+        ]
+        assert publisher.publish_release(tag, f"release-snapshot/{tag}-abc123").success
+        return client.update_release.call_args_list[-1]
+
+    def test_maintenance_without_later_cycle_is_latest(self, publisher, mock_github_client):
+        call = self._publish(publisher, mock_github_client, "r1.7", False,
+                             [("r1.7", False), ("r1.6", False)])
+        assert call == ((12345,), {"make_latest": "true"})
+
+    def test_later_cycle_public_keeps_latest(self, publisher, mock_github_client):
+        call = self._publish(publisher, mock_github_client, "r1.10", False,
+                             [("r1.10", False), ("r2.1", False), ("r1.9", True)])
+        assert call == ((12345,), {"make_latest": "false"})
+
+    def test_later_cycle_maintenance_keeps_latest(self, publisher, mock_github_client):
+        call = self._publish(publisher, mock_github_client, "r2.3", False,
+                             [("r2.3", False), ("r3.2", False), ("r3.1", False)])
+        assert call == ((12345,), {"make_latest": "false"})
+
+    def test_later_cycle_pre_release_only_takes_latest(self, publisher, mock_github_client):
+        call = self._publish(publisher, mock_github_client, "r1.8", False,
+                             [("r1.8", False), ("r2.1", True), ("r1.7", False)])
+        assert call == ((12345,), {"make_latest": "true"})
+
+    def test_cycle_number_compared_numerically(self, publisher, mock_github_client):
+        call = self._publish(publisher, mock_github_client, "r10.2", False,
+                             [("r10.2", False), ("r9.4", False)])
+        assert call == ((12345,), {"make_latest": "true"})
+
+    def test_pre_release_passes_false(self, publisher, mock_github_client):
+        call = self._publish(publisher, mock_github_client, "r1.9", True,
+                             [("r1.9", True), ("r1.8", False)])
+        assert call == ((12345,), {"make_latest": "false"})
+        mock_github_client.update_release.assert_any_call(12345, draft=False, prerelease=True)
+
+
 class TestPublishResult:
     """Tests for PublishResult dataclass."""
 

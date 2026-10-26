@@ -772,9 +772,12 @@ class SnapshotCreator:
 
         The CHANGELOG convention defines different comparison bases:
         - Alpha: delta to the previous release (any type)
-        - First RC: all changes since the last public release
+        - First RC: all changes since the last public release; on a
+          maintenance line, since the patched release
         - Subsequent RC: delta to the previous release-candidate
-        - Public/maintenance: all changes since the previous public release
+        - Public: all changes since the previous public release
+        - Maintenance: all changes since the patched release, the newest
+          public or maintenance release of the cycle
 
         For RC releases, checks same-cycle prereleases via release-metadata.yaml
         to distinguish first RC from subsequent RC.
@@ -793,14 +796,28 @@ class SnapshotCreator:
         if release_type == "pre-release-rc":
             return self._get_rc_compare_base(release_tag)
 
-        # Public and maintenance: compare against last public release
+        if release_type == "maintenance-release":
+            return self._get_patched_release(release_tag) or self._get_latest_public_release()
+
         return self._get_latest_public_release()
+
+    def _get_patched_release(self, release_tag: str) -> Optional[str]:
+        """Newest public or maintenance release of the tag's cycle (rc pre-releases skipped)."""
+        match = re.match(r"(r\d+\.)", release_tag)
+        if not match:
+            return None
+        for r in self.gh.get_releases(include_drafts=False):
+            if r.tag_name.startswith(match.group(1)) and not r.prerelease:
+                return r.tag_name
+        return None
 
     def _get_rc_compare_base(self, release_tag: str) -> Optional[str]:
         """Find compare base for an RC release.
 
         Checks same-cycle prereleases for a previous RC. If found,
-        this is a subsequent RC (compare against it). Otherwise,
+        this is a subsequent RC (compare against it). A same-cycle public
+        or maintenance release found first makes this the first RC on a
+        maintenance line (compare against that patched release). Otherwise,
         this is the first RC (compare against last public release).
 
         Args:
@@ -822,7 +839,7 @@ class SnapshotCreator:
                 if not r.tag_name.startswith(cycle_prefix):
                     continue  # Different cycle
                 if not r.prerelease:
-                    break  # Public release in same cycle — no prior RC possible
+                    return r.tag_name  # First rc on a maintenance line: the patched release
                 # Same-cycle prerelease — check if it's an RC
                 metadata = self.gh.get_release_metadata(r.tag_name)
                 if metadata:
@@ -917,15 +934,10 @@ class SnapshotCreator:
             for api_name, version in api_versions.items()
         ]
 
-        cycle_match = re.match(r"r(\d+)\.", config.release_tag)
-        cycle = cycle_match.group(1) if cycle_match else ""
-
         # Build data dict
         data = {
             "repo_name": repo_name,
-            "changelog_url": self._changelog_url(
-                temp_dir, org, repo_name, release_type, cycle
-            ),
+            "changelog_url": self._changelog_url(org, repo_name),
         }
 
         if release_state in ("public_release", "public_with_prerelease"):
@@ -975,27 +987,9 @@ class SnapshotCreator:
         return updater.update_release_info(readme_path, release_state, data)
 
     @staticmethod
-    def _changelog_url(
-        temp_dir: str,
-        org: str,
-        repo_name: str,
-        release_type: str,
-        cycle: str,
-    ) -> str:
-        """Build the CHANGELOG link used in README release-info.
-
-        Mirrors the generator's dual-mode rule: a maintenance release
-        into a cycle with no per-cycle file writes flat ``CHANGELOG.md``
-        and the link points there. Every other case uses the per-cycle
-        ``CHANGELOG/`` directory tree view.
-        """
-        base = f"https://github.com/{org}/{repo_name}"
-        per_cycle_file = os.path.join(
-            temp_dir, "CHANGELOG", f"CHANGELOG-r{cycle}.md"
-        )
-        if release_type == "maintenance-release" and not os.path.isfile(per_cycle_file):
-            return f"{base}/blob/main/CHANGELOG.md"
-        return f"{base}/tree/main/CHANGELOG"
+    def _changelog_url(org: str, repo_name: str) -> str:
+        """CHANGELOG link used in README release-info: the per-cycle CHANGELOG/ directory."""
+        return f"https://github.com/{org}/{repo_name}/tree/main/CHANGELOG"
 
     def _generate_changelog(
         self,
@@ -1045,7 +1039,6 @@ class SnapshotCreator:
             content,
             config.release_tag,
             repo_name,
-            release_type=release_type,
         )
 
     def _cleanup_branches(

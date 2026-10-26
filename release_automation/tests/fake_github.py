@@ -90,6 +90,13 @@ class FakeGitHub:
             return None
         return Release(tag_name=r["tag"], name=r["tag"], draft=True, prerelease=r["prerelease"], html_url=r["html_url"])
 
+    def get_releases(self, include_drafts=False) -> List[Release]:
+        self._call("get_releases")
+        return [
+            Release(tag_name=r["tag"], name=r["tag"], draft=r["draft"], prerelease=r["prerelease"], html_url=r["html_url"])
+            for r in reversed(self.releases) if include_drafts or not r["draft"]
+        ]
+
     def get_release_id(self, tag, draft_only=False):
         r = self._release(tag, draft_only)
         return r["id"] if r else None

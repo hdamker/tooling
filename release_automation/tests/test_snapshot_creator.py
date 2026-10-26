@@ -269,54 +269,13 @@ class TestGenerateSnapshotId:
 
 
 class TestChangelogUrl:
-    """Tests for the CHANGELOG link rendered into README release-info.
+    """README release-info links the per-cycle CHANGELOG/ directory for every
+    release type, maintenance included (no flat CHANGELOG.md)."""
 
-    Mirrors the dual-mode rule used by the generator: maintenance releases
-    into a cycle without a per-cycle file link to the flat CHANGELOG.md;
-    every other case links to the per-cycle CHANGELOG/ directory view.
-    """
-
-    def test_maintenance_with_no_per_cycle_file_points_to_flat(self, tmp_path):
-        (tmp_path / "CHANGELOG.md").write_text("legacy\n")
-        url = SnapshotCreator._changelog_url(
-            str(tmp_path),
-            org="camaraproject",
-            repo_name="SimpleEdgeDiscovery",
-            release_type="maintenance-release",
-            cycle="2",
-        )
-        assert url == (
-            "https://github.com/camaraproject/SimpleEdgeDiscovery/blob/main/CHANGELOG.md"
-        )
-
-    def test_maintenance_with_existing_per_cycle_file_points_to_dir(self, tmp_path):
-        (tmp_path / "CHANGELOG").mkdir()
-        (tmp_path / "CHANGELOG" / "CHANGELOG-r2.md").write_text("per-cycle\n")
-        url = SnapshotCreator._changelog_url(
-            str(tmp_path),
-            org="camaraproject",
-            repo_name="SimpleEdgeDiscovery",
-            release_type="maintenance-release",
-            cycle="2",
-        )
+    def test_points_to_the_changelog_directory(self):
+        url = SnapshotCreator._changelog_url("camaraproject", "SimpleEdgeDiscovery")
         assert url == (
             "https://github.com/camaraproject/SimpleEdgeDiscovery/tree/main/CHANGELOG"
-        )
-
-    def test_non_maintenance_always_points_to_dir(self, tmp_path):
-        # Even a repo with a flat CHANGELOG.md and no CHANGELOG/ yet gets
-        # the directory link when the release is not a maintenance release,
-        # because the generator will create the per-cycle file on first run.
-        (tmp_path / "CHANGELOG.md").write_text("legacy\n")
-        url = SnapshotCreator._changelog_url(
-            str(tmp_path),
-            org="camaraproject",
-            repo_name="QualityOnDemand",
-            release_type="public-release",
-            cycle="4",
-        )
-        assert url == (
-            "https://github.com/camaraproject/QualityOnDemand/tree/main/CHANGELOG"
         )
 
 
@@ -1405,6 +1364,54 @@ class TestReleaseDocumentation:
         result = snapshot_creator._get_compare_base("maintenance-release", "r3.3")
         assert result == "r3.2"
 
+    def test_compare_base_maintenance_skips_rc_on_the_line(
+        self, snapshot_creator, mock_github_client
+    ):
+        """Spec 1.9: the patched release is the newest public/maintenance of the cycle."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r1.7", prerelease=True),
+            Mock(tag_name="r1.6", prerelease=False),
+        ]
+        result = snapshot_creator._get_compare_base("maintenance-release", "r1.8")
+        assert result == "r1.6"
+
+    def test_compare_base_maintenance_ignores_later_cycle_public(
+        self, snapshot_creator, mock_github_client
+    ):
+        """A later cycle's public release is not the patched release (M1)."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r2.1", prerelease=False),
+            Mock(tag_name="r1.9", prerelease=True),
+            Mock(tag_name="r1.8", prerelease=False),
+            Mock(tag_name="r1.6", prerelease=False),
+        ]
+        result = snapshot_creator._get_compare_base("maintenance-release", "r1.10")
+        assert result == "r1.8"
+
+    def test_compare_base_first_rc_on_line_uses_patched_release(
+        self, snapshot_creator, mock_github_client
+    ):
+        """First rc on a maintenance line compares against the patched release."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r2.1", prerelease=False),
+            Mock(tag_name="r1.8", prerelease=False),
+            Mock(tag_name="r1.6", prerelease=False),
+        ]
+        result = snapshot_creator._get_compare_base("pre-release-rc", "r1.9")
+        assert result == "r1.8"
+        mock_github_client.get_release_metadata.assert_not_called()
+
+    def test_compare_base_maintenance_without_cycle_release_uses_last_public(
+        self, snapshot_creator, mock_github_client
+    ):
+        """No public release in the cycle: fall back to the newest public release."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r3.1", prerelease=True),
+            Mock(tag_name="r2.4", prerelease=False),
+        ]
+        result = snapshot_creator._get_compare_base("maintenance-release", "r3.2")
+        assert result == "r2.4"
+
     def test_compare_base_alpha_no_releases_returns_none(
         self, snapshot_creator, mock_github_client
     ):
@@ -1455,13 +1462,13 @@ class TestReleaseDocumentation:
     def test_compare_base_rc_same_cycle_public_stops_search(
         self, snapshot_creator, mock_github_client
     ):
-        """RC stops searching same-cycle when public release found."""
+        """RC on a cycle with a public release compares against it (patched release)."""
         mock_github_client.get_releases.return_value = [
             Mock(tag_name="r4.0", prerelease=False),  # Public in same cycle
             Mock(tag_name="r3.2", prerelease=False),
         ]
         result = snapshot_creator._get_compare_base("pre-release-rc", "r4.1")
-        # Should return r4.0 (last public, found after breaking from same-cycle search)
+        # r4.0 is the patched release of the line
         assert result == "r4.0"
         mock_github_client.get_release_metadata.assert_not_called()
 

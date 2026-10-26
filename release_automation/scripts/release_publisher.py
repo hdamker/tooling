@@ -7,6 +7,7 @@ in complete_publication(): reference tag, pointer branch, branch cleanup.
 """
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -16,6 +17,11 @@ import yaml
 from .github_client import GitHubClient, GitHubClientError
 
 logger = logging.getLogger(__name__)
+
+
+def _cycle(release_tag: str) -> Optional[int]:
+    match = re.match(r"r(\d+)\.", release_tag)
+    return int(match.group(1)) if match else None
 
 
 @dataclass
@@ -203,11 +209,7 @@ class ReleasePublisher:
 
         # Step 3b: Set make_latest separately — GitHub ignores make_latest
         # while the release is still a draft (same PATCH call)
-        if not is_prerelease:
-            try:
-                self.gh.update_release(release_id, make_latest="true")
-            except GitHubClientError:
-                logger.warning(f"Failed to mark {release_tag} as Latest release")
+        self.set_latest(release_id, release_tag, is_prerelease)
 
         return PublishResult(
             success=True,
@@ -251,17 +253,32 @@ class ReleasePublisher:
             )
 
         # make_latest in its own call, as in publish_release()
-        if not is_prerelease:
-            try:
-                self.gh.update_release(created.get("id"), make_latest="true")
-            except GitHubClientError:
-                logger.warning(f"Failed to mark {release_tag} as Latest release")
+        self.set_latest(created.get("id"), release_tag, is_prerelease)
         return PublishResult(
             success=True,
             release_url=created.get("html_url"),
             release_id=created.get("id"),
             is_prerelease=is_prerelease
         )
+
+    def latest_flag(self, release_tag: str, is_prerelease: bool) -> str:
+        """make_latest value: "true" only for a release that is not a pre-release
+        and has no later cycle with a public or maintenance release."""
+        if is_prerelease:
+            return "false"
+        cycle = _cycle(release_tag)
+        for release in self.gh.get_releases(include_drafts=False):
+            other = _cycle(release.tag_name)
+            if not release.prerelease and cycle is not None and other is not None and other > cycle:
+                return "false"
+        return "true"
+
+    def set_latest(self, release_id: Any, release_tag: str, is_prerelease: bool) -> None:
+        """Pass make_latest explicitly, so a patch of an older cycle does not take "Latest"."""
+        try:
+            self.gh.update_release(release_id, make_latest=self.latest_flag(release_tag, is_prerelease))
+        except GitHubClientError:
+            logger.warning(f"Failed to set the Latest flag of {release_tag}")
 
     def create_reference_tag(
         self,

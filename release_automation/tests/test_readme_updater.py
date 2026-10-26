@@ -188,22 +188,6 @@ class TestTemplateRendering:
         for result in (public_result, prerelease_result, combined_result):
             assert f"[CHANGELOG]({dir_url})" in result
 
-    def test_changelog_url_renders_flat_file_link(self, updater, public_release_data):
-        """Flat-mode URL (blob/main/CHANGELOG.md) also renders cleanly."""
-        flat_url = "https://github.com/camaraproject/SimpleEdgeDiscovery/blob/main/CHANGELOG.md"
-        public_release_data["changelog_url"] = flat_url
-        public_release_data["repo_name"] = "SimpleEdgeDiscovery"
-
-        result = updater._render_template("public_release", public_release_data)
-        assert f"[CHANGELOG]({flat_url})" in result
-
-
-# --- Content Replacement ---
-
-
-class TestContentReplacement:
-    """Tests for delimited content replacement."""
-
     def test_replace_existing_content(self, updater):
         """Replaces content between delimiters."""
         content = (

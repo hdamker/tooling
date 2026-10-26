@@ -78,10 +78,9 @@ def sync_readme(gh, work_dir: Path, tag: str) -> bool:
 
 
 def changelog_candidates(tag: str) -> List[str]:
-    """Per-cycle CHANGELOG first, then the flat CHANGELOG.md of repos not yet migrated."""
+    """The per-cycle CHANGELOG of the tag's release cycle."""
     match = re.match(r"^r(\d+)\.\d+", tag)
-    candidates = [f"CHANGELOG/CHANGELOG-r{match.group(1)}.md"] if match else []
-    return candidates + ["CHANGELOG.md"]
+    return [f"CHANGELOG/CHANGELOG-r{match.group(1)}.md"] if match else []
 
 
 def sync_changelog(gh, work_dir: Path, tag: str) -> str:
