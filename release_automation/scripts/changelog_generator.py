@@ -509,20 +509,28 @@ class ChangelogGenerator:
         base_url = f"https://github.com/{org}/{repo_name}"
         raw_url = f"https://raw.githubusercontent.com/{org}/{repo_name}"
 
+        comparison_baseline = api.get("comparison_baseline", "")
+        # An API released again at its baseline's version (e.g. the APIs a
+        # maintenance release does not fix) has nothing to describe
+        unchanged = bool(comparison_baseline) and (
+            comparison_baseline.lstrip("vV") == version.lstrip("vV")
+        )
+
         descriptor = cls._version_descriptor(version, release_type)
-        if descriptor:
+        if unchanged:
+            first_sentence = f"**{title} {version} is unchanged in this release.**"
+        elif descriptor:
             first_sentence = f"**{title} {version} is {descriptor} of this API.**"
         else:
             first_sentence = f"**{title} {version} is ...**"
 
-        comparison_baseline = api.get("comparison_baseline", "")
         lines = [
             f"## {title} {version}",
             "",
             first_sentence,
             "",
         ]
-        if comparison_baseline:
+        if comparison_baseline and not unchanged:
             lines.extend([
                 f"Changes documented below are compared to version {comparison_baseline}.",
                 "",
@@ -534,6 +542,11 @@ class ChangelogGenerator:
             f"  - [View it on Swagger Editor](https://camaraproject.github.io/swagger-ui/"
             f"?url={raw_url}/{release_tag}/{yaml_path})",
             f"  - OpenAPI [YAML spec file]({base_url}/blob/{release_tag}/{yaml_path})",
+        ])
+        if unchanged:
+            return "\n".join(lines)
+
+        lines.extend([
             "",
             "### Breaking changes",
             "",
