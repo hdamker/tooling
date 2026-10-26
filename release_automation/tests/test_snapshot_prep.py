@@ -134,3 +134,72 @@ def test_main_bot_identity_failure_is_an_error(tmp_path, monkeypatch, capsys):
 def test_main_rejects_an_unknown_step():
     with pytest.raises(SystemExit):
         main(["nonsense"], {})
+
+
+# ── create: the snapshot of the plan's release ───────────────────────────────
+
+from release_automation.scripts import snapshot_creator as creator_mod  # noqa: E402
+from release_automation.scripts.snapshot_creator import SnapshotResult  # noqa: E402
+from release_automation.tests.fake_github import FakeGitHub  # noqa: E402
+from release_automation.tests.plans import make_plan  # noqa: E402
+
+PLAN_YAML = "repository:\n  target_release_tag: r1.8\n  target_release_type: maintenance-release\n"
+
+
+def run_create(tmp_path, monkeypatch, gh, result=None, plan_fields=None):
+    seen = {}
+
+    def fake_create(self, release_plan, config):
+        seen.update(release_plan=release_plan, config=config, bot=(self.bot_name, self.bot_email))
+        return result
+
+    monkeypatch.setattr(creator_mod.SnapshotCreator, "create_snapshot", fake_create)
+    out_file = tmp_path / "out"
+    plan = make_plan(**{"release_tag": "r1.8", "state": "planned", "base_branch": "maintenance/r1",
+                        "release_issue_number": "7", "action": "create-snapshot", **(plan_fields or {})})
+    env = {"PLAN_JSON": plan.to_json(), "GITHUB_REPOSITORY": "camaraproject/Example", "GITHUB_TOKEN": "t",
+           "TOOLING_PATH": str(TOOLING_ROOT), "BOT_NAME": "bot[bot]", "BOT_EMAIL": "1+bot[bot]@x", "GITHUB_OUTPUT": str(out_file)}
+    monkeypatch.setattr(snapshot_prep, "_github_client", lambda env: gh)
+    code = main(["create"], env)
+    return code, parse_outputs(out_file), seen
+
+
+def test_main_create_runs_the_creator_on_the_plans_release(tmp_path, monkeypatch):
+    gh = FakeGitHub(files={("maintenance/r1", "release-plan.yaml"): PLAN_YAML})
+    result = SnapshotResult(success=True, snapshot_id="r1.8-abc1234", snapshot_branch="release-snapshot/r1.8-abc1234",
+                            release_review_branch="release-review/r1.8-abc1234", release_pr_number=12,
+                            release_pr_url="https://github.com/camaraproject/Example/pull/12",
+                            api_versions={"qod": "1.0.1"}, warnings=["w"], notes=["n"])
+
+    code, out, seen = run_create(tmp_path, monkeypatch, gh, result)
+
+    assert code == 0
+    assert out == {
+        "success": "true", "snapshot_id": "r1.8-abc1234", "snapshot_branch": "release-snapshot/r1.8-abc1234",
+        "release_review_branch": "release-review/r1.8-abc1234", "release_pr_number": "12",
+        "release_pr_url": "https://github.com/camaraproject/Example/pull/12", "error_message": "",
+        "apis_json": '[{"api_name": "qod", "api_version": "1.0.1"}]',
+    }
+    # The plan's tag, base branch and Release Issue, the plan file of the base branch (F12: no main default)
+    config = seen["config"]
+    assert (config.release_tag, config.base_branch, config.release_issue_number, config.dry_run) == ("r1.8", "maintenance/r1", 7, False)
+    assert seen["release_plan"]["repository"]["target_release_tag"] == "r1.8"
+    assert seen["bot"] == ("bot[bot]", "1+bot[bot]@x")
+
+
+def test_main_create_reports_a_failed_creation(tmp_path, monkeypatch, capsys):
+    gh = FakeGitHub(files={("maintenance/r1", "release-plan.yaml"): PLAN_YAML})
+    result = SnapshotResult(success=False, snapshot_id="r1.8-abc1234", errors=["Transformations failed", "x"])
+
+    code, out, _ = run_create(tmp_path, monkeypatch, gh, result)
+
+    assert code == 1
+    assert (out["success"], out["snapshot_id"], out["error_message"]) == ("false", "r1.8-abc1234", "Transformations failed; x")
+    assert "::error::Snapshot creation failed: Transformations failed; x" in capsys.readouterr().out
+
+
+def test_main_create_without_a_release_plan_fails_before_creating(tmp_path, monkeypatch):
+    code, out, seen = run_create(tmp_path, monkeypatch, FakeGitHub())
+
+    assert code == 1 and seen == {}
+    assert (out["success"], out["error_message"]) == ("false", "release-plan.yaml not found")

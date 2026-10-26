@@ -199,13 +199,13 @@ def pr(number, head):
 def test_find_sync_pr_matches_the_exact_branch():
     gh = FakeGitHub([pr(5, "sync-common/r4.2"), pr(6, "sync-common/r4.3-old"), pr(7, "sync-common/r4.3")])
 
-    assert find_sync_pr(gh, "r4.3") == "https://github.com/camaraproject/Example/pull/7"
+    assert find_sync_pr(gh, "r4.3", "main") == "https://github.com/camaraproject/Example/pull/7"
 
 
 def test_find_sync_pr_ignores_other_sync_branches():
     gh = FakeGitHub([pr(5, "sync-common/r4.2")])
 
-    assert find_sync_pr(gh, "r4.3") == ""
+    assert find_sync_pr(gh, "r4.3", "main") == ""
 
 
 
@@ -262,6 +262,7 @@ def run_sync_common(tmp_path, remotes, gh, release="r4.3"):
         release,
         "release-bot[bot]",
         "7+release-bot[bot]@users.noreply.github.com",
+        base_branch="main",
     )
 
 
@@ -363,7 +364,7 @@ def test_cache_already_matching_is_no_changes(tmp_path, remotes):
     outcome = sync_common(
         git_ops(api, tmp_path / "again-api"),
         git_ops(commonalities, tmp_path / "again-commonalities"),
-        FakeGitHub(), "r4.3", "bot", "bot@example.com",
+        FakeGitHub(), "r4.3", "bot", "bot@example.com", base_branch="main",
     )
 
     assert outcome == CommonSyncOutcome(status="no_changes")
@@ -448,7 +449,7 @@ MB = "maintenance/r1"
 
 @pytest.mark.parametrize(
     "base_branch,branch",
-    [("main", "sync-common/r4.3"), (MB, "sync-common/maintenance/r1/r4.3"), ("", "sync-common/r4.3")],
+    [("main", "sync-common/r4.3"), (MB, "sync-common/maintenance/r1/r4.3")],
 )
 def test_sync_branch_per_line(base_branch, branch):
     assert common_sync.sync_branch("r4.3", base_branch) == branch

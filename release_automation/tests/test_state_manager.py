@@ -10,11 +10,8 @@ from unittest.mock import Mock, patch
 
 from release_automation.scripts.github_client import Branch, Release
 from release_automation.scripts.state_manager import (
-    ConfigurationError,
-    ReleaseInfoResult,
     ReleaseState,
     ReleaseStateManager,
-    SnapshotInfo,
 )
 
 
@@ -55,7 +52,7 @@ class TestDeriveStatePerLine:
     def test_main_without_maintenance_branch(self, state_manager, mock_github_client):
         self.given(mock_github_client, {"main": self.plan("r1.7")})
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert result.success and result.state == ReleaseState.PLANNED
         assert (result.release_tag, result.base_branch) == ("r1.7", "main")
@@ -67,7 +64,7 @@ class TestDeriveStatePerLine:
             branches=[self.MB],
         )
 
-        result = state_manager.derive_state(base_branch=self.MB)
+        result = state_manager.derive_state(self.MB)
 
         assert result.success and result.state == ReleaseState.PLANNED
         assert (result.release_tag, result.base_branch) == ("r1.8", self.MB)
@@ -79,7 +76,7 @@ class TestDeriveStatePerLine:
         self.given(mock_github_client, {"main": self.plan(tag)}, branches=[self.MB])
         mock_github_client.tag_exists.return_value = published
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert not result.success
         assert result.config_error.error_type == "release_line"
@@ -90,7 +87,7 @@ class TestDeriveStatePerLine:
     ):
         self.given(mock_github_client, {self.MB: self.plan("r2.1", "public-release")}, branches=[self.MB])
 
-        result = state_manager.derive_state(base_branch=self.MB)
+        result = state_manager.derive_state(self.MB)
 
         assert not result.success and result.config_error.error_type == "release_line"
 
@@ -112,7 +109,7 @@ class TestDeriveStatePerLine:
             lambda pattern: [snapshot] if pattern == "release-snapshot/r1.8-*" else []
         )
 
-        result = state_manager.derive_state(base_branch=base_branch)
+        result = state_manager.derive_state(base_branch)
 
         assert result.success and result.state == state
 
@@ -120,7 +117,7 @@ class TestDeriveStatePerLine:
         self.given(mock_github_client, {"main": self.plan("r1.6", "public-release")})
         mock_github_client.tag_exists.return_value = True
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert result.success and result.state == ReleaseState.PUBLISHED
 
@@ -147,7 +144,7 @@ repository:
         mock_github_client.get_file_content.return_value = self.VALID_PLAN
         mock_github_client.tag_exists.return_value = True
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert result.success
         assert result.state == ReleaseState.PUBLISHED
@@ -165,7 +162,7 @@ repository:
         ]
         mock_github_client.draft_release_exists.return_value = True
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert result.success
         assert result.state == ReleaseState.DRAFT_READY
@@ -182,7 +179,7 @@ repository:
         ]
         mock_github_client.draft_release_exists.return_value = False
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert result.success
         assert result.state == ReleaseState.SNAPSHOT_ACTIVE
@@ -200,7 +197,7 @@ repository:
         ]
         mock_github_client.draft_release_exists.side_effect = [False, False, True]
 
-        result = state_manager.derive_state(retry_draft_release=True)
+        result = state_manager.derive_state("main", retry_draft_release=True)
 
         assert result.success
         assert result.state == ReleaseState.DRAFT_READY
@@ -219,7 +216,7 @@ repository:
         ]
         mock_github_client.draft_release_exists.side_effect = [False, False, False]
 
-        result = state_manager.derive_state(retry_draft_release=True)
+        result = state_manager.derive_state("main", retry_draft_release=True)
 
         assert result.success
         assert result.state == ReleaseState.SNAPSHOT_ACTIVE
@@ -234,7 +231,7 @@ repository:
         mock_github_client.list_branches.return_value = []
         mock_github_client.get_file_content.return_value = self.VALID_PLAN
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert result.success
         assert result.state == ReleaseState.PLANNED
@@ -253,7 +250,7 @@ repository:
   target_release_type: none
 """
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert result.success
         assert result.state == ReleaseState.NOT_PLANNED
@@ -270,7 +267,7 @@ repository:
   meta_release: Sync26
 """
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert result.success
         assert result.meta_release == "Sync26"
@@ -289,105 +286,15 @@ repository:
         ]
         mock_github_client.draft_release_exists.return_value = False
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert result.success
         assert result.release_tag == "r4.1"
         assert result.release_type == "pre-release-rc"
 
 
-class TestGetCurrentSnapshot:
-    """Tests for get_current_snapshot method."""
-
-    def test_returns_none_when_no_snapshot(self, state_manager, mock_github_client):
-        """No snapshot branch → returns None."""
-        mock_github_client.list_branches.return_value = []
-
-        result = state_manager.get_current_snapshot("r4.1")
-
-        assert result is None
-
-    def test_returns_snapshot_info_when_exists(self, state_manager, mock_github_client):
-        """Snapshot branch exists → returns SnapshotInfo."""
-        mock_github_client.list_branches.return_value = [
-            Branch(name="release-snapshot/r4.1-abc1234", sha="abc1234567890")
-        ]
-        mock_github_client.get_file_content.return_value = """
-repository:
-  src_commit_sha: full1234567890abcdef1234567890abcdef12345678
-"""
-        mock_github_client.get_branch_creation_time.return_value = (
-            "2026-01-29T12:00:00Z"
-        )
-        mock_github_client.find_pr_for_branch.return_value = 42
-
-        result = state_manager.get_current_snapshot("r4.1")
-
-        assert result is not None
-        assert result.snapshot_id == "r4.1-abc1234"
-        assert result.snapshot_branch == "release-snapshot/r4.1-abc1234"
-        assert result.release_review_branch == "release-review/r4.1-abc1234"
-        assert result.src_commit_sha == "full1234567890abcdef1234567890abcdef12345678"
-        assert result.release_pr_number == 42
-
-    def test_uses_branch_sha_when_no_metadata(self, state_manager, mock_github_client):
-        """No release-metadata.yaml → uses branch SHA."""
-        mock_github_client.list_branches.return_value = [
-            Branch(name="release-snapshot/r4.1-abc1234", sha="branch_sha_123")
-        ]
-        mock_github_client.get_file_content.return_value = None
-        mock_github_client.get_branch_creation_time.return_value = (
-            "2026-01-29T12:00:00Z"
-        )
-
-        result = state_manager.get_current_snapshot("r4.1")
-
-        assert result is not None
-        assert result.src_commit_sha == "branch_sha_123"
-
-    def test_handles_invalid_datetime(self, state_manager, mock_github_client):
-        """Invalid datetime string → uses current time."""
-        mock_github_client.list_branches.return_value = [
-            Branch(name="release-snapshot/r4.1-abc1234", sha="abc1234")
-        ]
-        mock_github_client.get_file_content.return_value = None
-        mock_github_client.get_branch_creation_time.return_value = "not-a-valid-date"
-
-        result = state_manager.get_current_snapshot("r4.1")
-
-        assert result is not None
-        # Should not raise an exception, uses fallback datetime
 
 
-class TestGetSnapshotHistory:
-    """Tests for get_snapshot_history method."""
-
-    def test_returns_empty_list_when_no_snapshot(
-        self, state_manager, mock_github_client
-    ):
-        """No snapshot → returns empty list."""
-        mock_github_client.list_branches.return_value = []
-
-        result = state_manager.get_snapshot_history("r4.1")
-
-        assert result == []
-
-    def test_returns_current_snapshot_when_exists(
-        self, state_manager, mock_github_client
-    ):
-        """Current snapshot exists → returns list with one item."""
-        mock_github_client.list_branches.return_value = [
-            Branch(name="release-snapshot/r4.1-abc1234", sha="abc1234")
-        ]
-        mock_github_client.get_file_content.return_value = None
-        mock_github_client.get_branch_creation_time.return_value = (
-            "2026-01-29T12:00:00Z"
-        )
-
-        result = state_manager.get_snapshot_history("r4.1")
-
-        assert len(result) == 1
-        assert result[0].snapshot_id == "r4.1-abc1234"
 
 
 class TestStateTransitions:
@@ -405,21 +312,21 @@ repository:
         mock_github_client.get_file_content.return_value = self.VALID_PLAN
 
         # Initial state: PLANNED
-        assert manager.derive_state().state == ReleaseState.PLANNED
+        assert manager.derive_state("main").state == ReleaseState.PLANNED
 
         # After /create-snapshot: SNAPSHOT_ACTIVE
         mock_github_client.list_branches.return_value = [
             Branch(name="release-snapshot/r4.1-abc1234", sha="abc1234")
         ]
-        assert manager.derive_state().state == ReleaseState.SNAPSHOT_ACTIVE
+        assert manager.derive_state("main").state == ReleaseState.SNAPSHOT_ACTIVE
 
         # After PR merge creates draft: DRAFT_READY
         mock_github_client.draft_release_exists.return_value = True
-        assert manager.derive_state().state == ReleaseState.DRAFT_READY
+        assert manager.derive_state("main").state == ReleaseState.DRAFT_READY
 
         # After release published: PUBLISHED
         mock_github_client.tag_exists.return_value = True
-        assert manager.derive_state().state == ReleaseState.PUBLISHED
+        assert manager.derive_state("main").state == ReleaseState.PUBLISHED
 
     def test_discard_and_retry_path(self, mock_github_client):
         """Test state transitions through discard and retry path."""
@@ -430,21 +337,21 @@ repository:
         mock_github_client.list_branches.return_value = [
             Branch(name="release-snapshot/r4.1-abc1234", sha="abc1234")
         ]
-        assert manager.derive_state().state == ReleaseState.SNAPSHOT_ACTIVE
+        assert manager.derive_state("main").state == ReleaseState.SNAPSHOT_ACTIVE
 
         # After /discard-snapshot: back to PLANNED
         mock_github_client.list_branches.return_value = []
-        assert manager.derive_state().state == ReleaseState.PLANNED
+        assert manager.derive_state("main").state == ReleaseState.PLANNED
 
         # New /create-snapshot: SNAPSHOT_ACTIVE again
         mock_github_client.list_branches.return_value = [
             Branch(name="release-snapshot/r4.1-def5678", sha="def5678")
         ]
-        assert manager.derive_state().state == ReleaseState.SNAPSHOT_ACTIVE
+        assert manager.derive_state("main").state == ReleaseState.SNAPSHOT_ACTIVE
 
 
 class TestDeriveStateErrors:
-    """Tests for derive_state() configuration error handling.
+    """Tests for derive_state("main") configuration error handling.
 
     Configuration errors should return error results, not NOT_PLANNED state.
     """
@@ -453,7 +360,7 @@ class TestDeriveStateErrors:
         """Missing release-plan.yaml returns config error, not NOT_PLANNED."""
         mock_github_client.get_file_content.return_value = None
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert not result.success
         assert result.config_error is not None
@@ -466,7 +373,7 @@ class TestDeriveStateErrors:
         """Malformed YAML returns config error, not NOT_PLANNED."""
         mock_github_client.get_file_content.return_value = "{{invalid yaml:: missing"
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert not result.success
         assert result.config_error is not None
@@ -478,7 +385,7 @@ class TestDeriveStateErrors:
         """Empty YAML (null) returns config error."""
         mock_github_client.get_file_content.return_value = ""
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert not result.success
         assert result.config_error is not None
@@ -492,7 +399,7 @@ class TestDeriveStateErrors:
 apis:
   - api_name: quality-on-demand
 """
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert not result.success
         assert result.config_error is not None
@@ -507,7 +414,7 @@ apis:
 repository:
   target_release_type: initial
 """
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert not result.success
         assert result.config_error is not None
@@ -526,7 +433,7 @@ repository:
         mock_github_client.list_branches.return_value = []
         mock_github_client.tag_exists.return_value = False
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert result.success
         assert result.state == ReleaseState.NOT_PLANNED
@@ -544,7 +451,7 @@ repository:
         mock_github_client.list_branches.return_value = []
         mock_github_client.tag_exists.return_value = False
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert result.success
         assert result.state == ReleaseState.NOT_PLANNED
@@ -562,7 +469,7 @@ repository:
         mock_github_client.list_branches.return_value = []
         mock_github_client.tag_exists.return_value = False
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert result.success
         assert result.state == ReleaseState.PLANNED
@@ -707,7 +614,7 @@ repository:
             }
         ]
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert result.success
         assert result.release_issue_number == 123
@@ -725,14 +632,14 @@ repository:
         mock_github_client.tag_exists.return_value = False
         mock_github_client.search_issues.return_value = []
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert result.success
         assert result.release_issue_number is None
 
 
 class TestDeriveStateDetails:
-    """derive_state() carries what the plan document needs: snapshot details or plan details (107 D3)."""
+    """derive_state("main") carries what the plan document needs: snapshot details or plan details (107 D3)."""
 
     PLAN = (
         "repository:\n  target_release_tag: r4.1\n  target_release_type: pre-release-rc\n"
@@ -750,7 +657,7 @@ class TestDeriveStateDetails:
         mock_github_client.tag_exists.return_value = False
         mock_github_client.list_branches.return_value = []
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert result.apis == [{"api_name": "qod", "api_version": "1.0.0"}]
         assert (result.commonalities_release, result.identity_consent_management_release) == ("r4.3", "r4.2")
@@ -766,7 +673,7 @@ class TestDeriveStateDetails:
         mock_github_client.draft_release_exists.return_value = False
         mock_github_client.find_pr_for_branch.return_value = 42
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert result.state == ReleaseState.SNAPSHOT_ACTIVE
         assert (result.snapshot_id, result.release_review_branch) == ("r4.1-abc1234", "release-review/r4.1-abc1234")
@@ -787,7 +694,7 @@ class TestDeriveStateDetails:
             tag_name="r4.1", name="r4.1", draft=True, prerelease=True, html_url="https://github.com/o/r/releases/untagged-1",
         )
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert result.state == ReleaseState.DRAFT_READY
         assert result.draft_release_url == "https://github.com/o/r/releases/untagged-1"
@@ -802,7 +709,7 @@ class TestDeriveStateDetails:
         mock_github_client.draft_release_exists.return_value = False
         mock_github_client.find_pr_for_branch.return_value = None
 
-        result = state_manager.derive_state()
+        result = state_manager.derive_state("main")
 
         assert (result.src_commit_sha, result.apis, result.commonalities_release) == ("s1", [], "")
 
@@ -810,7 +717,7 @@ class TestDeriveStateDetails:
 # ── main(): the validation.yml step (P-033 reads the active release state) ───
 
 
-def run_main(tmp_path, monkeypatch, client, base_branch=""):
+def run_main(tmp_path, monkeypatch, client, base_branch):
     from release_automation.scripts import state_manager as module
     from release_automation.tests.test_trigger import read_outputs
 
@@ -843,7 +750,7 @@ def test_main_writes_the_active_release_state(tmp_path, monkeypatch, mock_github
 def test_main_config_error_writes_empty_outputs(tmp_path, monkeypatch, mock_github_client, capsys):
     mock_github_client.get_file_content.return_value = None
 
-    out = run_main(tmp_path, monkeypatch, mock_github_client)
+    out = run_main(tmp_path, monkeypatch, mock_github_client, base_branch="main")
 
     assert out == {"state": "", "snapshot_branch": "", "release_issue_number": ""}
     assert "::warning::Configuration error: No release-plan.yaml found on main branch" in capsys.readouterr().out

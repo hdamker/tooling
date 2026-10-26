@@ -107,8 +107,8 @@ class Plan:
     release_tag: str
     state: str
     release_type: str
+    base_branch: str
     confirm_tag: str = ""
-    base_branch: str = MAIN_BRANCH
     publish_mode: str = PUBLISH_MODE_DRAFT
     response: str = ""
     action: str = ""

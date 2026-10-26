@@ -29,7 +29,7 @@ Both use a short-lived `camara-validation` GitHub App installation token for cro
 
 ### Mandatory E2E for release-automation changes
 
-The Release Automation Regression canary is publish-free — it does not exercise publish, draft build, or release artifact creation. Any change touching `release-automation-reusable.yml`, `release_automation/`, `shared-actions/create-snapshot/`, or related publish-side code requires a full manual E2E on ReleaseTest before `v1-rc` advances.
+The Release Automation Regression canary is publish-free — it does not exercise publish, draft build, or release artifact creation. Any change touching `release-automation-reusable.yml`, `release_automation/`, or related publish-side code requires a full manual E2E on ReleaseTest before `v1-rc` advances.
 
 ## 2. v1 — GA (planned)
 

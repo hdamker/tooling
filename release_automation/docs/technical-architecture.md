@@ -55,7 +55,7 @@ tooling/
 │   │   ├── regression_runner.py      # RA regression canary runner
 │   │   ├── release_publisher.py      # Draft release publication
 │   │   ├── snapshot_creator.py       # Snapshot + release-review branch creation
-│   │   ├── snapshot_prep.py          # Snapshot job glue: settings check, validation gate, bot identity
+│   │   ├── snapshot_prep.py          # Snapshot job steps: settings check, validation gate, bot identity, create (on the plan)
 │   │   ├── state_manager.py          # State derivation logic
 │   │   ├── sync_pr.py                # Post-release sync PR
 │   │   ├── template_loader.py        # Shared template loading utilities
@@ -111,9 +111,6 @@ tooling/
 │       └── technical-architecture.md     # This document
 │
 ├── shared-actions/
-│   ├── create-snapshot/                  # Orchestrates snapshot + release-review branch
-│   │   └── action.yml
-│   │
 │   ├── update-issue-section/            # Update reserved sections in issue body
 │   │   └── action.yml
 │   │
@@ -691,13 +688,13 @@ Updates a reserved section in the issue description between `<!-- BEGIN:{section
 
 ### 4.4 Release Issue sync
 
-No longer a composite action: the `finalize` job calls `issue_sync.sync_for_workflow()` ([finalize.py](../scripts/finalize.py)). It synchronizes the Release Issue with the derived state (or the state the run's command produced), creates the issue when none exists and the state is PLANNED, and updates sections, labels and title on state changes.
+No longer a composite action: the `finalize` job calls `issue_sync.sync_for_workflow()` ([finalize.py](../scripts/finalize.py)) with the plan document and a `ReleaseView` (the state after the run's action and that state's artifacts, from the plan and the action's outcome; nothing is derived again). It creates the issue when none exists and the state is PLANNED, and updates sections, labels and title; commands and syncs always rewrite the managed sections, issue events only on a state change.
 
 **Returns:** `issue_number`, `issue_action` (`created`, `updated`, `unchanged`, `skipped`, `error`), `issue_url`
 
-### 4.5 create-snapshot
+### 4.5 Snapshot creation
 
-Orchestrates the full snapshot creation flow: validate release plan, calculate API versions, create snapshot branch with transformations + README Release Information, generate release-metadata.yaml, create release-review branch with the CHANGELOG commit, create Release PR.
+No longer a composite action: the `snapshot` job's *Create Snapshot* step runs `python -m release_automation.scripts.snapshot_prep create` on the plan document. It reads `release-plan.yaml` from the plan's base branch and runs `SnapshotCreator` (`snapshot_creator.py`): calculate API versions, create the snapshot branch with transformations + README Release Information, generate release-metadata.yaml, create the release-review branch with the CHANGELOG commit, create the Release PR (linking the plan's Release Issue). The state check happened in `plan`; the concurrency group holds between the two jobs.
 
 ---
 

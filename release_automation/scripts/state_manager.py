@@ -6,7 +6,6 @@ the current release state by examining repository artifacts.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
 import time
 from typing import Any, Dict, List, Optional
@@ -14,7 +13,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from .github_client import GitHubClient
-from .release_line import MAIN_BRANCH, line_of
+from .release_line import line_of
 from .trigger import RELEASE_TAG_MARKER_RE
 from . import config
 
@@ -38,38 +37,6 @@ class ReleaseState(Enum):
     DRAFT_READY = config.STATE_DRAFT_READY        # Draft release created
     PUBLISHED = config.STATE_PUBLISHED            # Tag exists (final state)
     NOT_PLANNED = config.STATE_NOT_PLANNED        # target_release_type set to "none"
-
-
-@dataclass
-class SnapshotInfo:
-    """
-    Information about an active release snapshot.
-
-    The snapshot_id is derived from the branch name:
-        release-snapshot/r4.1-abc1234 → r4.1-abc1234
-
-    Attributes:
-        snapshot_id: Unique identifier (e.g., "r4.1-abc1234")
-        snapshot_branch: Full branch name (e.g., "release-snapshot/r4.1-abc1234")
-        release_review_branch: Review branch name (e.g., "release-review/r4.1-abc1234")
-        src_commit_sha: The commit SHA the snapshot was created from
-        created_at: When the snapshot was created
-        release_pr_number: PR number if Release PR exists
-        release_type: Release type from release-metadata.yaml
-        apis: API metadata from release-metadata.yaml
-        commonalities_release: From release-metadata.yaml dependencies
-        identity_consent_management_release: From release-metadata.yaml dependencies
-    """
-    snapshot_id: str
-    snapshot_branch: str
-    release_review_branch: str
-    src_commit_sha: str
-    created_at: datetime
-    release_pr_number: Optional[int] = None
-    release_type: str = ""
-    apis: List[Dict[str, str]] = field(default_factory=list)
-    commonalities_release: str = ""
-    identity_consent_management_release: str = ""
 
 
 @dataclass
@@ -118,7 +85,7 @@ class ReleaseInfoResult:
     release_issue_number: Optional[int] = None  # GitHub issue number if found
     release_type: Optional[str] = None  # Release type if available
     meta_release: Optional[str] = None  # Meta-release name (e.g., "Sync26")
-    base_branch: str = MAIN_BRANCH  # Branch whose release-plan.yaml was read
+    base_branch: str = ""  # Branch whose release-plan.yaml was read (set by derive_state)
     # Snapshot details (release-metadata.yaml of the snapshot branch)
     snapshot_id: str = ""
     release_review_branch: str = ""
@@ -151,8 +118,8 @@ class ReleaseStateManager:
 
     def derive_state(
         self,
+        base_branch: str,
         retry_draft_release: bool = False,
-        base_branch: str = MAIN_BRANCH,
     ) -> ReleaseInfoResult:
         """
         Derive the current release state and tag from repository artifacts.
@@ -171,9 +138,9 @@ class ReleaseStateManager:
         5. Otherwise → NOT_PLANNED
 
         Args:
+            base_branch: Branch whose release-plan.yaml defines the release
             retry_draft_release: Retry draft-release detection for eventual
                 consistency (useful when called right after draft creation)
-            base_branch: Branch whose release-plan.yaml defines the release
 
         Returns:
             ReleaseInfoResult with either:
@@ -184,12 +151,12 @@ class ReleaseStateManager:
         plan, config_error = self._read_release_plan_with_validation(base_branch)
 
         if config_error:
-            return ReleaseInfoResult(success=False, config_error=config_error)
+            return ReleaseInfoResult(success=False, config_error=config_error, base_branch=base_branch)
 
         plan_release_tag = plan["repository"]["target_release_tag"]
         line = line_of(self.gh, plan_release_tag)
         if line != base_branch:
-            return ReleaseInfoResult(success=False, config_error=ConfigurationError(
+            return ReleaseInfoResult(success=False, base_branch=base_branch, config_error=ConfigurationError(
                 error_type="release_line",
                 message=(
                     f"{config.RELEASE_PLAN_FILE} on {base_branch} targets {plan_release_tag}, "
@@ -335,102 +302,6 @@ class ReleaseStateManager:
 
         return False
 
-    def get_current_snapshot(self, release_tag: str) -> Optional[SnapshotInfo]:
-        """
-        Get information about the current active snapshot for a release.
-
-        If multiple snapshot branches exist for the same release tag,
-        returns the most recent one (by branch creation time).
-
-        Args:
-            release_tag: Release tag to check (e.g., "r4.1")
-
-        Returns:
-            SnapshotInfo if a snapshot exists, None otherwise
-        """
-        branches = self.gh.list_branches(f"{config.SNAPSHOT_BRANCH_PREFIX}{release_tag}-*")
-
-        if not branches:
-            return None
-
-        # Use the first (or only) matching branch
-        # In practice, there should only be one active snapshot per release
-        branch = branches[0]
-        branch_name = branch.name
-
-        # Derive snapshot_id from branch name
-        # release-snapshot/r4.1-abc1234 → r4.1-abc1234
-        snapshot_id = branch_name.replace(config.SNAPSHOT_BRANCH_PREFIX, "")
-
-        # Read release-metadata.yaml from the snapshot branch
-        metadata = self._read_release_metadata(branch_name)
-
-        # Extract data from metadata (or use defaults)
-        if metadata:
-            repo_section = metadata.get("repository", {})
-            src_commit_sha = repo_section.get("src_commit_sha", branch.sha)
-            release_type = repo_section.get("release_type", "")
-            apis = metadata.get("apis", [])
-            deps = metadata.get("dependencies", {})
-            commonalities_release = deps.get("commonalities_release", "")
-            identity_consent_management_release = deps.get(
-                "identity_consent_management_release", ""
-            )
-        else:
-            src_commit_sha = branch.sha
-            release_type = ""
-            apis = []
-            commonalities_release = ""
-            identity_consent_management_release = ""
-
-        # Get branch creation time (approximated)
-        created_at_str = self.gh.get_branch_creation_time(branch_name)
-        if created_at_str:
-            try:
-                created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-            except ValueError:
-                created_at = datetime.now()
-        else:
-            created_at = datetime.now()
-
-        # Find the Release PR for this snapshot branch
-        release_review_branch = f"{config.RELEASE_REVIEW_BRANCH_PREFIX}{snapshot_id}"
-        release_pr_number = self.gh.find_pr_for_branch(release_review_branch)
-
-        return SnapshotInfo(
-            snapshot_id=snapshot_id,
-            snapshot_branch=branch_name,
-            release_review_branch=release_review_branch,
-            src_commit_sha=src_commit_sha,
-            created_at=created_at,
-            release_pr_number=release_pr_number,
-            release_type=release_type,
-            apis=apis,
-            commonalities_release=commonalities_release,
-            identity_consent_management_release=identity_consent_management_release,
-        )
-
-    def get_snapshot_history(self, release_tag: str) -> List[SnapshotInfo]:
-        """
-        Get history of all snapshots for a release.
-
-        This includes both active and discarded snapshots. Discarded
-        snapshots may have their branches deleted but can be identified
-        from release-review branches or issue history.
-
-        Args:
-            release_tag: Release tag to check (e.g., "r4.1")
-
-        Returns:
-            List of SnapshotInfo objects, ordered by creation time (newest first)
-        """
-        # For now, just return the current snapshot if it exists
-        # Full history tracking will be implemented with issue_sync.py
-        current = self.get_current_snapshot(release_tag)
-        if current:
-            return [current]
-        return []
-
     def find_release_issue(self, release_tag: str) -> Optional[int]:
         """
         Find the Release Issue number for a given release tag.
@@ -462,7 +333,7 @@ class ReleaseStateManager:
         return None
 
     def _read_release_plan_with_validation(
-        self, ref: str = "main"
+        self, ref: str
     ) -> tuple[Optional[dict], Optional[ConfigurationError]]:
         """
         Read and validate release-plan.yaml from the repository.
@@ -566,8 +437,8 @@ def main(client=None) -> int:
     env = os.environ
     if client is None:
         client = GitHubClient(repo=env["GITHUB_REPOSITORY"], token=env.get("GITHUB_TOKEN"))
-    base_branch = env.get("BASE_BRANCH") or MAIN_BRANCH
-    info = ReleaseStateManager(client).derive_state(base_branch=base_branch)
+    base_branch = env["BASE_BRANCH"]
+    info = ReleaseStateManager(client).derive_state(base_branch)
     if not info.success:
         print(f"::warning::Configuration error: {info.config_error.message}")
     else:

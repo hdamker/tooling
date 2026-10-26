@@ -1,12 +1,13 @@
 """
 Issue synchronization for CAMARA release automation.
 
-This module provides functionality for creating and synchronizing
-workflow-owned Release Issues based on state derivation from repository
-artifacts.
+Creates and synchronizes the workflow-owned Release Issue of a release line
+with the release as the plan derived it and the run's action changed it
+(ReleaseView): the finalize job never derives state again.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import json
 import re
 import traceback
 from typing import Any, Dict, List, Optional
@@ -14,11 +15,11 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from .github_client import GitHubClient
-from .release_line import MAIN_BRANCH, line_of
-from .state_manager import ReleaseState, ReleaseStateManager
+from .release_line import line_of
+from .state_manager import ReleaseState
 from .issue_manager import IssueManager
-from .bot_responder import BotResponder
 from .labels import RELEASE_ISSUE_LABELS, ensure_labels
+from .plan_document import PlanDocument
 
 
 # Marker to identify workflow-owned issues
@@ -26,6 +27,48 @@ WORKFLOW_MARKER = "<!-- release-automation:workflow-owned -->"
 RELEASE_TAG_MARKER_RE = re.compile(
     r"<!--\s*release-automation:release-tag:(?P<tag>.*?)\s*-->"
 )
+
+# Triggers that only refresh the issue on a state change; everything else
+# (commands, syncs) rewrites the managed sections
+ISSUE_EVENTS = ("issue_close", "issue_reopen")
+
+
+@dataclass(frozen=True)
+class ReleaseView:
+    """
+    The release as the Release Issue must show it: the state after the run's
+    action, the issue to write, and the artifacts the plan knew or the action
+    produced. Built by finalize from the plan document and the outcome
+    (release_view).
+
+    Attributes:
+        state: Release state to show (ReleaseState value)
+        issue_number: The Release Issue, "" when none exists yet
+        snapshot_id, snapshot_branch, release_pr_number, draft_release_url:
+            Artifacts of the state ("" when the state has none)
+        api_versions: Calculated version per api_name (a snapshot's
+            release-metadata.yaml), {} before a snapshot exists
+        commonalities_release, identity_consent_management_release: From the
+            snapshot's metadata; "" to take the release plan's
+        common_cache_status, common_cache_details, common_sync_pr_url: Cache
+            detection and sync PR, shown in the CONFIG section
+        refresh: Rewrite the managed sections even when the state label
+            already matches (commands and syncs; issue events only on a change)
+    """
+    state: str
+    issue_number: str = ""
+    snapshot_id: str = ""
+    snapshot_branch: str = ""
+    release_pr_number: str = ""
+    draft_release_url: str = ""
+    api_versions: Dict[str, str] = field(default_factory=dict)
+    commonalities_release: str = ""
+    identity_consent_management_release: str = ""
+    common_cache_status: str = ""
+    common_cache_details: str = ""
+    common_sync_pr_url: str = ""
+    refresh: bool = True
+
 
 @dataclass
 class SyncResult:
@@ -49,11 +92,10 @@ class IssueSyncManager:
     This class is responsible for:
     - Creating Release Issues when a PLANNED state is detected
     - Updating issue sections and labels when state changes
-    - Finding existing workflow-owned issues
+    - Closing superseded workflow-owned issues of the same line
     - Ignoring manually-created issues
 
     Only issues containing the WORKFLOW_MARKER are managed by this class.
-    Manually created issues are completely ignored.
     """
 
     # Labels used for Release Issues
@@ -63,25 +105,19 @@ class IssueSyncManager:
     def __init__(
         self,
         github_client: GitHubClient,
-        state_manager: Optional[ReleaseStateManager] = None,
-        issue_manager: Optional[IssueManager] = None,
-        bot_responder: Optional[BotResponder] = None,
-        base_branch: str = MAIN_BRANCH,
+        issue_manager: Optional[IssueManager],
+        base_branch: str,
     ):
         """
         Initialize the issue sync manager.
 
         Args:
             github_client: GitHubClient for repository operations
-            state_manager: ReleaseStateManager for state derivation (optional for finalize_published_issue)
             issue_manager: IssueManager for issue content management
-            bot_responder: BotResponder for message templates (optional for finalize_published_issue)
             base_branch: Line the Release Issue belongs to (release_line.line_of)
         """
         self.gh = github_client
-        self.state_manager = state_manager
         self.issue_manager = issue_manager
-        self.bot = bot_responder
         self.base_branch = base_branch
         self._labels_ensured = False  # Track if we've already ensured labels
 
@@ -102,36 +138,18 @@ class IssueSyncManager:
         self._labels_ensured = True
         return created
 
-    def sync_release_issue(
-        self,
-        release_plan: Dict[str, Any],
-        trigger_pr: Optional[int] = None,
-        state_override: Optional[ReleaseState] = None,
-        snapshot_branch_override: Optional[str] = None,
-        release_pr_number_override: Optional[str] = None,
-        draft_release_url_override: Optional[str] = None,
-        force_update: bool = False,
-        common_cache_status: str = "",
-        common_cache_details: str = "",
-        common_sync_pr_url: str = "",
-    ) -> SyncResult:
+    def sync_release_issue(self, release_plan: Dict[str, Any], view: ReleaseView) -> SyncResult:
         """
-        Ensure Release Issue exists and reflects current state.
+        Ensure the Release Issue exists and reflects the release view.
 
-        This method:
-        1. Derives the current release state from repository artifacts
-        2. Finds any existing workflow-owned issue for this release
-        3. Creates a new issue if PLANNED and no issue exists
-        4. Updates the issue if state or content has changed
+        1. Read the issue the view names (never searched: the plan found it)
+        2. Create a new issue if PLANNED and none exists
+        3. Update the issue when the view asks for a refresh or its state,
+           title or plan content changed
 
         Args:
-            release_plan: Parsed release-plan.yaml content
-            trigger_pr: Optional PR number that triggered the sync
-            state_override: Authoritative state for same-run workflow transitions
-            snapshot_branch_override: Authoritative snapshot branch for same-run updates
-            release_pr_number_override: Authoritative release PR number for same-run updates
-            draft_release_url_override: Authoritative draft release URL for same-run updates
-            force_update: Force a refresh even if state appears unchanged
+            release_plan: Parsed release-plan.yaml content of the base branch
+            view: The release as the issue must show it
 
         Returns:
             SyncResult with action taken and issue details
@@ -143,54 +161,26 @@ class IssueSyncManager:
         # Ensure required labels exist before any label operations
         self.ensure_labels_exist()
 
-        # Derive current state
-        if state_override:
-            state = state_override
-            context_source = "override"
-        else:
-            release_info = self.state_manager.derive_state(
-                retry_draft_release=True,
-                base_branch=self.base_branch,
-            )
-            if not release_info.success:
-                return SyncResult(
-                    action="none",
-                    reason=f"config_error: {release_info.config_error.message}",
-                )
-            state = release_info.state
-            context_source = "re-derived"
+        state = ReleaseState(view.state)
         print(
-            f"Issue sync effective context: source={context_source}, "
-            f"state={state.value}, "
-            f"snapshot_branch={snapshot_branch_override or '(auto)'}, "
-            f"release_pr_number={release_pr_number_override or '(auto)'}, "
-            f"draft_release_url={'yes' if draft_release_url_override else 'auto'}, "
-            f"force_update={force_update}"
+            f"Issue sync: state={state.value}, issue=#{view.issue_number or '(none)'}, "
+            f"snapshot_branch={view.snapshot_branch or '(none)'}, "
+            f"release_pr_number={view.release_pr_number or '(none)'}, "
+            f"draft_release_url={'yes' if view.draft_release_url else 'no'}, refresh={view.refresh}"
         )
 
-        # Find existing workflow-owned issue
-        issue = self.find_workflow_owned_issue(release_tag)
+        issue = self.gh.get_issue(int(view.issue_number)) if view.issue_number else None
 
         if issue is None:
             # No workflow-owned issue exists
             if state == ReleaseState.PLANNED:
                 # Create new Release Issue
-                new_issue = self.create_release_issue(release_plan, trigger_pr)
+                new_issue = self.create_release_issue(release_plan)
                 # Populate sections with initial content and refetch.
                 # Wrapped in retry_on_not_found because GitHub API may
                 # return 404 for a freshly created issue (eventual consistency).
                 def _post_create():
-                    self._update_release_issue(
-                        new_issue,
-                        state,
-                        release_plan,
-                        snapshot_branch_override=snapshot_branch_override,
-                        release_pr_number_override=release_pr_number_override,
-                        draft_release_url_override=draft_release_url_override,
-                        common_cache_status=common_cache_status,
-                        common_cache_details=common_cache_details,
-                        common_sync_pr_url=common_sync_pr_url,
-                    )
+                    self._update_release_issue(new_issue, state, release_plan, view)
                     return self.gh.get_issue(new_issue["number"])
                 updated_issue = self.gh.retry_on_not_found(_post_create)
                 self.cleanup_stale_workflow_owned_issues(release_tag, updated_issue)
@@ -199,18 +189,8 @@ class IssueSyncManager:
                 return SyncResult(action="none", reason="no_planned_release")
 
         # Issue exists - check if update needed
-        if force_update or self._needs_update(issue, state, release_plan):
-            self._update_release_issue(
-                issue,
-                state,
-                release_plan,
-                snapshot_branch_override=snapshot_branch_override,
-                release_pr_number_override=release_pr_number_override,
-                draft_release_url_override=draft_release_url_override,
-                common_cache_status=common_cache_status,
-                common_cache_details=common_cache_details,
-                common_sync_pr_url=common_sync_pr_url,
-            )
+        if view.refresh or self._needs_update(issue, state, release_plan):
+            self._update_release_issue(issue, state, release_plan, view)
             # Refetch issue after update
             updated_issue = self.gh.get_issue(issue["number"])
             self.cleanup_stale_workflow_owned_issues(release_tag, updated_issue)
@@ -218,40 +198,6 @@ class IssueSyncManager:
 
         self.cleanup_stale_workflow_owned_issues(release_tag, issue)
         return SyncResult(action="none", reason="up_to_date")
-
-    def find_workflow_owned_issue(self, release_tag: str) -> Optional[Dict[str, Any]]:
-        """
-        Find an existing workflow-owned issue for the given release.
-
-        Searches for open issues with the 'release-issue' label, then
-        filters to find one that:
-        1. Contains the WORKFLOW_MARKER in its body
-        2. Contains the release-tag marker in its body
-
-        Args:
-            release_tag: Release tag to search for (e.g., "r4.1")
-
-        Returns:
-            Issue dict if found, None otherwise
-        """
-        issues = self.gh.search_issues(
-            labels=[self.RELEASE_ISSUE_LABEL],
-            state="open"
-        )
-
-        for issue in issues:
-            body = issue.get("body", "") or ""
-
-            # Check for workflow marker
-            if WORKFLOW_MARKER not in body:
-                continue
-
-            # Check for release tag marker in body (hidden HTML comment)
-            release_tag_marker = f"<!-- release-automation:release-tag:{release_tag} -->"
-            if release_tag_marker in body:
-                return issue
-
-        return None
 
     def cleanup_stale_workflow_owned_issues(
         self,
@@ -327,17 +273,12 @@ class IssueSyncManager:
             "Removing the release-state label and closing this stale issue."
         )
 
-    def create_release_issue(
-        self,
-        release_plan: Dict[str, Any],
-        trigger_pr: Optional[int] = None
-    ) -> Dict[str, Any]:
+    def create_release_issue(self, release_plan: Dict[str, Any]) -> Dict[str, Any]:
         """
         Create a new workflow-owned Release Issue.
 
         Args:
             release_plan: Parsed release-plan.yaml content
-            trigger_pr: Optional PR number that triggered creation
 
         Returns:
             Dict with created issue details
@@ -435,15 +376,10 @@ class IssueSyncManager:
         issue: Dict[str, Any],
         state: ReleaseState,
         release_plan: Dict[str, Any],
-        snapshot_branch_override: Optional[str] = None,
-        release_pr_number_override: Optional[str] = None,
-        draft_release_url_override: Optional[str] = None,
-        common_cache_status: str = "",
-        common_cache_details: str = "",
-        common_sync_pr_url: str = "",
+        view: ReleaseView,
     ) -> None:
         """
-        Update an existing Release Issue to match current state.
+        Update an existing Release Issue to match the release view.
 
         Updates:
         - State label (removes old, adds new)
@@ -454,11 +390,9 @@ class IssueSyncManager:
 
         Args:
             issue: Issue dict to update
-            state: Current derived state
+            state: State to show
             release_plan: Current release plan
-            snapshot_branch_override: Authoritative snapshot branch for same-run updates
-            release_pr_number_override: Authoritative release PR number for same-run updates
-            draft_release_url_override: Authoritative draft release URL for same-run updates
+            view: Artifacts and cache state to show
         """
         issue_number = issue["number"]
         release_tag = release_plan.get("repository", {}).get("target_release_tag", "")
@@ -490,31 +424,13 @@ class IssueSyncManager:
                 self.gh.remove_labels(issue_number, old_state_labels)
             self.gh.add_labels(issue_number, [new_state_label])
 
-        # Get snapshot info and artifact URLs
-        snapshot = self.state_manager.get_current_snapshot(release_tag)
-        snapshot_id = snapshot.snapshot_id if snapshot else ""
-        snapshot_branch = snapshot_branch_override or (snapshot.snapshot_branch if snapshot else "")
-        release_pr_url = ""
-        draft_release_url = ""
-        snapshot_branch_url = ""
-        release_pr_number = release_pr_number_override or (
-            str(snapshot.release_pr_number) if snapshot and snapshot.release_pr_number else ""
-        )
-
-        if snapshot_branch and not snapshot_id:
-            snapshot_id = snapshot_branch.replace("release-snapshot/", "")
-
-        if release_pr_number:
-            # Construct PR URL
-            release_pr_url = f"https://github.com/{self.gh.repo}/pull/{release_pr_number}"
-
-        if snapshot_branch:
-            # Construct snapshot branch tree URL
-            snapshot_branch_url = f"https://github.com/{self.gh.repo}/tree/{snapshot_branch}"
-
-        # Get draft release URL if in draft-ready state
-        if state == ReleaseState.DRAFT_READY:
-            draft_release_url = draft_release_url_override or self._get_draft_release_url(release_tag)
+        # Artifact URLs of the view
+        snapshot_id = view.snapshot_id
+        if view.snapshot_branch and not snapshot_id:
+            snapshot_id = view.snapshot_branch.replace("release-snapshot/", "")
+        release_pr_url = f"https://github.com/{self.gh.repo}/pull/{view.release_pr_number}" if view.release_pr_number else ""
+        snapshot_branch_url = f"https://github.com/{self.gh.repo}/tree/{view.snapshot_branch}" if view.snapshot_branch else ""
+        draft_release_url = view.draft_release_url if state == ReleaseState.DRAFT_READY else ""
 
         # Update STATE section with artifact links
         new_state_content = self.issue_manager.generate_state_section(
@@ -529,33 +445,17 @@ class IssueSyncManager:
             current_body, "STATE", new_state_content
         )
 
-        # Update CONFIG section with API versions and dependencies
-        api_versions = {}
-        commonalities_release = ""
-        icm_release = ""
-        if snapshot:
-            # Extract calculated versions from snapshot APIs
-            for api in snapshot.apis:
-                api_name = api.get("api_name", "")
-                api_version = api.get("api_version", "")
-                if api_name and api_version:
-                    api_versions[api_name] = api_version
-            commonalities_release = snapshot.commonalities_release
-            icm_release = snapshot.identity_consent_management_release
-        else:
-            # No snapshot - get dependencies from release_plan
-            deps = release_plan.get("dependencies", {})
-            commonalities_release = deps.get("commonalities_release", "")
-            icm_release = deps.get("identity_consent_management_release", "")
-
+        # Update CONFIG section: calculated versions and dependencies from the
+        # snapshot when there is one, dependencies from release_plan otherwise
+        deps = release_plan.get("dependencies", {})
         new_config_content = self.issue_manager.generate_config_section(
             release_plan=release_plan,
-            api_versions=api_versions,
-            commonalities_release=commonalities_release,
-            icm_release=icm_release,
-            common_cache_status=common_cache_status,
-            common_cache_details=common_cache_details,
-            common_sync_pr_url=common_sync_pr_url,
+            api_versions=dict(view.api_versions),
+            commonalities_release=view.commonalities_release or deps.get("commonalities_release", ""),
+            icm_release=view.identity_consent_management_release or deps.get("identity_consent_management_release", ""),
+            common_cache_status=view.common_cache_status,
+            common_cache_details=view.common_cache_details,
+            common_sync_pr_url=view.common_sync_pr_url,
         )
         updated_body = self.issue_manager.update_section(
             updated_body, "CONFIG", new_config_content
@@ -588,25 +488,6 @@ class IssueSyncManager:
             title=new_title,
             body=updated_body if updated_body != current_body else None
         )
-
-    def _get_draft_release_url(self, release_tag: str) -> str:
-        """
-        Get the URL of the draft release for a given tag.
-
-        Args:
-            release_tag: Release tag to search for
-
-        Returns:
-            Draft release URL if found, empty string otherwise
-        """
-        try:
-            releases = self.gh.get_releases(include_drafts=True)
-            for release in releases:
-                if release.draft and release.tag_name == release_tag:
-                    return release.html_url
-        except Exception:
-            pass
-        return ""
 
     def get_state_label(self, state: ReleaseState) -> str:
         """
@@ -722,80 +603,71 @@ class WorkflowSync:
     issue_url: str = ""
 
 
-def parse_state(value: str) -> Optional[ReleaseState]:
-    """ReleaseState for a value or name in any case, - or _; None for ""."""
-    normalized = value.strip().lower().replace("-", "_")
-    if not normalized:
-        return None
-    for state in ReleaseState:
-        if normalized in {state.value.lower().replace("-", "_"), state.name.lower()}:
-            return state
-    raise ValueError(f"Unknown release state override: {value}")
-
-
 def _summary(path: str, text: str) -> None:
     if path:
         with open(path, "a", encoding="utf-8") as f:
             f.write(text)
 
 
-def sync_for_workflow(
-    gh: GitHubClient,
-    release_tag: str,
-    state: str,
-    state_override: str = "",
-    snapshot_branch_override: str = "",
-    release_pr_number_override: str = "",
-    draft_release_url_override: str = "",
-    force_update: bool = False,
-    common_cache_status: str = "",
-    common_cache_details: str = "",
-    common_sync_pr_url: str = "",
-    summary_path: str = "",
-    base_branch: str = MAIN_BRANCH,
-) -> WorkflowSync:
+def release_view(plan: PlanDocument, state: str, outcome: Dict[str, str], issue_number: str,
+                 common_sync_pr_url: str = "") -> ReleaseView:
+    """
+    The release as finalize shows it on the Release Issue: the state after the
+    run's action, the artifacts of that state from the action's outcome or,
+    when the plan already knew them, from the plan.
+    """
+    release = plan.release
+    with_snapshot = state in (ReleaseState.SNAPSHOT_ACTIVE.value, ReleaseState.DRAFT_READY.value)
+    api_versions: Dict[str, str] = {}
+    if with_snapshot:
+        apis = json.loads(outcome["apis_json"]) if outcome.get("apis_json") else release.apis
+        api_versions = {a["api_name"]: a["api_version"] for a in apis if a.get("api_name") and a.get("api_version")}
+    return ReleaseView(
+        state=state,
+        issue_number=issue_number,
+        snapshot_id=(outcome.get("snapshot_id") or release.snapshot_id) if with_snapshot else "",
+        snapshot_branch=(outcome.get("snapshot_branch") or plan.snapshot_branch) if with_snapshot else "",
+        release_pr_number=(outcome.get("release_pr_number") or plan.release_pr_number) if with_snapshot else "",
+        draft_release_url=(outcome.get("draft_release_url") or release.draft_release_url) if with_snapshot else "",
+        api_versions=api_versions,
+        commonalities_release=release.commonalities_release if with_snapshot else "",
+        identity_consent_management_release=release.identity_consent_management_release if with_snapshot else "",
+        common_cache_status=plan.cache.status,
+        common_cache_details=plan.cache.details,
+        common_sync_pr_url=common_sync_pr_url or plan.cache.sync_pr_url,
+        refresh=plan.trigger.trigger_type not in ISSUE_EVENTS,
+    )
+
+
+def sync_for_workflow(gh: GitHubClient, plan: PlanDocument, view: ReleaseView, summary_path: str = "") -> WorkflowSync:
     """
     Sync the Release Issue for a workflow run (create, update, or leave it).
 
     Args:
-        gh: GitHub client of the API repository
-        release_tag: Release tag from the plan
-        state: State derived by the plan job
-        state_override: State the run's command moved the release to ("" for none)
-        snapshot_branch_override, release_pr_number_override,
-        draft_release_url_override: Artifacts the run's command created
-        force_update: Refresh the issue even if its state label matches
-        common_cache_status, common_cache_details, common_sync_pr_url: Cache
-            detection and common sync PR, shown in the CONFIG section
+        gh: GitHub client of the API repository (the issue client)
+        plan: The plan document; its base branch's release-plan.yaml is read
+        view: The release as the issue must show it (release_view)
         summary_path: GITHUB_STEP_SUMMARY ("" to skip)
-        base_branch: Line of the release (Plan.base_branch); its
-            release-plan.yaml is read
 
     Returns:
         WorkflowSync; issue_action "error" when the sync failed (logged)
     """
-    try:
-        override = parse_state(state_override)
-    except ValueError as e:
-        print(f"::error::{e}")
-        return WorkflowSync(issue_action="error")
-
-    requested_state = state_override or state
-    print("Effective sync context:")
-    print(f"  Source: {'override' if override else 're-derived'}")
-    print(f"  Requested state: {requested_state or '(none)'}")
-    print(f"  Snapshot branch override: {snapshot_branch_override or '(none)'}")
-    print(f"  Release PR override: {release_pr_number_override or '(none)'}")
-    print(f"  Draft release URL override present: {'yes' if draft_release_url_override else 'no'}")
-    print(f"  Force update: {force_update}")
+    release_tag, base_branch = plan.release_tag, plan.base_branch
+    print("Issue sync context:")
+    print(f"  State: {view.state or '(none)'}")
+    print(f"  Issue: #{view.issue_number or '(none)'}")
+    print(f"  Snapshot branch: {view.snapshot_branch or '(none)'}")
+    print(f"  Release PR: {view.release_pr_number or '(none)'}")
+    print(f"  Draft release URL present: {'yes' if view.draft_release_url else 'no'}")
+    print(f"  Refresh: {view.refresh}")
 
     if not release_tag:
         print("No release tag provided - skipping issue sync")
         return WorkflowSync()
 
-    if requested_state.lower() in ("published", ""):
-        print(f"State '{requested_state}' does not require issue sync - skipping")
-        if requested_state.lower() == "published":
+    if view.state in (ReleaseState.PUBLISHED.value, ""):
+        print(f"State '{view.state}' does not require issue sync - skipping")
+        if view.state == ReleaseState.PUBLISHED.value:
             _summary(summary_path, (
                 "## Release Status: Published\n\n"
                 f"Release `{release_tag}` has already been published. No further actions needed.\n"
@@ -825,26 +697,10 @@ def sync_for_workflow(
     if plan_tag != release_tag:
         print(f"::warning::release-plan.yaml tag '{plan_tag}' doesn't match input '{release_tag}'")
 
-    sync_manager = IssueSyncManager(
-        github_client=gh,
-        state_manager=ReleaseStateManager(github_client=gh),
-        issue_manager=IssueManager(),
-        bot_responder=BotResponder(),
-        base_branch=base_branch,
-    )
-    print(f"Syncing Release Issue for {release_tag} (state: {requested_state})")
+    sync_manager = IssueSyncManager(github_client=gh, issue_manager=IssueManager(), base_branch=base_branch)
+    print(f"Syncing Release Issue for {release_tag} (state: {view.state})")
     try:
-        result = sync_manager.sync_release_issue(
-            release_plan_data,
-            state_override=override,
-            snapshot_branch_override=snapshot_branch_override or None,
-            release_pr_number_override=release_pr_number_override or None,
-            draft_release_url_override=draft_release_url_override or None,
-            force_update=force_update,
-            common_cache_status=common_cache_status,
-            common_cache_details=common_cache_details,
-            common_sync_pr_url=common_sync_pr_url,
-        )
+        result = sync_manager.sync_release_issue(release_plan_data, view)
     except Exception as e:
         print(f"::error::Issue sync failed: {e}")
         traceback.print_exc()

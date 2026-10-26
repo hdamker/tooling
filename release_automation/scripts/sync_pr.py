@@ -25,7 +25,6 @@ from .labels import add_pr_labels
 RELEASE_INFO_START = "<!-- CAMARA:RELEASE-INFO:START -->"
 RELEASE_INFO_END = "<!-- CAMARA:RELEASE-INFO:END -->"
 SYNC_BRANCH_PREFIX = "pr-to-"
-MAIN_BRANCH = "main"
 PR_LABELS = ["post-release", "automated"]
 
 
@@ -124,7 +123,7 @@ def sync_changelog(gh, work_dir: Path, tag: str) -> str:
     return ""
 
 
-def sync_branch(tag: str, base_branch: str = MAIN_BRANCH) -> str:
+def sync_branch(tag: str, base_branch: str) -> str:
     """pr-to-<base_branch>/<tag>: pr-to-main/r1.3, pr-to-maintenance/r1/r1.10."""
     return f"{SYNC_BRANCH_PREFIX}{base_branch}/{tag}"
 
@@ -148,7 +147,7 @@ def _failed() -> SyncPrOutcome:
 
 def create_sync_pr(
     gh, git, tag: str, bot_name: str, bot_email: str,
-    base_branch: str = MAIN_BRANCH, readme: bool = True,
+    base_branch: str, readme: bool = True,
 ) -> SyncPrOutcome:
     """
     Open the post-release sync PR of a published release into one branch.

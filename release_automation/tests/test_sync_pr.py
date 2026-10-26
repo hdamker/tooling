@@ -77,7 +77,8 @@ def remote(tmp_path):
 
 
 def run(tmp_path, remote, gh, tag="r1.3"):
-    return create_sync_pr(gh, git_ops(remote, tmp_path / "api"), tag, "release-bot[bot]", "7+release-bot[bot]@users.noreply.github.com")
+    return create_sync_pr(gh, git_ops(remote, tmp_path / "api"), tag, "release-bot[bot]", "7+release-bot[bot]@users.noreply.github.com",
+                          base_branch="main")
 
 
 def remote_file(remote, branch, path):
