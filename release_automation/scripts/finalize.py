@@ -34,24 +34,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from . import config
 from .bot_identity import resolve_bot_identity
+from .commands import COMMANDS, command
 from .common_sync import CommonSyncOutcome
 from .issue_sync import WorkflowSync, post_publish_warnings
 from .sync_pr import SyncPrOutcome
 
 COMMONALITIES_REPO = "camaraproject/Commonalities"
 
-# Actions after which the Release Issue is synced (when they succeeded)
-STATE_CHANGING_ACTIONS = ("create-snapshot", "discard-snapshot", "delete-draft", "create-draft")
 PUBLISH_ACTIONS = ("publish-release", "publish-on-merge")
+ACTION_CREATE_DRAFT = "create-draft"
 
-# Template of the result comment per command: success, failure
-RESULT_TEMPLATES = {
-    "create-snapshot": ("snapshot_created", "snapshot_failed"),
-    "discard-snapshot": ("snapshot_discarded", "snapshot_failed"),
-    "delete-draft": ("draft_revoked", "snapshot_failed"),
-    "publish-release": ("release_published", "publish_failed"),
-}
+# Actions after which the Release Issue is synced (when they succeeded); a
+# publication updates the issue in finalize_published instead
+STATE_CHANGING_ACTIONS = tuple(
+    c.name for c in COMMANDS if c.job and c.state_after and c.name not in PUBLISH_ACTIONS
+) + (ACTION_CREATE_DRAFT,)
 
 
 @dataclass
@@ -152,22 +151,22 @@ def sync_overrides(run: Run) -> Dict[str, Any]:
     }
     if run.succeeded("create-snapshot"):
         overrides.update(
-            state_override="snapshot-active",
+            state_override=command("create-snapshot").state_after,
             snapshot_branch_override=run.out("snapshot_branch"),
             release_pr_number_override=run.out("release_pr_number"),
             force_update=True,
         )
-    elif run.succeeded("create-draft"):
+    elif run.succeeded(ACTION_CREATE_DRAFT):
         pr_number = (run.event.get("pull_request") or {}).get("number", "")
         overrides.update(
-            state_override="draft-ready",
+            state_override=config.STATE_DRAFT_READY,
             snapshot_branch_override=run.plan("snapshot_branch"),
             release_pr_number_override=str(pr_number),
             draft_release_url_override=run.out("draft_release_url"),
             force_update=True,
         )
     elif run.succeeded("discard-snapshot") or run.succeeded("delete-draft"):
-        overrides.update(state_override="planned", force_update=True)
+        overrides.update(state_override=command(run.action).state_after, force_update=True)
     elif run.plan("command") == "sync-issue":
         overrides.update(force_update=True)
     return overrides
@@ -207,15 +206,25 @@ def notifications(run: Run, sync: WorkflowSync, common: Optional[CommonSyncOutco
 # ── result comment ───────────────────────────────────────────────────────────
 
 
-def result_template(run: Run) -> str:
-    command = run.plan("command")
-    if command == "sync-issue":
-        return "interim_processing"
-    if command not in RESULT_TEMPLATES:
+def result_template(run: Run, sync: Optional[WorkflowSync] = None) -> str:
+    cmd = command(run.plan("command"))
+    if cmd is None:
         # No handler matched: a workflow bug
         return "internal_error"
-    success, failure = RESULT_TEMPLATES[command]
-    return success if run.action == command and run.out("success") == "true" else failure
+    if not cmd.job:
+        # Finalize alone (/sync-issue): the result is the issue sync's
+        return cmd.ok if sync and sync.issue_action != "error" else cmd.failed
+    return cmd.ok if run.action == cmd.name and run.out("success") == "true" else cmd.failed
+
+
+def reported_state(run: Run) -> str:
+    """The release state a result comment reports: after a successful command, its state_after."""
+    cmd = command(run.plan("command"))
+    if cmd and cmd.state_after and run.succeeded(cmd.name):
+        return cmd.state_after
+    if run.published:
+        return config.STATE_PUBLISHED
+    return run.plan("state")
 
 
 def result_context(run: Run, sync: Optional[SyncPrOutcome]) -> Dict[str, str]:
@@ -391,11 +400,11 @@ def run_issue_sync(run: Run, clients: Clients, report: Report, summary_path: str
 
 
 def run_result(run: Run, clients: Clients, report: Report) -> None:
-    report.result_template = result_template(run)
+    report.result_template = result_template(run, report.issue_sync)
     try:
         post_comment(
             clients, run, report.result_template, run.plan("issue_number"),
-            result_context(run, report.sync_pr), comment_id=run.result_comment_id,
+            {**result_context(run, report.sync_pr), "state": reported_state(run)}, comment_id=run.result_comment_id,
         )
     except Exception as e:
         # As before: without the result comment the issue is not finalised.
@@ -413,7 +422,8 @@ def run_merge_publication(run: Run, clients: Clients, report: Report) -> None:
         print("::warning::No Release Issue to report the publication on")
         return
     try:
-        post_comment(clients, run, report.result_template, issue, result_context(run, report.sync_pr))
+        post_comment(clients, run, report.result_template, issue,
+                     {**result_context(run, report.sync_pr), "state": reported_state(run)})
     except Exception as e:
         print(f"::error::Could not post the result comment: {e}")
         report.errors.append("result comment failed")

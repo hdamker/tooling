@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from . import config
+from .commands import actions_for
 from .release_line import MAIN_BRANCH
 
 
@@ -206,32 +207,7 @@ class IssueManager:
         Returns:
             Formatted actions section content
         """
-        state_lower = state.lower().replace("_", "-")
-
-        if state_lower == "planned":
-            return "**Valid actions:**<br>→ **`/create-snapshot` — begin the release process**"
-
-        elif state_lower == "snapshot-active":
-            pr_text = f"[Release PR]({release_pr_url})" if release_pr_url else "Release PR"
-            return (
-                f"**Valid actions:**<br>→ **Update, review, and merge {pr_text} to create draft release**"
-                "<br>→ `/discard-snapshot <reason>` — discard and return to `planned`"
-            )
-
-        elif state_lower == "draft-ready":
-            tag_text = f" {release_tag}" if release_tag else ""
-            return (
-                f"**Valid actions:**<br>→ **`/publish-release --confirm{tag_text}` — publish the release**"
-                "<br>→ `/delete-draft <reason>` — delete draft and return to `planned`"
-            )
-
-        elif state_lower == "not-planned":
-            return (
-                "**Valid actions:**<br>→ **Update `release-plan.yaml` with a planned release type to resume**"
-                "<br>→ Close this issue — a new one will be created when a release is planned"
-            )
-
-        return ""
+        return actions_for(state.lower().replace("_", "-"), release_tag, release_pr_url)
 
     def generate_config_section(
         self,

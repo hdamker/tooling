@@ -8,7 +8,9 @@ See technical-architecture.md Section 2.9 for the authoritative schema.
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
+
 from . import config
+from .commands import actions_for
 
 
 @dataclass
@@ -105,6 +107,9 @@ class BotContext:
     common_cache_stale: bool = False
     has_common_sync_pr: bool = False
 
+    # Valid actions of the state the comment reports (set by derive_flags())
+    valid_actions: str = ""
+
     def derive_flags(self) -> None:
         """Compute boolean flags and derived fields from string fields."""
         self.is_missing_file = self.error_type == "missing_file"
@@ -122,6 +127,7 @@ class BotContext:
         self.has_publish_warnings = bool(self.publish_warnings)
         self.common_cache_stale = self.common_cache_status == "stale"
         self.has_common_sync_pr = bool(self.common_sync_pr_url)
+        self.valid_actions = actions_for(self.state, self.release_tag, self.release_pr_url)
         if not self.short_type:
             self.short_type = config.SHORT_TYPE_MAP.get(
                 self.release_type, self.release_type
@@ -206,4 +212,5 @@ class BotContext:
             "common_sync_pr_url": self.common_sync_pr_url,
             "common_cache_stale": self.common_cache_stale,
             "has_common_sync_pr": self.has_common_sync_pr,
+            "valid_actions": self.valid_actions,
         }

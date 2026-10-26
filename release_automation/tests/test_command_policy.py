@@ -41,7 +41,7 @@ ALLOWED = {
 VALID_COMMANDS_TEXT = {
     ReleaseState.PLANNED: "Valid commands: /create-snapshot, /sync-issue",
     ReleaseState.SNAPSHOT_ACTIVE: "Valid commands: /discard-snapshot, /sync-issue",
-    ReleaseState.DRAFT_READY: "Valid commands: /delete-draft, /publish-release, /sync-issue",
+    ReleaseState.DRAFT_READY: "Valid commands: /publish-release, /delete-draft, /sync-issue",
     ReleaseState.PUBLISHED: "Valid commands: /sync-issue",
     ReleaseState.NOT_PLANNED: "Valid commands: /sync-issue",
 }

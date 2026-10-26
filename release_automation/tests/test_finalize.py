@@ -18,6 +18,7 @@ from release_automation.scripts.finalize import (
     notifications,
     result_context,
     result_due,
+    reported_state,
     result_template,
     sync_overrides,
 )
@@ -257,7 +258,6 @@ def test_no_common_sync_notification_without_an_issue():
         ("discard-snapshot", {"discard-snapshot": failed()}, "snapshot_failed"),
         ("delete-draft", {"delete-draft": ok()}, "draft_revoked"),
         ("delete-draft", {"delete-draft": failed()}, "snapshot_failed"),
-        ("sync-issue", {}, "interim_processing"),
         ("publish-release", {"publish-release": ok()}, "release_published"),
         ("publish-release", {"publish-release": failed()}, "publish_failed"),
         ("unknown-cmd", {}, "internal_error"),
@@ -265,6 +265,33 @@ def test_no_common_sync_notification_without_an_issue():
 )
 def test_result_template(command, jobs, template):
     assert result_template(make_run({"command": command}, jobs)) == template
+
+
+@pytest.mark.parametrize("issue_action,template", [
+    ("updated", "issue_synced"), ("unchanged", "issue_synced"), ("error", "internal_error"),
+])
+def test_sync_issue_result_follows_the_issue_sync(issue_action, template):
+    # F7 (#499): /sync-issue reports a result instead of staying at "Processing"
+    sync = WorkflowSync(issue_number="42", issue_action=issue_action)
+
+    assert result_template(make_run({"command": "sync-issue"}), sync) == template
+
+
+@pytest.mark.parametrize(
+    "command,jobs,state",
+    [
+        ("create-snapshot", {"create-snapshot": ok()}, "snapshot-active"),
+        ("create-snapshot", {"create-snapshot": failed()}, "planned"),
+        ("discard-snapshot", {"discard-snapshot": ok()}, "planned"),
+        ("discard-snapshot", {"discard-snapshot": failed()}, "snapshot-active"),
+        ("publish-release", {"publish-release": ok()}, "published"),
+        ("publish-release", {"publish-release": ("failure", {})}, "snapshot-active"),
+        ("sync-issue", {}, "snapshot-active"),
+    ],
+)
+def test_reported_state_is_the_state_after_the_action(command, jobs, state):
+    # The valid actions of a result comment follow the state after the action
+    assert reported_state(make_run({"command": command, "state": "snapshot-active" if command != "create-snapshot" else "planned"}, jobs)) == state
 
 
 # ── Resolve Reason + Build Result Context ────────────────────────────────────
@@ -624,8 +651,10 @@ def test_sync_issue_command(stubs, tmp_path):
 
     assert kinds(gh) == ["issue-sync", "update"]
     assert stubs["issue_sync"]["force_update"] is True
-    assert "**⏳ Processing: `/sync-issue`**" in gh.events[1][2]
-    assert report.result_template == "interim_processing"
+    body = gh.events[1][2]
+    assert body.startswith("<!-- release-bot:r4.1 -->\n**🔄 Release Issue synced — State: `planned`**")
+    assert "**Valid actions:**<br>→ **`/create-snapshot` — begin the release process**" in body
+    assert report.result_template == "issue_synced"
 
 
 def test_stale_cache_runs_common_sync_before_the_issue_sync(stubs, tmp_path):

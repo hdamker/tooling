@@ -13,4 +13,4 @@
 {{/commonalities_release}}
 </details>
 
-**Valid actions:**<br>→ **Update, review, and merge [Release PR]({{release_pr_url}}) to create draft release**<br>→ `/discard-snapshot <reason>` — discard and create a new snapshot from updated `main`
+{{valid_actions}}

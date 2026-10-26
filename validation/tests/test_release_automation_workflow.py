@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from release_automation.scripts.trigger import SLASH_COMMANDS
+from release_automation.scripts.commands import COMMANDS
 
 
 WORKFLOW = (
@@ -111,13 +111,13 @@ def test_plan_acks_before_checkout_then_runs_trigger_module():
     assert "uses" not in detect
 
 
-def test_ack_command_list_matches_trigger_module():
+def test_ack_command_list_matches_the_commands_table():
     ack = _step_by_name(_job_steps("plan"), "Post Acknowledgment")
     script = ack["with"]["script"]
 
     match = re.search(r"body\.match\(/\^\\/\(([a-z|-]+)\)", script)
     assert match, "ack command regex not found"
-    assert match.group(1).split("|") == [name for name, _ in SLASH_COMMANDS]
+    assert sorted(match.group(1).split("|")) == sorted(c.name for c in COMMANDS)
     # The ack reads the payload directly; it must not depend on later steps.
     assert "steps." not in script
 
@@ -322,6 +322,13 @@ def test_callers_need_no_oidc_token_and_stay_on_v1_rc():
 
 
 RA_BOT = "camara-release-automation[bot]"
+
+
+def test_ra_caller_command_list_matches_the_commands_table():
+    condition = yaml.safe_load(RA_CALLER.read_text(encoding="utf-8"))["jobs"]["release-automation"]["if"]
+
+    names = re.findall(r"startsWith\(github\.event\.comment\.body, '/([a-z-]+)'\)", condition)
+    assert sorted(names) == sorted(c.name for c in COMMANDS)
 
 
 def test_ra_caller_serializes_at_job_level():

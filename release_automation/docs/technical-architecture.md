@@ -37,6 +37,7 @@ tooling/
 │   │   ├── bot_responder.py          # Message formatting + template rendering
 │   │   ├── changelog_generator.py    # CHANGELOG draft generation
 │   │   ├── command_policy.py         # Plan job: Trigger x State -> Plan or Rejection, the response
+│   │   ├── commands.py               # Slash commands, dispatch actions, valid actions per state
 │   │   ├── common_sync.py            # Common cache detection and common sync
 │   │   ├── config.py                 # Shared constants and configuration
 │   │   ├── context_builder.py        # build_context() for unified context
@@ -75,6 +76,7 @@ tooling/
 │   │   │   ├── internal_error.md
 │   │   │   ├── issue_created.md
 │   │   │   ├── issue_reopened.md
+│   │   │   ├── issue_synced.md
 │   │   │   ├── publish_confirmation.md
 │   │   │   ├── publish_failed.md
 │   │   │   ├── release_published.md
@@ -289,11 +291,14 @@ Renders bot messages from Mustache templates using pystache with strict mode (`m
 | `draft_revoked.md` | Draft release deleted by user |
 | `issue_created.md` | Release Issue auto-created (posted on first sync) |
 | `issue_reopened.md` | Issue auto-reopened because active artifacts exist |
+| `issue_synced.md` | Result of `/sync-issue` |
 | `state_not_planned.md` | Release set to NOT_PLANNED (`target_release_type: none`) |
 | `publish_confirmation.md` | Confirmation prompt before publication |
 | `release_published.md` | Release published successfully |
 | `publish_failed.md` | Publication failed |
 | `internal_error.md` | Unexpected internal error |
+
+The "Valid actions" block of every comment and of the Release Issue body is the `valid_actions` context field, rendered by `commands.actions_for()` from `STATE_ACTIONS` for the state the comment reports (after the command for a result comment). Templates carry at most one situation-specific line above it.
 
 **PR body templates** (`release_automation/templates/pr_bodies/`):
 - `release_review_pr.mustache` — Release Review PR body with checklist
