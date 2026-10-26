@@ -699,8 +699,8 @@ def find_recent_caller_run(
     so dispatch discovery passes no title.
 
     The newest candidate is returned by default. ``oldest=True`` returns the
-    first run after *since* instead — an issue close is followed by a second
-    ``issues`` run when the workflow reopens the issue.
+    first run after *since* instead (an issue close; the workflow's own
+    reopen uses GITHUB_TOKEN and starts no second run).
 
     Returns the run dict (with databaseId, createdAt, url, status, conclusion,
     displayTitle) once one is observed. Raises InfrastructureError on timeout.
@@ -1013,6 +1013,7 @@ def phase_dispatch_refused_branch(
     marker = datetime.now(timezone.utc).replace(microsecond=0)
     try:
         dispatch_workflow(repo, _RA_CALLER_WORKFLOW, inputs)
+        logger.info("dispatched %s %s on %s; polling for caller run", _RA_CALLER_WORKFLOW, inputs, repo)
         run = find_recent_caller_run(
             repo,
             workflow_file=_RA_CALLER_WORKFLOW,
@@ -1317,8 +1318,8 @@ def phase_close_auto_reopen(
         issue_title = get_issue_title(repo, issue_number)
         close_issue(repo, issue_number)
         logger.info("closed %s#%s; polling for caller run", repo, issue_number)
-        # The workflow's reopen triggers a second `issues` run on the same
-        # title; the close run is the oldest one after the marker.
+        # The close run is the oldest one after the marker (the workflow's
+        # reopen uses GITHUB_TOKEN and starts no run of its own).
         run = find_recent_caller_run(
             repo,
             workflow_file=_RA_CALLER_WORKFLOW,
