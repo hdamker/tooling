@@ -168,7 +168,12 @@ def create(gh, plan: BranchPlan) -> CreateResult:
     warnings = []
     source_tag = f"source/{plan.patched_release}"
     source_sha = gh.get_tag_sha(source_tag)
-    if source_sha and source_sha != plan.patched_sha:
+    if not source_sha:
+        warnings.append(
+            f"{source_tag} not found; the branch starts at src_commit_sha {plan.patched_sha[:7]} "
+            f"of {plan.patched_release} ({config.RELEASE_METADATA_FILE})"
+        )
+    elif source_sha != plan.patched_sha:
         warnings.append(
             f"{source_tag} points to {source_sha[:7]}, not to src_commit_sha {plan.patched_sha[:7]} "
             f"of {plan.patched_release}; the branch starts at src_commit_sha"

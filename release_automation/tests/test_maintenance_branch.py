@@ -217,6 +217,19 @@ def test_warning_when_the_source_tag_points_elsewhere():
     assert "source/r1.8 points to fffffff, not to src_commit_sha aaaaaaa" in result.warning
 
 
+def test_warning_when_the_source_tag_is_missing():
+    gh = repo()
+    del gh.tags["source/r1.8"]
+
+    result = create(gh, PLAN)
+
+    assert result.success
+    assert gh.commits[0]["parent"] == SRC
+    assert result.warning == (
+        "source/r1.8 not found; the branch starts at src_commit_sha aaaaaaa of r1.8 (release-metadata.yaml)"
+    )
+
+
 def test_missing_validation_caller_and_changelog_are_warnings():
     gh = repo(files={
         ("main", ".github/workflows/camara-validation.yml"): None,
