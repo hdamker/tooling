@@ -603,6 +603,12 @@ class TestCheckReleasePlanMaintenanceLine:
         assert len(findings) == 1
         assert "'r2.1' is already published" in findings[0]["message"]
         assert "maintenance/r1" in findings[0]["message"]
+        # 107 D1: the suggestion says how the branch is created and where it is explained
+        assert findings[0]["suggestion"] == (
+            "Create 'maintenance/r1' from main: Actions → CAMARA Release Automation → Run workflow, "
+            "action create-maintenance-branch, cycle r1. Then plan 'r1.7' there, or plan a later release "
+            "on main. See https://github.com/camaraproject/ReleaseManagement/blob/main/documentation/release-process/maintenance-releases.md"
+        )
 
     # Spec 1.5
     def test_main_must_not_return_to_maintained_cycle(self, tmp_path: Path):
