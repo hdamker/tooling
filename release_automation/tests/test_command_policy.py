@@ -1041,7 +1041,7 @@ def test_summary_of_a_maintenance_branch_plan(tmp_path, monkeypatch):
         {"STATE": "planned", "RELEASE_TAG": "r2.1", "RELEASE_TYPE": "public-release"}, cycle_one(),
     )
 
-    assert ("| Plan | create-maintenance-branch: maintenance/r1 at r1.8 (aaaaaaa), plan PR for r1.9; "
+    assert ("| Plan | create-maintenance-branch: maintenance/r1 at r1.8 (aaaaaaa), plan parked at r1.9; "
             "runs act, finalize |") in text
 
 

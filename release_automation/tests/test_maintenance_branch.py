@@ -1,13 +1,17 @@
 """Tests for maintenance_branch.py: create-maintenance-branch checks and creation (spec 3.1-3.6)."""
 
+from dataclasses import fields
+
 import pytest
 import yaml
 
 from release_automation.scripts.maintenance_branch import (
     BranchPlan,
+    CreateResult,
     check,
     create,
 )
+from release_automation.scripts.state_manager import ReleaseState, ReleaseStateManager
 from release_automation.tests.fake_github import FakeGitHub, gh_error
 
 MB = "maintenance/r1"
@@ -149,6 +153,10 @@ def test_refused_when_the_patched_release_has_no_metadata():
 # ── creation ─────────────────────────────────────────────────────────────────
 
 
+PARKED_R19 = PLAN_R18.replace("target_release_tag: r1.8", "target_release_tag: r1.9").replace(
+    "target_release_type: maintenance-release", "target_release_type: none")
+
+
 def test_branch_at_the_source_commit_then_one_direct_commit():
     # spec 3.5
     gh = repo()
@@ -156,54 +164,54 @@ def test_branch_at_the_source_commit_then_one_direct_commit():
     result = create(gh, PLAN)
 
     assert result.success, result.error_message
-    setup = gh.commits[0]
+    (setup,) = gh.commits
     assert setup["branch"] == MB and setup["parent"] == SRC
     assert setup["paths"] == [
         ".github/workflows/camara-validation.yml",
         ".github/workflows/release-automation.yml",
         "CHANGELOG/CHANGELOG-r1.md",
+        "release-plan.yaml",
     ]
     assert gh.files[(MB, ".github/workflows/release-automation.yml")] == RA_CALLER
     assert gh.files[(MB, ".github/workflows/camara-validation.yml")] == VF_CALLER
     # From the tag: the source commit lacks the patched release's own section
     assert gh.files[(MB, "CHANGELOG/CHANGELOG-r1.md")] == CHANGELOG_R18
     assert gh.calls.index("create_branch_at_sha") < gh.calls.index("commit_files")
-    assert (result.branch, result.setup_commit_sha) == (MB, setup["sha"])
-    assert result.warning == ""
+    assert result == CreateResult(success=True, branch=MB, setup_commit_sha=setup["sha"])
 
 
-def test_plan_pr_targets_the_next_tag_with_versions_unchanged():
-    # spec 3.5
+def test_setup_commit_parks_the_plan_at_the_next_tag():
+    # spec 3.5 (107 D1): no plan branch, no plan PR
     gh = repo()
 
-    result = create(gh, PLAN)
+    create(gh, PLAN)
 
-    pr = gh.prs[0]
-    assert (pr["head"], pr["base"]) == ("release-plan/r1.9", MB)
-    assert "r1.9" in pr["title"] and MB in pr["title"]
-    assert "patch version" in pr["body"]
-    plan = gh.files[("release-plan/r1.9", "release-plan.yaml")]
-    parsed = yaml.safe_load(plan)
-    assert parsed["repository"]["target_release_tag"] == "r1.9"
-    assert parsed["repository"]["target_release_type"] == "maintenance-release"
-    assert parsed["apis"] == yaml.safe_load(PLAN_R18)["apis"]
-    assert parsed["dependencies"] == yaml.safe_load(PLAN_R18)["dependencies"]
-    # Only the two values change; comments and layout stay
-    assert plan == PLAN_R18.replace("target_release_tag: r1.8", "target_release_tag: r1.9")
-    # The plan branch starts at the set-up commit
-    assert gh.commits[1]["branch"] == "release-plan/r1.9"
-    assert (result.plan_pr_number, result.plan_pr_url) == (str(pr["number"]), f"https://github.com/camaraproject/Example/pull/{pr['number']}")
-    assert gh.labelled == [(pr["number"], ["automated"])]
+    plan = gh.files[(MB, "release-plan.yaml")]
+    # Only the two values change; comments, layout, dependencies and APIs stay
+    assert plan == PARKED_R19
+    assert gh.prs == [] and set(gh.branches) == {"main", MB}
+    assert {f.name for f in fields(CreateResult)} == {
+        "success", "branch", "setup_commit_sha", "warning", "error_message"}
 
 
-def test_plan_from_a_public_release_becomes_a_maintenance_release():
+def test_parked_plan_puts_the_line_in_not_planned():
+    # spec 3.7: the push of the setup commit creates no Release Issue (not-planned without an issue: no action)
+    gh = repo()
+    create(gh, PLAN)
+
+    info = ReleaseStateManager(gh).derive_state(base_branch=MB)
+
+    assert (info.state, info.release_tag) == (ReleaseState.NOT_PLANNED, "r1.9")
+
+
+def test_plan_from_a_public_release_is_parked_too():
     gh = repo(files={(SRC, "release-plan.yaml"): PLAN_R18.replace(
         "target_release_type: maintenance-release", 'target_release_type: "public-release"')})
 
     create(gh, PLAN)
 
-    plan = yaml.safe_load(gh.files[("release-plan/r1.9", "release-plan.yaml")])
-    assert plan["repository"]["target_release_type"] == "maintenance-release"
+    plan = yaml.safe_load(gh.files[(MB, "release-plan.yaml")])
+    assert plan["repository"] == {"release_track": "independent", "target_release_tag": "r1.9", "target_release_type": "none"}
 
 
 def test_warning_when_the_source_tag_points_elsewhere():
@@ -239,7 +247,7 @@ def test_missing_validation_caller_and_changelog_are_warnings():
     result = create(gh, PLAN)
 
     assert result.success
-    assert gh.commits[0]["paths"] == [".github/workflows/release-automation.yml"]
+    assert gh.commits[0]["paths"] == [".github/workflows/release-automation.yml", "release-plan.yaml"]
     assert ".github/workflows/camara-validation.yml not found on main" in result.warning
     assert "CHANGELOG/CHANGELOG-r1.md not found on tag r1.8" in result.warning
 
@@ -251,7 +259,7 @@ def test_failure_when_the_branch_appeared_meanwhile():
 
     assert not result.success
     assert f"{MB} already exists" in result.error_message
-    assert gh.commits == [] and gh.prs == []
+    assert gh.commits == []
 
 
 def test_failure_of_the_direct_commit_names_the_branch_left_behind():
@@ -262,14 +270,3 @@ def test_failure_of_the_direct_commit_names_the_branch_left_behind():
     assert not result.success
     assert "Repository rule violations" in result.error_message
     assert f"{MB} was created at {SRC[:7]}" in result.error_message
-    assert gh.prs == []
-
-
-def test_failure_of_the_plan_pr_keeps_the_branch():
-    gh = repo(fail={"create_pr": [gh_error("HTTP 422")]})
-
-    result = create(gh, PLAN)
-
-    assert not result.success
-    assert result.branch == MB and result.setup_commit_sha
-    assert "plan PR" in result.error_message

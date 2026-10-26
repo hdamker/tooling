@@ -18,7 +18,10 @@
 # - Manual: workflow_dispatch with action
 #   - sync-issue (default): sync the Release Issue of the selected branch
 #   - create-maintenance-branch: create maintenance/<cycle> for a release
-#     cycle (e.g. r1) once main plans a later cycle; codeowners only
+#     cycle (e.g. r1) once main plans a later cycle; codeowners only. The
+#     branch starts at the cycle's newest release with release-plan.yaml
+#     parked at the next tag (target_release_type: none); the first PR into
+#     the branch plans the maintenance release
 #
 # A maintenance/rX branch carries its own copy of this file (pushes and PRs
 # run the copy of their branch); create-maintenance-branch copies main's.
@@ -59,14 +62,14 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "sync-issue, or create-maintenance-branch (run from main)"
+        description: "sync-issue: sync the Release Issue of the selected branch. create-maintenance-branch: create maintenance/<cycle> to patch a release cycle that main has left (select main, codeowners only)"
         type: choice
         options:
           - sync-issue
           - create-maintenance-branch
         default: sync-issue
       cycle:
-        description: "Release cycle for create-maintenance-branch, e.g. r1"
+        description: "Release cycle to maintain, e.g. r1 (create-maintenance-branch only)"
         type: string
         required: false
         default: ""

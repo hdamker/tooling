@@ -474,7 +474,7 @@ def _describe_plan(result: Union[Plan, Rejection]) -> str:
         bp = result.branch_plan
         return (
             f"{result.action}: {bp.branch} at {bp.patched_release} ({bp.patched_sha[:7]}), "
-            f"plan PR for {bp.next_tag}; {runs}"
+            f"plan parked at {bp.next_tag}; {runs}"
         )
     if result.action:
         return f"{result.action}, publish mode {result.publish_mode}; {runs}"
