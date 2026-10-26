@@ -1282,25 +1282,6 @@ class TestReleaseDocumentation:
         result = snapshot_creator._get_latest_public_release()
         assert result is None
 
-    def test_get_previous_release_returns_most_recent(
-        self, snapshot_creator, mock_github_client
-    ):
-        """Returns the most recent release tag."""
-        mock_github_client.get_releases.return_value = [
-            Mock(tag_name="r3.2"),
-            Mock(tag_name="r2.2"),
-        ]
-        result = snapshot_creator._get_previous_release()
-        assert result == "r3.2"
-
-    def test_get_previous_release_returns_none_when_empty(
-        self, snapshot_creator, mock_github_client
-    ):
-        """Returns None when no releases exist."""
-        mock_github_client.get_releases.return_value = []
-        result = snapshot_creator._get_previous_release()
-        assert result is None
-
     # --- Tests for _get_compare_base ---
 
     def test_compare_base_alpha_uses_previous_release(
@@ -1418,6 +1399,63 @@ class TestReleaseDocumentation:
         ]
         result = snapshot_creator._get_compare_base("maintenance-release", "r3.2")
         assert result == "r2.4"
+
+    def test_compare_base_public_after_a_later_maintenance_release(
+        self, snapshot_creator, mock_github_client
+    ):
+        """r1.10 published after r2.1: r2.2 compares against r2.1 (tag version, not date)."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r1.10", prerelease=False),
+            Mock(tag_name="r2.1", prerelease=False),
+            Mock(tag_name="r1.9", prerelease=False),
+        ]
+        assert snapshot_creator._get_compare_base("public-release", "r2.2") == "r2.1"
+        assert snapshot_creator._get_compare_base("pre-release-alpha", "r2.2") == "r2.1"
+
+    def test_compare_base_first_public_of_a_cycle_is_the_newest_of_the_cycle_before(
+        self, snapshot_creator, mock_github_client
+    ):
+        """r2.1 compares against the newest release of cycle 1 by tag, even when r1.9 was published last."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r1.9", prerelease=False),
+            Mock(tag_name="r1.10", prerelease=False),
+            Mock(tag_name="r1.6", prerelease=False),
+        ]
+        assert snapshot_creator._get_compare_base("public-release", "r2.1") == "r1.10"
+
+    def test_compare_base_ignores_releases_of_later_tags(
+        self, snapshot_creator, mock_github_client
+    ):
+        """A re-cut of an older tag never compares against a later tag."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r3.1", prerelease=True),
+            Mock(tag_name="r2.2", prerelease=False),
+            Mock(tag_name="r2.1", prerelease=False),
+        ]
+        assert snapshot_creator._get_compare_base("pre-release-alpha", "r2.3") == "r2.2"
+
+    def test_compare_base_first_rc_after_a_later_maintenance_release(
+        self, snapshot_creator, mock_github_client
+    ):
+        """First rc of r2.3 compares against r2.1 public even if r1.10 is newer by date."""
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r1.10", prerelease=False),
+            Mock(tag_name="r2.2", prerelease=True),
+            Mock(tag_name="r2.1", prerelease=False),
+        ]
+        mock_github_client.get_release_metadata.return_value = {
+            "repository": {"release_type": "pre-release-alpha"},
+        }
+        assert snapshot_creator._get_compare_base("pre-release-rc", "r3.1") == "r2.1"
+
+    def test_compare_base_maintenance_picks_the_patched_release_by_tag(
+        self, snapshot_creator, mock_github_client
+    ):
+        mock_github_client.get_releases.return_value = [
+            Mock(tag_name="r1.9", prerelease=False),
+            Mock(tag_name="r1.10", prerelease=False),
+        ]
+        assert snapshot_creator._get_compare_base("maintenance-release", "r1.11") == "r1.10"
 
     def test_compare_base_alpha_no_releases_returns_none(
         self, snapshot_creator, mock_github_client
