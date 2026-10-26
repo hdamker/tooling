@@ -124,7 +124,8 @@ class TestIssueManagerGenerateTitle:
             base_branch="main",
         )
 
-        assert title == "Release r4.1 (RC) — Sync26"
+        # One display name per release type (config.RELEASE_TYPES): "rc", as in the comments
+        assert title == "Release r4.1 (rc) — Sync26"
 
     def test_generate_alpha_title(self):
         """Test generating title for alpha release."""
@@ -163,7 +164,7 @@ class TestIssueManagerGenerateTitle:
             base_branch="main",
         )
 
-        assert title == "Release r4.1 (RC)"
+        assert title == "Release r4.1 (rc)"
         assert "—" not in title
 
     def test_generate_title_maintenance(self):
@@ -223,7 +224,7 @@ class TestIssueManagerShouldUpdateTitle:
             }
         }
 
-        current_title = "Release r4.1 (RC) — Sync26"
+        current_title = "Release r4.1 (rc) — Sync26"
 
         assert manager.should_update_title(current_title, release_plan, base_branch="main") is False
 

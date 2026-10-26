@@ -117,18 +117,6 @@ class TestRenderTemplate:
 
         assert "[Release Issue](https://github.com/org/repo/issues/42)" in result
 
-    def test_render_sync_pr_template(self):
-        """Test rendering the sync PR template."""
-        context = {"release_tag": "r4.1"}
-
-        result = render_template("sync_pr", context)
-
-        assert "## Post-Release Sync" in result
-        assert "release `r4.1`" in result
-        assert "CHANGELOG.md updates" in result
-        assert "README.md release info section" in result
-        assert "Review required" in result
-
     def test_render_template_not_found(self):
         """Test rendering a non-existent template raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError) as exc_info:
@@ -255,14 +243,18 @@ class TestTemplateLoader:
 
         assert "seeded from" not in result.lower()
 
-    def test_loader_render_sync_pr(self):
-        """Test TemplateLoader.render for sync PR."""
+    def test_loader_render_release_review_pr_title(self):
+        """Test TemplateLoader.render for the Release PR body."""
         loader = TemplateLoader("pr_bodies")
-        context = {"release_tag": "r3.3"}
+        context = {
+            "release_tag": "r3.3", "base_branch": "main", "snapshot_id": "r3.3-abc1234",
+            "snapshot_branch_url": "u", "release_issue_url": "", "apis": [], "short_type": "rc",
+            "commonalities_release": "", "identity_consent_management_release": "",
+        }
 
-        result = loader.render("sync_pr", context)
+        result = loader.render("release_review_pr", context)
 
-        assert "release `r3.3`" in result
+        assert "Release Review: r3.3 rc" in result
 
     def test_loader_template_not_found(self):
         """Test TemplateLoader.render with non-existent template."""

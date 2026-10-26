@@ -24,6 +24,7 @@ from typing import Dict, List, Tuple
 
 import yaml
 
+from release_automation.scripts.config import MAIN_BRANCH
 from release_automation.scripts.git_operations import GitOperationsError
 from release_automation.scripts.labels import add_pr_labels
 from tooling_lib.cache_sync import (
@@ -40,7 +41,6 @@ FIRST_CHECKED_RELEASE = (4, 2)
 COMMONALITIES = "Commonalities"
 ICM = "IdentityAndConsentManagement"
 SYNC_BRANCH_PREFIX = "sync-common/"
-MAIN_BRANCH = "main"
 PR_LABELS = ["common-sync", "automated"]
 
 

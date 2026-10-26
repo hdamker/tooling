@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from . import config
+from .config import is_prerelease as release_type_is_prerelease
 from .changelog_generator import ChangelogGenerator
 from .git_operations import GitOperations, GitOperationsError, PullRequestInfo
 from .github_client import GitHubClient
@@ -616,7 +617,7 @@ class SnapshotCreator:
         repo_name = self.gh.repo.split("/")[-1]
         release_type = release_plan.get("repository", {}).get("target_release_type", "")
         meta_release = release_plan.get("repository", {}).get("meta_release", "")
-        short_type = config.SHORT_TYPE_MAP.get(release_type, release_type)
+        short_type = config.short_type(release_type)
         type_suffix = f" ({short_type} {meta_release})" if meta_release else f" ({short_type})" if short_type else ""
         title = f"Release Review: {repo_name} {release_tag}{type_suffix}"
 
@@ -858,7 +859,8 @@ class SnapshotCreator:
         # Determine release state from metadata (release-metadata.yaml values)
         release_type = metadata.get("repository", {}).get("release_type", "")
         existing_public = self._get_latest_public_release()
-        is_prerelease = release_type in ("pre-release-alpha", "pre-release-rc")
+        # `config` is the SnapshotConfig here; the release-type table is the module's
+        is_prerelease = release_type_is_prerelease(release_type)
 
         if is_prerelease and not existing_public:
             release_state = "prerelease_only"

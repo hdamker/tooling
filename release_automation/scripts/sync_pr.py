@@ -13,11 +13,11 @@ The branch is rebuilt from main on every run and an open PR for it is reused,
 so a re-run after a partial failure converges instead of failing on push.
 """
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
+from .draft_release import changelog_candidates
 from .git_operations import GitOperationsError
 from .github_client import GitHubClientError
 from .labels import add_pr_labels
@@ -99,12 +99,6 @@ def sync_readme(gh, work_dir: Path, tag: str) -> bool:
     local_path.write_text(updated, encoding="utf-8")
     print("README release info synced from tag")
     return True
-
-
-def changelog_candidates(tag: str) -> List[str]:
-    """The per-cycle CHANGELOG of the tag's release cycle."""
-    match = re.match(r"^r(\d+)\.\d+", tag)
-    return [f"CHANGELOG/CHANGELOG-r{match.group(1)}.md"] if match else []
 
 
 def sync_changelog(gh, work_dir: Path, tag: str) -> str:

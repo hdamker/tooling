@@ -6,7 +6,6 @@ new release on the Release PR merge (draft_release.publish_on_merge). Both end
 in complete_publication(): reference tag, pointer branch, branch cleanup.
 """
 
-import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -15,9 +14,6 @@ from typing import Any, Dict, Optional
 import yaml
 
 from .github_client import GitHubClient, GitHubClientError
-
-logger = logging.getLogger(__name__)
-
 
 def _cycle(release_tag: str) -> Optional[int]:
     match = re.match(r"r(\d+)\.", release_tag)
@@ -113,13 +109,13 @@ class ReleasePublisher:
             ref=snapshot_branch
         )
         if not metadata_content:
-            logger.error(f"Cannot read release-metadata.yaml from {snapshot_branch}")
+            print(f"::error::Cannot read release-metadata.yaml from {snapshot_branch}")
             return None
 
         try:
             metadata = yaml.safe_load(metadata_content)
         except yaml.YAMLError as e:
-            logger.error(f"Failed to parse release-metadata.yaml: {e}")
+            print(f"::error::Failed to parse release-metadata.yaml: {e}")
             return None
 
         # Set release_date in UTC (ISO 8601 with time)
@@ -144,10 +140,10 @@ class ReleasePublisher:
                 branch=snapshot_branch
             )
             commit_sha = result.get("commit", {}).get("sha")
-            logger.info(f"Finalized metadata with commit {commit_sha}")
+            print(f"Finalized metadata with commit {commit_sha}")
             return commit_sha
         except GitHubClientError as e:
-            logger.error(f"Failed to update release-metadata.yaml: {e}")
+            print(f"::error::Failed to update release-metadata.yaml: {e}")
             return None
 
     def publish_release(
@@ -278,7 +274,7 @@ class ReleasePublisher:
         try:
             self.gh.update_release(release_id, make_latest=self.latest_flag(release_tag, is_prerelease))
         except GitHubClientError:
-            logger.warning(f"Failed to set the Latest flag of {release_tag}")
+            print(f"::warning::Failed to set the Latest flag of {release_tag}")
 
     def create_reference_tag(
         self,
@@ -301,20 +297,20 @@ class ReleasePublisher:
 
         # Check if tag already exists
         if self.gh.tag_exists(tag_name):
-            logger.warning(f"Reference tag {tag_name} already exists")
+            print(f"::warning::Reference tag {tag_name} already exists")
             return tag_name
 
         try:
             self.gh.create_tag(tag_name, src_commit_sha)
-            logger.info(f"Created reference tag {tag_name} at {src_commit_sha[:8]}")
+            print(f"Created reference tag {tag_name} at {src_commit_sha[:8]}")
             return tag_name
         except GitHubClientError as e:
             # Handle race condition where tag was created between check and create
             error_msg = str(e).lower()
             if "422" in error_msg or "reference already exists" in error_msg:
-                logger.warning(f"Reference tag {tag_name} already exists (race condition)")
+                print(f"::warning::Reference tag {tag_name} already exists (race condition)")
                 return tag_name
-            logger.error(f"Failed to create reference tag {tag_name}: {e}")
+            print(f"::error::Failed to create reference tag {tag_name}: {e}")
             return None
 
     def create_pointer_branch(
@@ -342,24 +338,23 @@ class ReleasePublisher:
         # Resolve tag to commit SHA
         tag_sha = self.gh.get_tag_sha(release_tag)
         if not tag_sha:
-            logger.error(f"Cannot resolve tag {release_tag} to SHA")
+            print(f"::error::Cannot resolve tag {release_tag} to SHA")
             return None
 
         try:
             created = self.gh.create_branch_at_sha(branch_name, tag_sha)
             if created:
-                logger.info(f"Created pointer branch {branch_name} at {tag_sha[:8]}")
+                print(f"Created pointer branch {branch_name} at {tag_sha[:8]}")
             else:
-                logger.warning(f"Pointer branch {branch_name} already exists")
+                print(f"::warning::Pointer branch {branch_name} already exists")
             return branch_name
         except GitHubClientError as e:
             error_msg = str(e).lower()
             if "422" in error_msg or "reference already exists" in error_msg:
-                logger.warning(
-                    f"Pointer branch {branch_name} already exists (race condition)"
+                print(f"::warning::Pointer branch {branch_name} already exists (race condition)"
                 )
                 return branch_name
-            logger.error(f"Failed to create pointer branch {branch_name}: {e}")
+            print(f"::error::Failed to create pointer branch {branch_name}: {e}")
             return None
 
     def cleanup_branches(
@@ -389,11 +384,11 @@ class ReleasePublisher:
             deleted = self.gh.delete_branch(snapshot_branch)
             result["snapshot_deleted"] = "deleted" if deleted else "not_found"
             if deleted:
-                logger.info(f"Deleted branch {snapshot_branch}")
+                print(f"Deleted branch {snapshot_branch}")
             else:
-                logger.warning(f"Branch {snapshot_branch} not found (already deleted)")
+                print(f"::warning::Branch {snapshot_branch} not found (already deleted)")
         except GitHubClientError as e:
-            logger.error(f"Failed to delete {snapshot_branch}: {e}")
+            print(f"::error::Failed to delete {snapshot_branch}: {e}")
             result["snapshot_deleted"] = "error"
 
         # Delete release-review branch
@@ -401,11 +396,11 @@ class ReleasePublisher:
             deleted = self.gh.delete_branch(release_review_branch)
             result["review_deleted"] = "deleted" if deleted else "not_found"
             if deleted:
-                logger.info(f"Deleted branch {release_review_branch}")
+                print(f"Deleted branch {release_review_branch}")
             else:
-                logger.warning(f"Branch {release_review_branch} not found (already deleted)")
+                print(f"::warning::Branch {release_review_branch} not found (already deleted)")
         except GitHubClientError as e:
-            logger.error(f"Failed to delete {release_review_branch}: {e}")
+            print(f"::error::Failed to delete {release_review_branch}: {e}")
             result["review_deleted"] = "error"
 
         return result

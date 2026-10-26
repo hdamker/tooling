@@ -8,6 +8,8 @@ The output conforms to the release-metadata-schema.yaml specification.
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from . import config
+
 
 @dataclass
 class ApiMetadata:
@@ -92,12 +94,7 @@ class MetadataGenerator:
     """
 
     # Valid long-form release type values (from release-plan.yaml)
-    VALID_RELEASE_TYPES = {
-        "pre-release-alpha",
-        "pre-release-rc",
-        "public-release",
-        "maintenance-release",
-    }
+    VALID_RELEASE_TYPES = frozenset(config.RELEASE_TYPES)
 
     def generate(
         self,

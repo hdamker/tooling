@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 
 from . import config
 from .commands import actions_for
-from .release_line import MAIN_BRANCH
+from .config import MAIN_BRANCH
 
 
 class IssueManager:
@@ -32,16 +32,6 @@ class IssueManager:
 
     # Pattern for matching sections (use .format(name=section_name))
     SECTION_PATTERN = r"<!-- BEGIN:{name} -->\n(.*?)\n<!-- END:{name} -->"
-
-    # Release type display names for titles
-    TYPE_DISPLAY_NAMES = {
-        "pre-release-alpha": "alpha",
-        "pre-release-rc": "RC",
-        "public-release": "public",
-        "public": "public",
-        "maintenance-release": "maintenance",
-        "none": "",
-    }
 
     def update_section(self, body: str, section: str, content: str) -> str:
         """
@@ -100,7 +90,7 @@ class IssueManager:
         " on {base_branch}" for a release from a maintenance branch
 
         Examples:
-            - "Release r4.1 (RC) — Sync26"
+            - "Release r4.1 (rc) — Sync26"
             - "Release r4.1 (alpha)"
             - "Release r4.1 (public)"
             - "Release r1.9 (maintenance) on maintenance/r1"
@@ -116,8 +106,8 @@ class IssueManager:
         """
         title = f"Release {release_tag}"
 
-        # Add type suffix if known
-        type_display = self.TYPE_DISPLAY_NAMES.get(release_type, release_type)
+        # Add type suffix if known (config.RELEASE_TYPES; none has no suffix)
+        type_display = config.short_type(release_type)
         if type_display:
             title += f" ({type_display})"
 
@@ -246,7 +236,7 @@ class IssueManager:
         release_type = release_plan.get("repository", {}).get(
             "target_release_type", ""
         )
-        short_type = config.SHORT_TYPE_MAP.get(release_type, release_type)
+        short_type = config.short_type(release_type)
         if short_type:
             lines.append(f"**Release type:** {short_type}")
             lines.append("")

@@ -12,15 +12,10 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from .config import RELEASE_ISSUE_LABEL, RELEASE_TAG_MARKER_RE, WORKFLOW_MARKER
 from .github_client import GitHubClient
 from .release_line import line_of
-from .trigger import RELEASE_TAG_MARKER_RE
 from . import config
-
-
-# Constants for release issue identification (duplicated from issue_sync to avoid circular imports)
-WORKFLOW_MARKER = "<!-- release-automation:workflow-owned -->"
-RELEASE_ISSUE_LABEL = "release-issue"
 
 
 class ReleaseState(Enum):

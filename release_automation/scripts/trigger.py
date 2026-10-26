@@ -19,10 +19,7 @@ from .commands import (  # noqa: F401  (DISPATCH_* re-exported for the workflow 
     DISPATCH_CREATE_MAINTENANCE_BRANCH,
     DISPATCH_SYNC_ISSUE,
 )
-from .config import SNAPSHOT_BRANCH_PREFIX
-
-RELEASE_ISSUE_LABEL = "release-issue"
-RELEASE_TAG_MARKER_RE = re.compile(r"<!--\s*release-automation:release-tag:(?P<tag>.*?)\s*-->")
+from .config import RELEASE_ISSUE_LABEL, RELEASE_TAG_MARKER_RE, SNAPSHOT_BRANCH_PREFIX
 
 TRIGGER_SLASH_COMMAND = "slash_command"
 TRIGGER_UNKNOWN = "unknown"

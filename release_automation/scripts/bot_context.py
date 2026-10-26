@@ -136,9 +136,7 @@ class BotContext:
         if not self.src_commit_sha_short:
             self.src_commit_sha_short = self.src_commit_sha[:7]
         if not self.short_type:
-            self.short_type = config.SHORT_TYPE_MAP.get(
-                self.release_type, self.release_type
-            )
+            self.short_type = config.short_type(self.release_type)
 
     def to_dict(self) -> Dict[str, Any]:
         """

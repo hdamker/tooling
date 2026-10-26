@@ -378,14 +378,17 @@ def test_initial_policy_is_draft_on_main_for_every_type(release_type):
 
 
 def test_publish_modes_cover_all_release_types():
-    assert set(policy.PUBLISH_MODES) == set(policy.config.SHORT_TYPE_MAP)
-    assert set(policy.PUBLISH_MODES.values()) <= {"on_merge", "draft"}
-    assert set(policy.PUBLISHERS) == set(policy.config.SHORT_TYPE_MAP)
+    # One release-type table (config.RELEASE_TYPES) carries publish mode and publishers
+    for name, release_type in policy.config.RELEASE_TYPES.items():
+        assert release_type.name == name
+        assert release_type.publish_mode in {policy.PUBLISH_MODE_ON_MERGE, policy.PUBLISH_MODE_DRAFT}
+        assert release_type.publishers == policy.PUBLISHERS_CODEOWNERS
+    assert policy.publish_mode_for("unknown-type") == policy.PUBLISH_MODE_DRAFT
 
 
 def test_maintenance_release_publishes_from_a_draft():
     # Spec 6.5: draft until RM#675 is decided
-    assert policy.PUBLISH_MODES["maintenance-release"] == policy.PUBLISH_MODE_DRAFT
+    assert policy.publish_mode_for("maintenance-release") == policy.PUBLISH_MODE_DRAFT
 
 
 @pytest.mark.parametrize("command", ["create-snapshot", "discard-snapshot", "delete-draft", "sync-issue"])
@@ -922,7 +925,10 @@ def test_action(trigger, state, action):
 
 
 def test_pr_merge_publishes_on_merge_when_the_policy_says_so(monkeypatch):
-    monkeypatch.setitem(policy.PUBLISH_MODES, "pre-release-rc", "on_merge")
+    from dataclasses import replace as dc_replace
+
+    rc_type = policy.config.RELEASE_TYPES["pre-release-rc"]
+    monkeypatch.setitem(policy.config.RELEASE_TYPES, "pre-release-rc", dc_replace(rc_type, publish_mode="on_merge"))
     trigger = Trigger(trigger_type="pr_merge", user="x", should_continue=True)
 
     rc = evaluate(trigger, info(ReleaseState.SNAPSHOT_ACTIVE, release_type="pre-release-rc"), client=FakeClient())
