@@ -24,6 +24,7 @@ from .github_client import GitHubClient
 from .mechanical_transformer import MechanicalTransformer, TransformationContext
 from .metadata_generator import MetadataGenerator
 from .readme_updater import ReadmeUpdater, ReadmeUpdateError
+from .release_line import tag_version
 from .state_manager import ReleaseState, ReleaseStateManager
 from .template_loader import render_template
 from .version_calculator import VersionCalculator
@@ -759,19 +760,30 @@ class SnapshotCreator:
                 return release.tag_name
         return None
 
-    def _get_previous_release(self) -> Optional[str]:
-        """Query GitHub releases for the most recent release tag (any type)."""
+    def _releases_before(self, release_tag: str) -> list:
+        """Published releases with a lower tag version than release_tag, newest tag first.
+
+        Ordered by tag version (cycle, then number), not by date: a maintenance
+        release r1.10 published after r2.1 is still older than r2.2. An
+        unparsable release_tag keeps the date order of the listing.
+        """
         releases = self.gh.get_releases(include_drafts=False)
-        if releases:
-            return releases[0].tag_name
-        return None
+        version = tag_version(release_tag)
+        if not version:
+            return releases
+        return sorted(
+            (r for r in releases if tag_version(r.tag_name) and tag_version(r.tag_name) < version),
+            key=lambda r: tag_version(r.tag_name),
+            reverse=True,
+        )
 
     def _get_compare_base(
         self, release_type: str, release_tag: str
     ) -> Optional[str]:
         """Determine the compare base for CHANGELOG candidate changes.
 
-        The CHANGELOG convention defines different comparison bases:
+        The CHANGELOG convention defines different comparison bases, each the
+        newest matching release with a lower tag version (_releases_before):
         - Alpha: delta to the previous release (any type)
         - First RC: all changes since the last public release; on a
           maintenance line, since the patched release
@@ -791,69 +803,58 @@ class SnapshotCreator:
         Returns:
             Tag name of the compare base, or None if no prior release exists.
         """
+        releases = self._releases_before(release_tag)
+        latest_public = next((r.tag_name for r in releases if not r.prerelease), None)
+
         if release_type == "pre-release-alpha":
-            return self._get_previous_release()
+            return releases[0].tag_name if releases else None
 
         if release_type == "pre-release-rc":
-            return self._get_rc_compare_base(release_tag)
+            return self._get_rc_compare_base(release_tag, releases) or latest_public
 
         if release_type == "maintenance-release":
-            return self._get_patched_release(release_tag) or self._get_latest_public_release()
+            return self._get_patched_release(release_tag, releases) or latest_public
 
-        return self._get_latest_public_release()
+        return latest_public
 
-    def _get_patched_release(self, release_tag: str) -> Optional[str]:
+    @staticmethod
+    def _get_patched_release(release_tag: str, releases: list) -> Optional[str]:
         """Newest public or maintenance release of the tag's cycle (rc pre-releases skipped)."""
         match = re.match(r"(r\d+\.)", release_tag)
         if not match:
             return None
-        for r in self.gh.get_releases(include_drafts=False):
+        for r in releases:
             if r.tag_name.startswith(match.group(1)) and not r.prerelease:
                 return r.tag_name
         return None
 
-    def _get_rc_compare_base(self, release_tag: str) -> Optional[str]:
-        """Find compare base for an RC release.
+    def _get_rc_compare_base(self, release_tag: str, releases: list) -> Optional[str]:
+        """Same-cycle compare base of an RC release, None for the first RC of a cycle.
 
-        Checks same-cycle prereleases for a previous RC. If found,
-        this is a subsequent RC (compare against it). A same-cycle public
-        or maintenance release found first makes this the first RC on a
-        maintenance line (compare against that patched release). Otherwise,
-        this is the first RC (compare against last public release).
+        Checks same-cycle releases newest first. A previous RC makes this a
+        subsequent RC (compare against it). A same-cycle public or maintenance
+        release found first makes this the first RC on a maintenance line
+        (compare against that patched release). Otherwise the caller compares
+        the first RC against the last public release.
 
         Args:
             release_tag: Current release tag (e.g., "r4.2") for cycle detection.
-
-        Returns:
-            Tag name of the compare base, or None if no prior release exists.
+            releases: _releases_before(release_tag)
         """
-        releases = self.gh.get_releases(include_drafts=False)
-        if not releases:
-            return None
-
-        # Extract cycle prefix (e.g., "r4." from "r4.2")
         match = re.match(r"(r\d+\.)", release_tag)
-        cycle_prefix = match.group(1) if match else None
-
-        if cycle_prefix:
-            for r in releases:
-                if not r.tag_name.startswith(cycle_prefix):
-                    continue  # Different cycle
-                if not r.prerelease:
-                    return r.tag_name  # First rc on a maintenance line: the patched release
-                # Same-cycle prerelease — check if it's an RC
-                metadata = self.gh.get_release_metadata(r.tag_name)
-                if metadata:
-                    prev_type = metadata.get("repository", {}).get(
-                        "release_type", ""
-                    )
-                    if prev_type == "pre-release-rc":
-                        return r.tag_name  # Subsequent RC
-
-        # No previous RC in same cycle → first RC → last public (any cycle)
+        if not match:
+            return None
         for r in releases:
+            if not r.tag_name.startswith(match.group(1)):
+                continue  # Different cycle
             if not r.prerelease:
-                return r.tag_name
+                return r.tag_name  # First rc on a maintenance line: the patched release
+            # Same-cycle prerelease — check if it's an RC
+            metadata = self.gh.get_release_metadata(r.tag_name)
+            if metadata:
+                prev_type = metadata.get("repository", {}).get("release_type", "")
+                if prev_type == "pre-release-rc":
+                    return r.tag_name  # Subsequent RC
         return None
 
     def _get_candidate_changes(

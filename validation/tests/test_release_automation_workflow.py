@@ -335,3 +335,13 @@ def test_validation_checks_tooling_out_at_its_own_commit():
         assert token not in text, token
     assert "id-token" not in workflow["permissions"]
     assert "tooling_ref_override" not in _on(workflow)["workflow_call"]["inputs"]
+
+
+def test_cache_detection_uses_the_base_branch():
+    # M10: detection on the base branch's checkout, sync PR looked up within the line
+    steps = _job_steps("plan")
+    checkout = _step_by_name(steps, "Checkout API repo (sparse, for cache sync check)")
+    cache = _step_by_name(steps, "Check common cache sync")
+
+    assert checkout["with"]["ref"] == "${{ steps.line.outputs.base_branch }}"
+    assert cache["env"]["BASE_BRANCH"] == "${{ steps.line.outputs.base_branch }}"

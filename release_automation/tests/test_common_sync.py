@@ -466,3 +466,83 @@ def test_push_failure_is_failed(tmp_path, remotes):
 def test_pr_creation_failure_is_failed(tmp_path, remotes, capsys):
     assert run_sync_common(tmp_path, remotes, FakeGitHub(fail_create=True)) == CommonSyncOutcome(status="failed")
     assert "::error::Failed to create sync PR" in capsys.readouterr().out
+
+
+# ── per base branch (M10, spec 7.4/7.5) ──────────────────────────────────────
+
+MB = "maintenance/r1"
+
+
+@pytest.mark.parametrize(
+    "base_branch,branch",
+    [("main", "sync-common/r4.3"), (MB, "sync-common/maintenance/r1/r4.3"), ("", "sync-common/r4.3")],
+)
+def test_sync_branch_per_line(base_branch, branch):
+    assert common_sync.sync_branch("r4.3", base_branch) == branch
+
+
+def test_find_sync_pr_matches_within_the_line():
+    gh = FakeGitHub([pr(5, "sync-common/r4.3"), pr(6, "sync-common/maintenance/r1/r4.3")])
+
+    assert find_sync_pr(gh, "r4.3", MB).endswith("/pull/6")
+    assert find_sync_pr(gh, "r4.3", "main").endswith("/pull/5")
+    assert find_sync_pr(gh, "r4.3", "maintenance/r2") == ""
+
+
+def test_sync_on_a_maintenance_branch_opens_its_pr_into_that_branch(tmp_path, remotes):
+    # spec 7.4
+    api, commonalities = remotes
+    push_branch(api, tmp_path, MB, {"code/common/CAMARA_common.yaml": "line copy\n"})
+    gh = FakeGitHub()
+
+    outcome = sync_common(
+        git_ops(api, tmp_path / "work-api"),
+        git_ops(commonalities, tmp_path / "work-commonalities", repo="camaraproject/Commonalities"),
+        gh, "r4.3", "bot", "bot@example.com", base_branch=MB,
+    )
+
+    branch = "sync-common/maintenance/r1/r4.3"
+    assert outcome.status == "created"
+    assert git(api, "rev-parse", f"{branch}~1") == git(api, "rev-parse", MB)
+    assert git(api, "show", f"{branch}:code/common/CAMARA_common.yaml") + "\n" == NEW_COMMON
+    (created,) = gh.created
+    assert (created["head"], created["base"]) == (branch, MB)
+    assert f"rebuilt from `{MB}` on every run" in created["body"]
+    assert f"fix the errors on `{MB}`" in created["body"]
+
+
+def test_lines_do_not_close_each_others_sync_prs(tmp_path, remotes):
+    # spec 7.5: main's sync and the line's sync for the same release coexist
+    api, commonalities = remotes
+    push_branch(api, tmp_path, MB, {"README.md": "line\n"})
+    open_prs = [
+        pr(31, "sync-common/r4.2"),
+        pr(32, "sync-common/r4.3"),
+        pr(41, "sync-common/maintenance/r1/r4.2"),
+        pr(42, "sync-common/maintenance/r2/r4.2"),
+    ]
+    gh_main, gh_line = FakeGitHub(open_prs), FakeGitHub(open_prs)
+
+    run_sync_common(tmp_path, remotes, gh_main)
+    sync_common(
+        git_ops(api, tmp_path / "line-api"),
+        git_ops(commonalities, tmp_path / "line-commonalities", repo="camaraproject/Commonalities"),
+        gh_line, "r4.3", "bot", "bot@example.com", base_branch=MB,
+    )
+
+    assert [n for n, _ in gh_main.closed] == [31]
+    assert [n for n, _ in gh_line.closed] == [41]
+
+
+def test_main_looks_up_the_sync_pr_of_the_base_branch(tmp_path, monkeypatch):
+    output = tmp_path / "output"
+    output.write_text("")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("API_REPO_PATH", str(tmp_path / "missing"))
+    monkeypatch.setenv("COMMONALITIES_RELEASE", "r4.3")
+    monkeypatch.setenv("BASE_BRANCH", MB)
+
+    common_sync.main(client=FakeGitHub([pr(9, "sync-common/r4.3"), pr(10, "sync-common/maintenance/r1/r4.3")]))
+
+    from release_automation.tests.test_trigger import read_outputs
+    assert read_outputs(output)["common_sync_pr_url"].endswith("/pull/10")

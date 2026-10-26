@@ -227,3 +227,44 @@ def test_existing_open_pr_is_reused(tmp_path, remote):
     )
     assert remote_file(remote, "pr-to-main/r1.3", "README.md") == "kept"
     assert gh.created == []
+
+
+# ── case B: CHANGELOG only, into the maintenance branch and main (M9, spec 7.1) ──
+
+MB = "maintenance/r1"
+
+
+def run_line(tmp_path, remote, gh, base_branch, work="api"):
+    return create_sync_pr(gh, git_ops(remote, tmp_path / work), "r1.10", "release-bot[bot]",
+                          "7+release-bot[bot]@users.noreply.github.com", base_branch=base_branch, readme=False)
+
+
+@pytest.mark.parametrize("base_branch,branch", [(MB, "pr-to-maintenance/r1/r1.10"), ("main", "pr-to-main/r1.10")])
+def test_case_b_syncs_only_the_cycle_changelog(tmp_path, remote, base_branch, branch):
+    push_branch(remote, tmp_path, MB, {"CHANGELOG/CHANGELOG-r1.md": "# r1.9\n"})
+    gh = FakeGitHub(files={
+        ("r1.10", "README.md"): TAG_README,
+        ("r1.10", "CHANGELOG/CHANGELOG-r1.md"): "# r1.10\n\n# r1.9\n",
+    })
+
+    outcome = run_line(tmp_path, remote, gh, base_branch)
+
+    assert outcome.status == "created"
+    assert git(remote, "rev-parse", f"{branch}~1") == git(remote, "rev-parse", base_branch)
+    assert remote_file(remote, branch, "CHANGELOG/CHANGELOG-r1.md") == "# r1.10\n\n# r1.9"
+    # No README change on either line
+    assert remote_file(remote, branch, "README.md") == remote_file(remote, base_branch, "README.md")
+    (created,) = gh.created
+    assert (created["head"], created["base"]) == (branch, base_branch)
+    assert created["title"] == f"Release Automation: Post-release sync (r1.10) into {base_branch}"
+    assert "README" not in created["body"]
+    assert "CHANGELOG for the release cycle" in created["body"]
+
+
+def test_case_a_branch_and_title_are_unchanged(tmp_path, remote):
+    gh = FakeGitHub(files=tag_files(**{"CHANGELOG/CHANGELOG-r1.md": "# r1.3\n"}))
+
+    create_sync_pr(gh, git_ops(remote, tmp_path / "api"), "r1.3", "bot", "bot@example.com", base_branch="main")
+
+    assert gh.created[0]["head"] == "pr-to-main/r1.3"
+    assert gh.created[0]["title"] == "Release Automation: Post-release sync (r1.3)"

@@ -4,9 +4,11 @@ Finalize phase of CAMARA release automation.
 Runs after the action jobs, also when one of them failed, and is the only job
 after plan for push, workflow_dispatch and /sync-issue. In order:
 
-1. post-release sync PR, after a publication (sync_pr)
-2. common sync when the cache is stale, then the Release Issue sync and its
-   notifications (common_sync, issue_sync)
+1. post-release sync PR, after a publication (sync_pr): into main for a
+   release from main, into the maintenance branch and main for a release
+   from maintenance/rX
+2. common sync of the base branch when its cache is stale, then the Release
+   Issue sync and its notifications (common_sync, issue_sync)
 3. the result comment on a slash command, updating its acknowledgment; after
    a publication on the Release PR merge (publish_mode on_merge), a new
    comment on the Release Issue
@@ -247,6 +249,8 @@ def result_context(run: Run, sync: Optional[SyncPrOutcome]) -> Dict[str, str]:
             reference_tag_url=run.tree_url(reference_tag) if reference_tag else "",
             sync_pr_url=sync.pr_url if sync else "",
             sync_pr_number=sync.pr_number if sync else "",
+            main_sync_pr_url=sync.main_pr_url if sync else "",
+            main_sync_pr_number=sync.main_pr_number if sync else "",
             src_commit_sha_short=run.plan("src_commit_sha")[:7],
         )
         warnings = post_publish_warnings(run.out("error_message"), sync.status if sync else "")
@@ -300,15 +304,24 @@ def post_comment(clients: Clients, run: Run, template: str, issue: str, delta: D
 
 
 def run_sync_pr(run: Run, clients: Clients) -> SyncPrOutcome:
-    from .sync_pr import create_sync_pr
+    from .sync_pr import combine_case_b, create_sync_pr
 
     try:
         bot_name, bot_email = clients.bot_identity()
     except Exception as e:
         print(f"::error::Could not resolve the bot identity: {e}")
         return SyncPrOutcome(status="failed")
-    git = clients.git(run.repository, "api-repo", clients.token)
-    return create_sync_pr(clients.gh, git, run.plan("release_tag"), bot_name, bot_email)
+    tag = run.plan("release_tag")
+    base_branch = run.plan("base_branch") or "main"
+    if base_branch == "main":
+        git = clients.git(run.repository, "api-repo", clients.token)
+        return create_sync_pr(clients.gh, git, tag, bot_name, bot_email)
+    # Case B: the cycle CHANGELOG into the line and into main, no README
+    line_git = clients.git(run.repository, f"api-repo-{base_branch.replace('/', '-')}", clients.token)
+    line = create_sync_pr(clients.gh, line_git, tag, bot_name, bot_email, base_branch=base_branch, readme=False)
+    main_git = clients.git(run.repository, "api-repo", clients.token)
+    main = create_sync_pr(clients.gh, main_git, tag, bot_name, bot_email, base_branch="main", readme=False)
+    return combine_case_b(line, main)
 
 
 def run_common_sync(run: Run, clients: Clients) -> CommonSyncOutcome:
@@ -327,6 +340,7 @@ def run_common_sync(run: Run, clients: Clients) -> CommonSyncOutcome:
         run.plan("commonalities_release"),
         bot_name,
         bot_email,
+        base_branch=run.plan("base_branch") or "main",
     )
 
 
@@ -412,6 +426,7 @@ def finalize_published(run: Run, clients: Clients, report: Report) -> None:
             release_url=run.out("release_url"),
             reference_tag=run.out("reference_tag"),
             sync_pr_url=sync.pr_url,
+            main_sync_pr_url=sync.main_pr_url,
             sync_status=sync.status,
             publish_warnings=run.out("error_message"),
         )
@@ -455,7 +470,10 @@ def write_summary(run: Run, report: Report, summary_path: str) -> None:
         ("Release", f"{run.plan('release_tag')} ({run.plan('state') or 'no state'})"),
     ]
     if report.sync_pr:
-        rows.append(("Post-release sync PR", f"{report.sync_pr.status} {report.sync_pr.pr_url}".strip()))
+        sync_text = f"{report.sync_pr.status} {report.sync_pr.pr_url}".strip()
+        if report.sync_pr.main_pr_url:
+            sync_text += f", into main {report.sync_pr.main_pr_url}"
+        rows.append(("Post-release sync PR", sync_text))
     if report.common_sync:
         rows.append(("Common sync", f"{report.common_sync.status} {report.common_sync.pr_url}".strip()))
     if report.issue_sync:

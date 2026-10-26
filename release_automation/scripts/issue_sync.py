@@ -629,6 +629,7 @@ class IssueSyncManager:
         sync_pr_url: str,
         sync_status: str,
         publish_warnings: str = "",
+        main_sync_pr_url: str = "",
     ) -> bool:
         """
         Mark the Release Issue published; close it only if the sync PR was created.
@@ -648,6 +649,7 @@ class IssueSyncManager:
             sync_pr_url: URL of the post-release sync PR, "" if none
             sync_status: Post-release sync status (created | failed | no_changes | other)
             publish_warnings: Warnings of the non-critical publish steps
+            main_sync_pr_url: Case B: URL of the sync PR into main
 
         Returns:
             True if every step succeeded, False on an API error (logged, never
@@ -665,6 +667,7 @@ class IssueSyncManager:
                     reference_tag=reference_tag,
                     repo=self.gh.repo,
                     sync_pr_url=sync_pr_url,
+                    main_sync_pr_url=main_sync_pr_url,
                     warnings=post_publish_warnings(publish_warnings, sync_status),
                 ),
             )

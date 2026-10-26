@@ -213,6 +213,23 @@ def poll_run(
 # ---------------------------------------------------------------------------
 
 
+_RELEASE_TAG_MARKER_RE = re.compile(r"<!--\s*release-automation:release-tag:r([1-9]\d*)\.\d+\s*-->")
+
+
+def _on_maintenance_line(repo: str, body: str) -> bool:
+    """Whether the issue's release tag rX.Y is released from an existing maintenance/rX branch."""
+    match = _RELEASE_TAG_MARKER_RE.search(body)
+    if not match:
+        return False
+    try:
+        gh(["api", f"repos/{repo}/branches/maintenance/r{match.group(1)}"], parse_json=True)
+    except InfrastructureError as exc:
+        if "404" in str(exc) or "Not Found" in str(exc):
+            return False
+        raise
+    return True
+
+
 def find_release_issue(repo: str) -> int:
     """Discover the single workflow-owned Release Issue on *repo*.
 
@@ -222,6 +239,9 @@ def find_release_issue(repo: str) -> int:
 
     - the `release-issue` label (server-side filter), and
     - the workflow-owned body marker (client-side check).
+
+    The Release Issue of a maintenance line (its release tag rX.Y with an
+    existing maintenance/rX branch) is skipped: the canary drives main's.
 
     Returns the issue number. Raises InfrastructureError if zero matches
     (no active release cycle on the target repo) or more than one match
@@ -242,6 +262,7 @@ def find_release_issue(repo: str) -> int:
         item["number"]
         for item in data
         if _RELEASE_ISSUE_BODY_MARKER in (item.get("body") or "")
+        and not _on_maintenance_line(repo, item.get("body") or "")
     ]
     if len(matching) == 0:
         raise InfrastructureError(
