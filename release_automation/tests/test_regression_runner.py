@@ -32,6 +32,7 @@ from release_automation.scripts.regression_runner import (
     load_expected_comment_titles,
     phase_close_auto_reopen,
     phase_close_recreate,
+    phase_dispatch_refused_branch,
     phase_dispatch_sync_issue,
     phase_fire_create_snapshot,
     phase_fire_rejected_discard,
@@ -1529,6 +1530,74 @@ class TestPhaseDispatchSyncIssue:
         assert "DRY-RUN" in report.detail
 
 
+def _plan_jobs(plan: str, act: str | None) -> dict:
+    jobs = [{"name": "release-automation / plan", "conclusion": plan}]
+    if act is not None:
+        jobs.append({"name": "release-automation / act", "conclusion": act})
+    return {"jobs": jobs}
+
+
+class TestPhaseDispatchRefusedBranch:
+    """spec 3.1-3.3: create-maintenance-branch refused — failed run, act skipped, nothing created."""
+
+    def _report(self, jobs, conclusion="failure"):
+        calls: list[str] = []
+
+        def record(joined):
+            calls.append(joined)
+            return ""
+
+        responses = [
+            ("workflow run", record),
+            ("run list", [_run(8, "2026-04-23T05:00:05Z", "CAMARA Release Automation", conclusion)]),
+            ("status,conclusion", {"status": "completed", "conclusion": conclusion}),
+            ("--json jobs", jobs),
+        ]
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            side_effect=_gh_router(responses),
+        ):
+            report = phase_dispatch_refused_branch(
+                "camaraproject/ReleaseTest2", poll_timeout=10, dry_run=False,
+            )
+        return report, calls
+
+    def test_pass_when_plan_refuses_and_act_is_skipped(self, frozen_now):
+        report, calls = self._report(_plan_jobs("failure", "skipped"))
+
+        assert report.passed is True, report.detail
+        assert report.run_url == "https://x/run/8"
+        # r2 has no public release: refused without ever creating a branch
+        assert calls == [
+            "workflow run release-automation.yml --repo camaraproject/ReleaseTest2 "
+            "-f action=create-maintenance-branch -f cycle=r2"
+        ]
+
+    def test_pass_when_act_is_not_listed(self, frozen_now):
+        report, _ = self._report(_plan_jobs("failure", None))
+
+        assert report.passed is True, report.detail
+
+    def test_fail_when_the_run_succeeds(self, frozen_now):
+        report, _ = self._report(_plan_jobs("success", "success"), conclusion="success")
+
+        assert report.passed is False
+        assert "expected 'failure'" in report.detail
+
+    def test_fail_when_act_ran(self, frozen_now):
+        report, _ = self._report(_plan_jobs("success", "failure"))
+
+        assert report.passed is False
+        assert "act job concluded 'failure'" in report.detail
+
+    def test_dry_run(self):
+        report = phase_dispatch_refused_branch(
+            "camaraproject/ReleaseTest2", poll_timeout=10, dry_run=True,
+        )
+        assert report.passed is True
+        assert "DRY-RUN" in report.detail
+
+
 def _slash_responses(comment_body: str, sync_conclusion: str | None = None):
     responses = [
         ("{title: .title}", {"title": "Release for r1.2"}),
@@ -1741,6 +1810,7 @@ class TestRunPhases:
 
         monkeypatch.setattr(f"{self._MOD}.phase_pre_check", lambda *a, **k: ok("pre-check"))
         monkeypatch.setattr(f"{self._MOD}.phase_dispatch_sync_issue", lambda *a, **k: ok("dispatch"))
+        monkeypatch.setattr(f"{self._MOD}.phase_dispatch_refused_branch", lambda *a, **k: ok("refused-branch"))
         monkeypatch.setattr(f"{self._MOD}.phase_fire_sync_issue", lambda *a, **k: (ok("sync"), "1"))
         monkeypatch.setattr(f"{self._MOD}.phase_fire_rejected_discard", lambda *a, **k: (ok("rejected"), "2"))
         monkeypatch.setattr(f"{self._MOD}.phase_verify_planned_unchanged", lambda *a, **k: ok("planned"))
@@ -1755,13 +1825,13 @@ class TestRunPhases:
         self._patch_phases(monkeypatch)
         reports = run_phases("o/r", 90, poll_timeout=10, dry_run=False)
         assert [r.name for r in reports] == [
-            "pre-check", "dispatch", "sync", "rejected", "planned",
+            "pre-check", "dispatch", "refused-branch", "sync", "rejected", "planned",
             "create", "verify-create", "close", "discard", "verify-discard",
             "recreate",
         ]
 
     def test_publish_free_failure_does_not_stop_round_trip(self, monkeypatch):
-        self._patch_phases(monkeypatch, failing={"dispatch", "sync", "rejected"})
+        self._patch_phases(monkeypatch, failing={"dispatch", "refused-branch", "sync", "rejected"})
         reports = run_phases("o/r", 90, poll_timeout=10, dry_run=False)
         assert reports[-1].name == "recreate"
 
@@ -1786,7 +1856,7 @@ class TestRunPhases:
         self._patch_phases(monkeypatch)
         reports = run_phases("o/r", 90, poll_timeout=10, dry_run=True)
         assert [r.name for r in reports] == [
-            "pre-check", "dispatch", "sync", "rejected", "create",
+            "pre-check", "dispatch", "refused-branch", "sync", "rejected", "create",
         ]
 
 

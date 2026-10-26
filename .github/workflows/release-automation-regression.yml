@@ -2,7 +2,8 @@
 #
 # Sibling to validation-regression.yml. Exercises the release-automation-reusable.yml
 # workflow on camaraproject/ReleaseTest2 via publish-free paths — sync-issue
-# (workflow_dispatch and /sync-issue), a rejected /discard-snapshot in
+# (workflow_dispatch and /sync-issue), a refused create-maintenance-branch
+# dispatch, a rejected /discard-snapshot in
 # `planned`, then a /create-snapshot + /discard-snapshot round-trip with an
 # issue close (auto-reopen) in `snapshot-active`, and a final issue close in
 # `planned` that leaves a fresh Release Issue for the next run — catching
