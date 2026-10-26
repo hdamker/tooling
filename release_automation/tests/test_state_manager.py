@@ -623,7 +623,7 @@ class TestFindReleaseIssue:
             {
                 "number": 42,
                 "title": "Release r4.1 - Tracking Issue",
-                "body": "<!-- release-automation:workflow-owned -->\nRelease content",
+                "body": "<!-- release-automation:workflow-owned -->\n<!-- release-automation:release-tag:r4.1 -->\nRelease content",
             }
         ]
 
@@ -692,6 +692,33 @@ class TestFindReleaseIssue:
         assert result is None
 
 
+    def test_matches_the_release_tag_marker_exactly(self, state_manager, mock_github_client):
+        """r1.1 does not match the issue of r1.10; the title is not used."""
+        mock_github_client.search_issues.return_value = [
+            {
+                "number": 7,
+                "title": "Release r1.10 (maintenance/r1)",
+                "body": "<!-- release-automation:workflow-owned -->\n<!-- release-automation:release-tag:r1.10 -->",
+            },
+            {
+                "number": 8,
+                "title": "Renamed by hand",
+                "body": "<!-- release-automation:workflow-owned -->\n<!-- release-automation:release-tag:r1.1 -->",
+            },
+        ]
+
+        assert state_manager.find_release_issue("r1.1") == 8
+        assert state_manager.find_release_issue("r1.10") == 7
+        assert state_manager.find_release_issue("r1.2") is None
+
+    def test_ignores_issues_without_release_tag_marker(self, state_manager, mock_github_client):
+        mock_github_client.search_issues.return_value = [
+            {"number": 9, "title": "Release r4.1", "body": "<!-- release-automation:workflow-owned -->"},
+        ]
+
+        assert state_manager.find_release_issue("r4.1") is None
+
+
 class TestDeriveStateWithIssue:
     """Tests for derive_state including release_issue_number."""
 
@@ -708,7 +735,7 @@ repository:
             {
                 "number": 123,
                 "title": "Release r4.1 - Tracking Issue",
-                "body": "<!-- release-automation:workflow-owned -->\nRelease content",
+                "body": "<!-- release-automation:workflow-owned -->\n<!-- release-automation:release-tag:r4.1 -->\nRelease content",
             }
         ]
 

@@ -15,6 +15,7 @@ import yaml
 
 from .github_client import GitHubClient
 from .release_line import MAIN_BRANCH, line_of
+from .trigger import RELEASE_TAG_MARKER_RE
 from . import config
 
 
@@ -422,7 +423,8 @@ class ReleaseStateManager:
 
         Searches for open issues with the 'release-issue' label that:
         1. Contain the WORKFLOW_MARKER in the body (workflow-owned)
-        2. Have the release_tag in the title
+        2. Carry exactly this tag in their release-tag marker (the title is
+           for readers; "r1.1" is a substring of "Release r1.10")
 
         Args:
             release_tag: Release tag to search for (e.g., "r4.1")
@@ -437,14 +439,10 @@ class ReleaseStateManager:
 
         for issue in issues:
             body = issue.get("body", "") or ""
-            title = issue.get("title", "") or ""
-
-            # Check for workflow marker
             if WORKFLOW_MARKER not in body:
                 continue
-
-            # Check for release tag in title
-            if release_tag in title:
+            match = RELEASE_TAG_MARKER_RE.search(body)
+            if match and match.group("tag") == release_tag:
                 return issue.get("number")
 
         return None
