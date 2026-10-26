@@ -291,6 +291,10 @@ jobs:
           github.event_name == 'pull_request'
           && steps.detect-changes.outputs.release_plan_changed == 'true'
         uses: ./.tooling/shared-actions/derive-release-state
+        with:
+          # P-033 per line: a PR into maintenance/rX is checked against that
+          # line's release, any other PR against main's
+          base_branch: ${{ startsWith(github.base_ref, 'maintenance/r') && github.base_ref || 'main' }}
 
       # ── Step 6d: Resolve published release history for P-035 ──────
       #

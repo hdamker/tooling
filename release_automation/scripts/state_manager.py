@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from .github_client import GitHubClient
+from .release_line import MAIN_BRANCH, line_of
 from . import config
 
 
@@ -84,7 +85,7 @@ class ConfigurationError:
         file_path: Which file has the problem
         field_path: Dot-separated path to problematic field (e.g., "repository.target_release_tag")
     """
-    error_type: str  # 'missing_file', 'malformed_yaml', 'missing_field'
+    error_type: str  # 'missing_file', 'malformed_yaml', 'missing_field', 'release_line'
     message: str
     file_path: str
     field_path: Optional[str] = None
@@ -111,6 +112,7 @@ class ReleaseInfoResult:
     release_issue_number: Optional[int] = None  # GitHub issue number if found
     release_type: Optional[str] = None  # Release type if available
     meta_release: Optional[str] = None  # Meta-release name (e.g., "Sync26")
+    base_branch: str = MAIN_BRANCH  # Branch whose release-plan.yaml was read
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -165,7 +167,8 @@ class ReleaseStateManager:
 
     def derive_state(
         self,
-        retry_draft_release: bool = False
+        retry_draft_release: bool = False,
+        base_branch: str = MAIN_BRANCH,
     ) -> ReleaseInfoResult:
         """
         Derive the current release state and tag from repository artifacts.
@@ -173,7 +176,8 @@ class ReleaseStateManager:
         This is the single entry point for state derivation. It determines
         the release_tag from the authoritative source and derives the state:
 
-        1. Read and validate release-plan.yaml (config errors → failure)
+        1. Read and validate release-plan.yaml of base_branch (config errors
+           → failure); its target_release_tag must be on that line (line_of)
         2. If tag exists → PUBLISHED
         3. If snapshot branch exists:
            - Read release_tag from release-metadata.yaml on snapshot
@@ -185,6 +189,7 @@ class ReleaseStateManager:
         Args:
             retry_draft_release: Retry draft-release detection for eventual
                 consistency (useful when called right after draft creation)
+            base_branch: Branch whose release-plan.yaml defines the release
 
         Returns:
             ReleaseInfoResult with either:
@@ -192,12 +197,23 @@ class ReleaseStateManager:
                 - success=False: config_error with details
         """
         # Step 1: Read and validate release-plan.yaml
-        plan, config_error = self._read_release_plan_with_validation()
+        plan, config_error = self._read_release_plan_with_validation(base_branch)
 
         if config_error:
             return ReleaseInfoResult(success=False, config_error=config_error)
 
         plan_release_tag = plan["repository"]["target_release_tag"]
+        line = line_of(self.gh, plan_release_tag)
+        if line != base_branch:
+            return ReleaseInfoResult(success=False, config_error=ConfigurationError(
+                error_type="release_line",
+                message=(
+                    f"{config.RELEASE_PLAN_FILE} on {base_branch} targets {plan_release_tag}, "
+                    f"which is released from {line}. Plan it on {line}, or plan another tag here."
+                ),
+                file_path=config.RELEASE_PLAN_FILE,
+                field_path="repository.target_release_tag",
+            ))
         plan_release_type = plan["repository"].get("target_release_type")
         meta_release = plan["repository"].get("meta_release")
 
@@ -212,6 +228,7 @@ class ReleaseStateManager:
                 release_issue_number=self.find_release_issue(plan_release_tag),
                 release_type=plan_release_type,
                 meta_release=meta_release,
+                base_branch=base_branch,
             )
 
         # Step 3: Check for snapshot branches
@@ -260,6 +277,7 @@ class ReleaseStateManager:
                 release_issue_number=self.find_release_issue(effective_tag),
                 release_type=metadata_release_type,
                 meta_release=meta_release,
+                base_branch=base_branch,
             )
 
         # Step 4: No snapshot — use release-plan.yaml state
@@ -277,6 +295,7 @@ class ReleaseStateManager:
             release_issue_number=self.find_release_issue(plan_release_tag),
             release_type=plan_release_type,
             meta_release=meta_release,
+            base_branch=base_branch,
         )
 
     def _draft_release_exists(self, release_tag: str, retry: bool = False) -> bool:

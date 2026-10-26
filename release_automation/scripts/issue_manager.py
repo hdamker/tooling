@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from . import config
+from .release_line import MAIN_BRANCH
 
 
 class IssueManager:
@@ -88,12 +89,14 @@ class IssueManager:
         self,
         release_tag: str,
         release_type: str,
-        meta_release: Optional[str] = None
+        meta_release: Optional[str] = None,
+        base_branch: str = MAIN_BRANCH,
     ) -> str:
         """
         Generate a standardized issue title for a release.
 
-        Format: "Release {tag} ({type}) — {meta_release}"
+        Format: "Release {tag} ({type}) — {meta_release}", followed by
+        " ({base_branch})" for a release from a maintenance branch
 
         Examples:
             - "Release r4.1 (RC) — Sync26"
@@ -104,6 +107,7 @@ class IssueManager:
             release_tag: Release tag (e.g., "r4.1")
             release_type: Release type from release-plan.yaml
             meta_release: Optional meta-release name (e.g., "Sync26")
+            base_branch: Line of the release; named unless it is main
 
         Returns:
             Formatted issue title
@@ -119,12 +123,16 @@ class IssueManager:
         if meta_release:
             title += f" — {meta_release}"
 
+        if base_branch != MAIN_BRANCH:
+            title += f" ({base_branch})"
+
         return title
 
     def should_update_title(
         self,
         current_title: str,
-        release_plan: Dict[str, Any]
+        release_plan: Dict[str, Any],
+        base_branch: str = MAIN_BRANCH,
     ) -> bool:
         """
         Check if the issue title needs updating based on release-plan.yaml.
@@ -140,7 +148,8 @@ class IssueManager:
         expected_title = self.generate_title(
             release_tag=repo_config.get("target_release_tag", ""),
             release_type=repo_config.get("target_release_type", ""),
-            meta_release=repo_config.get("meta_release")
+            meta_release=repo_config.get("meta_release"),
+            base_branch=base_branch,
         )
         return current_title != expected_title
 

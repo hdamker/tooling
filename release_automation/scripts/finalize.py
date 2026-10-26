@@ -180,7 +180,9 @@ def notifications(run: Run, sync: WorkflowSync, common: Optional[CommonSyncOutco
         posts.append(("issue_created", sync.issue_number, {
             "state": "planned",
             "trigger_type": run.plan("trigger_type"),
-            "release_plan_url": f"{run.server_url}/{run.repository}/blob/main/release-plan.yaml",
+            "release_plan_url": (
+                f"{run.server_url}/{run.repository}/blob/{run.plan('base_branch') or 'main'}/release-plan.yaml"
+            ),
             "closed_issue_number": str(closed.get("number", "")),
             "closed_issue_url": closed.get("html_url", ""),
         }))
@@ -343,6 +345,7 @@ def run_issue_sync(run: Run, clients: Clients, report: Report, summary_path: str
         common_cache_details=run.plan("common_cache_details"),
         common_sync_pr_url=(report.common_sync.pr_url if report.common_sync else "") or run.plan("common_sync_pr_url"),
         summary_path=summary_path,
+        base_branch=run.plan("base_branch") or "main",
         **sync_overrides(run),
     )
     report.issue_sync = sync

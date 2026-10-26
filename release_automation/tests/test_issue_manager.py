@@ -171,9 +171,33 @@ class TestIssueManagerGenerateTitle:
 
         assert title == "Release r4.0.1 (maintenance)"
 
+    def test_generate_title_names_a_maintenance_line(self):
+        """Spec 5.4: a case-B Release Issue title names its line."""
+        title = IssueManager().generate_title(
+            release_tag="r1.8", release_type="maintenance-release", meta_release="Sync26",
+            base_branch="maintenance/r1",
+        )
+
+        assert title == "Release r1.8 (maintenance) — Sync26 (maintenance/r1)"
+
+    def test_generate_title_on_main_has_no_line(self):
+        title = IssueManager().generate_title(
+            release_tag="r1.8", release_type="maintenance-release", base_branch="main"
+        )
+
+        assert title == "Release r1.8 (maintenance)"
+
 
 class TestIssueManagerShouldUpdateTitle:
     """Tests for should_update_title method."""
+
+    def test_title_follows_the_line(self):
+        plan = {"repository": {"target_release_tag": "r1.8", "target_release_type": "maintenance-release"}}
+
+        assert IssueManager().should_update_title("Release r1.8 (maintenance)", plan, base_branch="maintenance/r1")
+        assert not IssueManager().should_update_title(
+            "Release r1.8 (maintenance) (maintenance/r1)", plan, base_branch="maintenance/r1"
+        )
 
     def test_title_matches_no_update_needed(self):
         """Test when current title matches expected."""

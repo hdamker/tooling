@@ -300,6 +300,13 @@ class TestValidatePreconditions:
 
         assert errors == []
 
+    def test_state_is_derived_on_the_base_branch(self, snapshot_creator, mock_state_manager):
+        mock_state_manager.derive_state.return_value = self._make_result(ReleaseState.PLANNED)
+
+        snapshot_creator.validate_preconditions("r1.8", base_branch="maintenance/r1")
+
+        mock_state_manager.derive_state.assert_called_once_with(base_branch="maintenance/r1")
+
     def test_invalid_published_state(self, snapshot_creator, mock_state_manager):
         """Test validation fails for PUBLISHED state."""
         mock_state_manager.derive_state.return_value = self._make_result(

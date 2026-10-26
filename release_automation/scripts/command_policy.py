@@ -26,6 +26,7 @@ from typing import Optional, Union
 
 from . import config
 from .github_client import GitHubClient, GitHubClientError
+from .release_line import MAIN_BRANCH
 from .state_manager import ConfigurationError, ReleaseInfoResult, ReleaseState
 from .trigger import TRIGGER_SLASH_COMMAND, Trigger
 
@@ -37,8 +38,6 @@ ALLOWED_COMMANDS = {
     config.STATE_PUBLISHED: ["sync-issue"],
     config.STATE_NOT_PLANNED: ["sync-issue"],
 }
-
-DEFAULT_BASE_BRANCH = "main"
 
 # How a release is published once its Release PR is merged:
 #   draft    — merge creates a draft release; /publish-release --confirm publishes it
@@ -103,7 +102,8 @@ class Plan:
 
     Attributes:
         response: Template the plan job posts ("" for non-slash triggers)
-        base_branch: Branch the release is cut from
+        base_branch: Branch the release is cut from: the line of the release
+            tag (release_line.line_of), whose release-plan.yaml was read
         publish_mode: draft | on_merge, per release type (PUBLISH_MODES)
         action: What the snapshot/act job executes ("" for none; action_for)
     """
@@ -113,7 +113,7 @@ class Plan:
     state: str
     release_type: str
     confirm_tag: str = ""
-    base_branch: str = DEFAULT_BASE_BRANCH
+    base_branch: str = MAIN_BRANCH
     publish_mode: str = PUBLISH_MODE_DRAFT
     response: str = ""
     action: str = ""
@@ -269,6 +269,7 @@ def _evaluate(
         state=state,
         release_type=release_type,
         confirm_tag=trigger.confirm_tag,
+        base_branch=release_info.base_branch,
         publish_mode=publish_mode_for(release_type),
     )
     if not is_slash:
@@ -337,6 +338,7 @@ def release_info_from_state(state_outputs: dict) -> ReleaseInfoResult:
         release_tag=state_outputs.get("release_tag", ""),
         state=ReleaseState(state) if state else None,
         release_type=state_outputs.get("release_type", ""),
+        base_branch=state_outputs.get("base_branch") or MAIN_BRANCH,
     )
 
 

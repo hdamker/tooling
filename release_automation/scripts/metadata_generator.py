@@ -39,6 +39,7 @@ class ReleaseMetadata:
     release_type: str
     src_commit_sha: Optional[str]
     apis: List[ApiMetadata] = field(default_factory=list)
+    base_branch: str = "main"
     release_date: Optional[str] = None
     release_notes: Optional[str] = None
     commonalities_release: Optional[str] = None
@@ -58,6 +59,7 @@ class ReleaseMetadata:
                 "release_type": self.release_type,
                 "release_date": self.release_date,
                 "src_commit_sha": self.src_commit_sha,
+                "base_branch": self.base_branch,
             },
             "apis": [api.to_dict() for api in self.apis],
         }
@@ -104,6 +106,7 @@ class MetadataGenerator:
         src_commit_sha: Optional[str],
         api_titles: Dict[str, str],
         repo: Optional[str] = None,
+        base_branch: str = "main",
     ) -> Dict[str, Any]:
         """
         Generate release metadata from release plan and calculated versions.
@@ -114,6 +117,7 @@ class MetadataGenerator:
             src_commit_sha: SHA of the source commit (snapshot was created from)
             api_titles: Dict mapping api_name to human-readable title
             repo: Full repository path (e.g., "owner/name") — name is extracted
+            base_branch: Branch the snapshot was created from (main or maintenance/rX)
 
         Returns:
             Dict suitable for YAML serialization as release-metadata.yaml
@@ -151,6 +155,7 @@ class MetadataGenerator:
             release_type=release_type,
             src_commit_sha=src_commit_sha,
             apis=apis,
+            base_branch=base_branch,
             release_date=None,  # Set during publication
             release_notes=release_notes,
             commonalities_release=commonalities,

@@ -4,22 +4,25 @@ State is plain dicts the tests set up and inspect. ``fail`` maps a method name
 to a list of exceptions raised by its next calls, in order.
 """
 
+import fnmatch
 import itertools
 from typing import Any, Dict, List, Optional
 
-from release_automation.scripts.github_client import GitHubClientError, Release
+from release_automation.scripts.github_client import Branch, GitHubClientError, Release
 
 REPO_URL = "https://github.com/camaraproject/Example"
 
 
 class FakeGitHub:
-    def __init__(self, files=None, branches=None, tags=None, releases=None, fail=None):
+    def __init__(self, files=None, branches=None, tags=None, releases=None, fail=None, issues=None, permissions=None):
         self.repo = "camaraproject/Example"
         self.files: Dict[tuple, str] = dict(files or {})   # (ref, path) -> content
         self.branches: Dict[str, str] = dict(branches or {})  # name -> sha
         self.tags: Dict[str, str] = dict(tags or {})  # name -> sha
         self.releases: List[Dict[str, Any]] = list(releases or [])
         self.fail: Dict[str, List[Exception]] = {k: list(v) for k, v in (fail or {}).items()}
+        self.issues: List[Dict[str, Any]] = list(issues or [])  # open issues
+        self.permissions: Dict[str, str] = dict(permissions or {})
         self.commits: List[Dict[str, str]] = []
         self.closed_prs: List[int] = []
         self.reopened: List[int] = []
@@ -55,6 +58,10 @@ class FakeGitHub:
         self._call("delete_branch")
         return self.branches.pop(branch_name, None) is not None
 
+    def list_branches(self, pattern=""):
+        self._call("list_branches")
+        return [Branch(name=n, sha=sha) for n, sha in self.branches.items() if fnmatch.fnmatch(n, pattern or "*")]
+
     def create_branch_at_sha(self, branch_name, sha):
         self._call("create_branch_at_sha")
         if branch_name in self.branches:
@@ -83,6 +90,9 @@ class FakeGitHub:
             if r["tag"] == tag and (r["draft"] or not draft_only):
                 return r
         return None
+
+    def draft_release_exists(self, tag):
+        return self._release(tag, draft_only=True) is not None
 
     def get_draft_release(self, tag) -> Optional[Release]:
         r = self._release(tag, draft_only=True)
@@ -132,6 +142,14 @@ class FakeGitHub:
         self.releases = [r for r in self.releases if r["id"] != release_id]
 
     # ── PRs, issues, comments ──
+    def search_issues(self, labels=None, state="open"):
+        self._call("search_issues")
+        return [i for i in self.issues if set(labels or []) <= set(i.get("label_names", []))]
+
+    def get_collaborator_permission(self, username):
+        self._call("get_collaborator_permission")
+        return self.permissions.get(username, "none")
+
     def close_pr(self, pr_number, comment=""):
         self._call("close_pr")
         self.closed_prs.append(pr_number)

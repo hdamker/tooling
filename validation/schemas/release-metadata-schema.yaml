@@ -78,6 +78,18 @@ properties:
         examples:
           - "abcd1234efgh5678ijkl9012mnop3456qrst7890"
 
+      base_branch:
+        type: string
+        description: |
+          Branch the release was created from: main, or maintenance/rX for a
+          release of a maintained cycle X. Written by automation at snapshot
+          creation for audit and the release collector; not read back.
+          Optional (absent in releases created before it was introduced).
+        pattern: "^(main|maintenance/r[1-9]\\d*)$"
+        examples:
+          - "main"
+          - "maintenance/r1"
+
       release_notes:
         type: string
         description: Optional release notes or description (manual or generated)
