@@ -40,7 +40,8 @@ from .bot_context import bot_context
 from .bot_identity import resolve_bot_identity
 from .commands import COMMANDS, command
 from .common_sync import CommonSyncOutcome
-from .issue_sync import WorkflowSync, post_publish_warnings
+from .issue_sync import ReleaseView, WorkflowSync, post_publish_warnings
+from .issue_sync import release_view as build_release_view
 from .plan_document import PlanDocument
 from .sync_pr import SyncPrOutcome
 
@@ -141,35 +142,26 @@ def result_due(run: Run) -> bool:
 # ── Release Issue sync ───────────────────────────────────────────────────────
 
 
-def sync_overrides(run: Run) -> Dict[str, Any]:
-    """State and artifacts the run's command produced, which the issue sync must not re-derive."""
-    overrides = {
-        "state_override": "",
-        "snapshot_branch_override": "",
-        "release_pr_number_override": "",
-        "draft_release_url_override": "",
-        "force_update": False,
-    }
-    if run.succeeded("create-snapshot"):
-        overrides.update(
-            state_override=command("create-snapshot").state_after,
-            snapshot_branch_override=run.out("snapshot_branch"),
-            release_pr_number_override=run.out("release_pr_number"),
-            force_update=True,
-        )
-    elif run.succeeded(ACTION_CREATE_DRAFT):
-        overrides.update(
-            state_override=config.STATE_DRAFT_READY,
-            snapshot_branch_override=run.plan.snapshot_branch,
-            release_pr_number_override=run.out("release_pr_number"),
-            draft_release_url_override=run.out("draft_release_url"),
-            force_update=True,
-        )
-    elif run.succeeded("discard-snapshot") or run.succeeded("delete-draft"):
-        overrides.update(state_override=command(run.action).state_after, force_update=True)
-    elif run.plan.trigger.command == "sync-issue":
-        overrides.update(force_update=True)
-    return overrides
+def synced_state(run: Run) -> str:
+    """The state the Release Issue shows after the run: a successful action's state_after, else the plan's."""
+    if run.succeeded(ACTION_CREATE_DRAFT):
+        return config.STATE_DRAFT_READY
+    cmd = command(run.action)
+    if cmd and cmd.state_after and run.succeeded(cmd.name):
+        return cmd.state_after
+    return run.plan.state
+
+
+def synced_issue(run: Run) -> str:
+    """The Release Issue the sync writes: the plan's, or the one the run just reopened ("" for none)."""
+    if run.plan.release_issue_number:
+        return run.plan.release_issue_number
+    return run.plan.trigger.issue_number if run.succeeded("reopen-issue") else ""
+
+
+def release_view(run: Run, common_sync_pr_url: str = "") -> ReleaseView:
+    """What the issue sync shows (issue_sync.release_view): the state after the action and its artifacts."""
+    return build_release_view(run.plan, synced_state(run), run.outcome, synced_issue(run), common_sync_pr_url)
 
 
 Notification = Tuple[str, str, Dict[str, str]]
@@ -368,15 +360,9 @@ def run_issue_sync(run: Run, clients: Clients, report: Report, summary_path: str
         print(f"Common sync: {report.common_sync.status}")
 
     sync = sync_for_workflow(
-        clients.issues,
-        release_tag=run.plan.release_tag,
-        state=run.plan.state,
-        common_cache_status=run.plan.cache.status,
-        common_cache_details=run.plan.cache.details,
-        common_sync_pr_url=(report.common_sync.pr_url if report.common_sync else "") or run.plan.cache.sync_pr_url,
+        clients.issues, run.plan,
+        release_view(run, report.common_sync.pr_url if report.common_sync else ""),
         summary_path=summary_path,
-        base_branch=run.plan.base_branch,
-        **sync_overrides(run),
     )
     report.issue_sync = sync
     print("Issue sync result:")
@@ -437,7 +423,9 @@ def finalize_published(run: Run, clients: Clients, report: Report) -> None:
     if run.published and run.plan.release_issue_number:
         sync = report.sync_pr or SyncPrOutcome(status="")
         print(f"Updating release issue #{run.plan.release_issue_number} after publish (sync status: {sync.status})")
-        report.issue_finalized = IssueSyncManager(clients.issues, issue_manager=IssueManager()).finalize_published_issue(
+        report.issue_finalized = IssueSyncManager(
+            clients.issues, issue_manager=IssueManager(), base_branch=run.plan.base_branch,
+        ).finalize_published_issue(
             issue_number=int(run.plan.release_issue_number),
             release_tag=run.plan.release_tag,
             release_url=run.out("release_url"),

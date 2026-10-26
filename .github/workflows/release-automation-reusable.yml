@@ -315,16 +315,18 @@ jobs:
           RELEASE_APP_SLUG: ${{ vars.RELEASE_APP_SLUG }}
         run: python -m release_automation.scripts.snapshot_prep bot-identity
 
+      # The snapshot, release-review branch and Release PR of the plan's
+      # release, with the App token (branch protection bypass, commit identity)
       - name: Create Snapshot
         id: create
-        uses: ./_tooling/shared-actions/create-snapshot
-        with:
-          release_tag: ${{ fromJSON(needs.plan.outputs.plan).release.release_tag }}
-          base_branch: ${{ fromJSON(needs.plan.outputs.plan).base_branch }}
-          github_token: ${{ steps.app-token.outputs.token || github.token }}
-          tooling_path: ${{ github.workspace }}/_tooling
-          bot_name: ${{ steps.bot-identity.outputs.bot_name }}
-          bot_email: ${{ steps.bot-identity.outputs.bot_email }}
+        working-directory: _tooling
+        env:
+          PLAN_JSON: ${{ needs.plan.outputs.plan }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          TOOLING_PATH: ${{ github.workspace }}/_tooling
+          BOT_NAME: ${{ steps.bot-identity.outputs.bot_name }}
+          BOT_EMAIL: ${{ steps.bot-identity.outputs.bot_email }}
+        run: python -m release_automation.scripts.snapshot_prep create
 
       - name: Outcome
         id: outcome

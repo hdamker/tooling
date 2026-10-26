@@ -90,8 +90,8 @@ class IssueManager:
         self,
         release_tag: str,
         release_type: str,
-        meta_release: Optional[str] = None,
-        base_branch: str = MAIN_BRANCH,
+        meta_release: Optional[str],
+        base_branch: str,
     ) -> str:
         """
         Generate a standardized issue title for a release.
@@ -133,7 +133,7 @@ class IssueManager:
         self,
         current_title: str,
         release_plan: Dict[str, Any],
-        base_branch: str = MAIN_BRANCH,
+        base_branch: str,
     ) -> bool:
         """
         Check if the issue title needs updating based on release-plan.yaml.

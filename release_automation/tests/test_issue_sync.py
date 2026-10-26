@@ -1,22 +1,25 @@
 """
 Unit tests for issue_sync.py
 
-Tests the IssueSyncManager class which handles Release Issue synchronization.
+Tests the IssueSyncManager class which synchronizes the Release Issue with
+the release view the finalize job builds from the plan document (107 D3).
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from release_automation.scripts.github_client import GitHubClientError
 from release_automation.scripts.issue_manager import IssueManager
 from release_automation.scripts.labels import RELEASE_ISSUE_LABELS
 from release_automation.scripts.issue_sync import (
     IssueSyncManager,
+    ReleaseView,
     SyncResult,
     WORKFLOW_MARKER,
     post_publish_warnings,
 )
-from release_automation.scripts.state_manager import ReleaseInfoResult, ReleaseState
+from release_automation.scripts.state_manager import ReleaseState
+from release_automation.tests.plans import make_plan
 
 
 class TestSyncResult:
@@ -44,265 +47,125 @@ class TestIssueSyncManagerInit:
     """Tests for IssueSyncManager initialization."""
 
     def test_init_with_dependencies(self):
-        """Test initialization with all dependencies."""
         gh = MagicMock()
-        state_manager = MagicMock()
         issue_manager = MagicMock()
-        bot_responder = MagicMock()
 
-        manager = IssueSyncManager(gh, state_manager, issue_manager, bot_responder)
+        manager = IssueSyncManager(gh, issue_manager, "maintenance/r1")
 
         assert manager.gh == gh
-        assert manager.state_manager == state_manager
         assert manager.issue_manager == issue_manager
-        assert manager.bot == bot_responder
+        assert manager.base_branch == "maintenance/r1"
 
-
-class TestFindWorkflowOwnedIssue:
-    """Tests for find_workflow_owned_issue method."""
-
-    def test_finds_issue_with_marker_and_tag(self):
-        """Test finding an issue with workflow marker and release tag marker in body."""
-        gh = MagicMock()
-        gh.search_issues.return_value = [
-            {
-                "number": 1,
-                "title": "Release r4.1 (RC) — Sync26",
-                "body": f"Some content\n{WORKFLOW_MARKER}\n<!-- release-automation:release-tag:r4.1 -->\nMore content",
-                "labels": [{"name": "release-issue"}]
-            }
-        ]
-
-        manager = IssueSyncManager(gh, MagicMock(), MagicMock(), MagicMock())
-        result = manager.find_workflow_owned_issue("r4.1")
-
-        assert result is not None
-        assert result["number"] == 1
-        gh.search_issues.assert_called_once_with(labels=["release-issue"], state="open")
-
-    def test_ignores_issue_without_marker(self):
-        """Test that issues without workflow marker are ignored."""
-        gh = MagicMock()
-        gh.search_issues.return_value = [
-            {
-                "number": 1,
-                "title": "Release r4.1 (RC)",
-                "body": "No marker here",
-                "labels": [{"name": "release-issue"}]
-            }
-        ]
-
-        manager = IssueSyncManager(gh, MagicMock(), MagicMock(), MagicMock())
-        result = manager.find_workflow_owned_issue("r4.1")
-
-        assert result is None
-
-    def test_ignores_issue_with_wrong_tag(self):
-        """Test that issues with different release tag marker are ignored."""
-        gh = MagicMock()
-        gh.search_issues.return_value = [
-            {
-                "number": 1,
-                "title": "Release r4.0 (RC)",
-                "body": f"{WORKFLOW_MARKER}\n<!-- release-automation:release-tag:r4.0 -->",
-                "labels": [{"name": "release-issue"}]
-            }
-        ]
-
-        manager = IssueSyncManager(gh, MagicMock(), MagicMock(), MagicMock())
-        result = manager.find_workflow_owned_issue("r4.1")
-
-        assert result is None
-
-    def test_returns_none_when_no_issues(self):
-        """Test returns None when no issues found."""
-        gh = MagicMock()
-        gh.search_issues.return_value = []
-
-        manager = IssueSyncManager(gh, MagicMock(), MagicMock(), MagicMock())
-        result = manager.find_workflow_owned_issue("r4.1")
-
-        assert result is None
-
-    def test_handles_multiple_issues_finds_correct_one(self):
-        """Test finding correct issue among multiple."""
-        gh = MagicMock()
-        gh.search_issues.return_value = [
-            {
-                "number": 1,
-                "title": "Release r4.0",
-                "body": f"{WORKFLOW_MARKER}\n<!-- release-automation:release-tag:r4.0 -->",
-                "labels": []
-            },
-            {
-                "number": 2,
-                "title": "Release r4.1 (RC)",
-                "body": f"{WORKFLOW_MARKER}\n<!-- release-automation:release-tag:r4.1 -->",
-                "labels": []
-            },
-            {
-                "number": 3,
-                "title": "Manual release issue",
-                "body": "No marker",
-                "labels": []
-            }
-        ]
-
-        manager = IssueSyncManager(gh, MagicMock(), MagicMock(), MagicMock())
-        result = manager.find_workflow_owned_issue("r4.1")
-
-        assert result is not None
-        assert result["number"] == 2
+    def test_base_branch_is_required(self):
+        # F12: no silent main
+        with pytest.raises(TypeError):
+            IssueSyncManager(MagicMock(), MagicMock())
 
 
 class TestSyncReleaseIssue:
-    """Tests for sync_release_issue method."""
+    """Tests for sync_release_issue method: the issue follows the release view, nothing is derived."""
+
+    PLAN = {"repository": {"target_release_tag": "r4.1", "target_release_type": "pre-release-rc", "meta_release": "Sync26"}}
 
     def _create_manager(self):
         """Helper to create a manager with mocked dependencies."""
         gh = MagicMock()
-        state_manager = MagicMock()
         issue_manager = MagicMock()
-        bot_responder = MagicMock()
-        state_manager.get_current_snapshot.return_value = None
         gh.get_branch_sha.return_value = None  # no maintenance branch
-
+        gh.search_issues.return_value = []  # no other workflow-owned issues
         # Make retry_on_not_found call the function directly (no actual retry in tests)
         gh.retry_on_not_found.side_effect = lambda fn, **kwargs: fn()
+        issue_manager.should_update_title.return_value = False
+        issue_manager.generate_state_section.return_value = "**State**: x"
+        issue_manager.update_section.return_value = "updated body"
 
-        manager = IssueSyncManager(gh, state_manager, issue_manager, bot_responder)
-        return manager, gh, state_manager, issue_manager, bot_responder
+        manager = IssueSyncManager(gh, issue_manager, "main")
+        return manager, gh, issue_manager
+
+    @staticmethod
+    def issue(number=1, label="release-state:planned", body=f"{WORKFLOW_MARKER}\n<!-- release-automation:release-tag:r4.1 -->"):
+        return {"number": number, "title": "Release r4.1 (RC)", "body": body, "labels": [{"name": label}],
+                "html_url": f"https://github.com/test/repo/issues/{number}"}
 
     def test_creates_issue_when_planned_and_no_issue(self):
-        """Test issue creation when PLANNED and no existing issue."""
-        manager, gh, state_manager, issue_manager, _ = self._create_manager()
-
-        release_plan = {
-            "repository": {
-                "target_release_tag": "r4.1",
-                "target_release_type": "pre-release-rc",
-                "meta_release": "Sync26"
-            }
-        }
-
-        state_manager.derive_state.return_value = ReleaseInfoResult(
-            success=True, state=ReleaseState.PLANNED,
-            release_tag="r4.1", source="release-plan.yaml")
-        gh.search_issues.return_value = []
+        manager, gh, issue_manager = self._create_manager()
         gh.create_issue.return_value = {"number": 1, "title": "Release r4.1 (RC)"}
+        gh.get_issue.return_value = self.issue()
         issue_manager.generate_title.return_value = "Release r4.1 (RC) — Sync26"
         issue_manager.generate_issue_body_template.return_value = f"## Release\n{WORKFLOW_MARKER}"
 
-        result = manager.sync_release_issue(release_plan, trigger_pr=123)
+        result = manager.sync_release_issue(self.PLAN, ReleaseView(state="planned"))
 
         assert result.action == "created"
         assert result.issue is not None
         gh.create_issue.assert_called_once()
 
-    def test_always_updates_issue_in_planned_state(self):
-        """Test that PLANNED state always triggers update to refresh CONFIG from release-plan.yaml."""
-        manager, gh, state_manager, issue_manager, _ = self._create_manager()
+    def test_reads_the_issue_the_view_names_not_a_search(self):
+        # 107 D3: GitHub objects by the plan's reference, never by search
+        manager, gh, _ = self._create_manager()
+        gh.get_issue.return_value = self.issue(7)
 
-        release_plan = {
-            "repository": {
-                "target_release_tag": "r4.1",
-                "target_release_type": "pre-release-rc"
-            }
-        }
-
-        state_manager.derive_state.return_value = ReleaseInfoResult(
-            success=True, state=ReleaseState.PLANNED,
-            release_tag="r4.1", source="release-plan.yaml")
-        gh.search_issues.return_value = [
-            {
-                "number": 1,
-                "title": "Release r4.1 (RC)",
-                "body": f"{WORKFLOW_MARKER}\n<!-- release-automation:release-tag:r4.1 -->",
-                "labels": [{"name": "release-state:planned"}]
-            }
-        ]
-        gh.get_issue.return_value = {"number": 1, "title": "Release r4.1 (RC)"}
-        issue_manager.should_update_title.return_value = False
-        issue_manager.generate_state_section.return_value = "**State**: planned"
-        issue_manager.update_section.return_value = "updated body"
-
-        result = manager.sync_release_issue(release_plan)
+        result = manager.sync_release_issue(self.PLAN, ReleaseView(state="planned", issue_number="7"))
 
         assert result.action == "updated"
-        assert result.issue is not None
+        gh.get_issue.assert_any_call(7)
+        gh.create_issue.assert_not_called()
+
+    def test_always_updates_issue_in_planned_state(self):
+        """PLANNED always refreshes CONFIG from release-plan.yaml, also without a refresh."""
+        manager, gh, _ = self._create_manager()
+        gh.get_issue.return_value = self.issue()
+
+        result = manager.sync_release_issue(self.PLAN, ReleaseView(state="planned", issue_number="1", refresh=False))
+
+        assert result.action == "updated"
 
     def test_updates_issue_when_state_changes(self):
-        """Test issue update when state changes."""
-        manager, gh, state_manager, issue_manager, _ = self._create_manager()
+        manager, gh, _ = self._create_manager()
+        gh.get_issue.return_value = self.issue(label="release-state:planned")
 
-        release_plan = {
-            "repository": {
-                "target_release_tag": "r4.1",
-                "target_release_type": "pre-release-rc"
-            }
-        }
-
-        state_manager.derive_state.return_value = ReleaseInfoResult(
-            success=True, state=ReleaseState.SNAPSHOT_ACTIVE,
-            release_tag="r4.1", source="release-metadata.yaml")
-        gh.search_issues.return_value = [
-            {
-                "number": 1,
-                "title": "Release r4.1 (RC)",
-                "body": f"{WORKFLOW_MARKER}\n<!-- release-automation:release-tag:r4.1 -->\n<!-- BEGIN:STATE -->old<!-- END:STATE -->",
-                "labels": [{"name": "release-state:planned"}]  # Old label
-            }
-        ]
-        gh.get_issue.return_value = {"number": 1, "title": "Release r4.1 (RC)"}
-        issue_manager.should_update_title.return_value = False
-        issue_manager.generate_state_section.return_value = "**State**: SNAPSHOT_ACTIVE"
-        issue_manager.update_section.return_value = "updated body"
-
-        result = manager.sync_release_issue(release_plan)
+        result = manager.sync_release_issue(
+            self.PLAN, ReleaseView(state="snapshot-active", issue_number="1", snapshot_branch="release-snapshot/r4.1-abc",
+                                   release_pr_number="12", refresh=False),
+        )
 
         assert result.action == "updated"
-        gh.remove_labels.assert_called()
-        gh.add_labels.assert_called()
+        gh.remove_labels.assert_called_with(1, ["release-state:planned"])
+        gh.add_labels.assert_called_with(1, ["release-state:snapshot-active"])
+
+    def test_issue_event_without_a_change_is_up_to_date(self):
+        # An issue close or reopen refreshes only on a state change (refresh=False)
+        manager, gh, _ = self._create_manager()
+        gh.get_issue.return_value = self.issue(label="release-state:snapshot-active")
+
+        result = manager.sync_release_issue(self.PLAN, ReleaseView(state="snapshot-active", issue_number="1", refresh=False))
+
+        assert (result.action, result.reason) == ("none", "up_to_date")
+        gh.update_issue.assert_not_called()
+
+    def test_refresh_rewrites_the_issue_when_state_matches(self):
+        # Commands and syncs rewrite the managed sections
+        manager, gh, _ = self._create_manager()
+        gh.get_issue.return_value = self.issue(label="release-state:snapshot-active")
+
+        result = manager.sync_release_issue(self.PLAN, ReleaseView(state="snapshot-active", issue_number="1", refresh=True))
+
+        assert result.action == "updated"
 
     def test_closes_stale_workflow_owned_issue_after_current_issue_exists(self):
-        """Test stale workflow-owned issues for old tags are de-stated and closed."""
-        manager, gh, state_manager, issue_manager, _ = self._create_manager()
-
-        release_plan = {
-            "repository": {
-                "target_release_tag": "r4.1",
-                "target_release_type": "pre-release-rc"
-            }
-        }
-
-        current_issue = {
-            "number": 2,
-            "title": "Release r4.1 (RC)",
-            "body": f"{WORKFLOW_MARKER}\n<!-- release-automation:release-tag:r4.1 -->",
-            "labels": [{"name": "release-state:planned"}],
-            "html_url": "https://github.com/test/repo/issues/2",
-        }
-        stale_issue = {
-            "number": 1,
-            "title": "Release r4.0 (RC)",
+        """Stale workflow-owned issues for old tags are de-stated and closed."""
+        manager, gh, _ = self._create_manager()
+        current = self.issue(2)
+        stale = {
+            "number": 1, "title": "Release r4.0 (RC)",
             "body": f"{WORKFLOW_MARKER}\n<!-- release-automation:release-tag:r4.0 -->",
-            "labels": [
-                {"name": "release-issue"},
-                {"name": "release-state:planned"},
-            ],
+            "labels": [{"name": "release-issue"}, {"name": "release-state:planned"}],
             "html_url": "https://github.com/test/repo/issues/1",
         }
+        gh.search_issues.return_value = [stale, current]
+        gh.get_issue.return_value = current
 
-        state_manager.derive_state.return_value = ReleaseInfoResult(
-            success=True, state=ReleaseState.PLANNED,
-            release_tag="r4.1", source="release-plan.yaml")
-        gh.search_issues.return_value = [stale_issue, current_issue]
-        gh.get_issue.return_value = current_issue
-        issue_manager.should_update_title.return_value = False
-        issue_manager.generate_state_section.return_value = "**State**: planned"
-        issue_manager.update_section.return_value = current_issue["body"]
-
-        result = manager.sync_release_issue(release_plan)
+        result = manager.sync_release_issue(self.PLAN, ReleaseView(state="planned", issue_number="2"))
 
         assert result.action == "updated"
         gh.remove_labels.assert_any_call(1, ["release-state:planned"])
@@ -314,111 +177,66 @@ class TestSyncReleaseIssue:
         gh.close_issue.assert_called_once_with(1, state_reason="not_planned")
 
     def test_no_action_when_not_planned_and_no_issue(self):
-        """Test no action when not PLANNED and no existing issue."""
-        manager, gh, state_manager, _, _ = self._create_manager()
+        manager, gh, _ = self._create_manager()
 
-        release_plan = {
-            "repository": {
-                "target_release_tag": "r4.1",
-                "target_release_type": "pre-release-rc"
-            }
-        }
+        result = manager.sync_release_issue(self.PLAN, ReleaseView(state="not-planned"))
 
-        state_manager.derive_state.return_value = ReleaseInfoResult(
-            success=True, state=ReleaseState.NOT_PLANNED,
-            release_tag="r4.1", source="release-plan.yaml")
-        gh.search_issues.return_value = []
-
-        result = manager.sync_release_issue(release_plan)
-
-        assert result.action == "none"
-        assert result.reason == "no_planned_release"
+        assert (result.action, result.reason) == ("none", "no_planned_release")
         gh.create_issue.assert_not_called()
 
     def test_returns_none_action_when_missing_release_tag(self):
-        """Test returns none action when release tag is missing."""
-        manager, _, _, _, _ = self._create_manager()
+        manager, _, _ = self._create_manager()
 
-        release_plan = {"repository": {}}
+        result = manager.sync_release_issue({"repository": {}}, ReleaseView(state="planned"))
 
-        result = manager.sync_release_issue(release_plan)
+        assert (result.action, result.reason) == ("none", "missing_release_tag")
 
-        assert result.action == "none"
-        assert result.reason == "missing_release_tag"
+    def test_draft_ready_shows_the_views_draft_url(self):
+        manager, gh, issue_manager = self._create_manager()
+        gh.get_issue.return_value = self.issue(label="release-state:snapshot-active")
+        url = "https://github.com/org/repo/releases/tag/untagged-123"
 
-    def test_force_update_refreshes_issue_when_state_matches(self):
-        """Test force_update refreshes issue even when label and title already match."""
-        manager, gh, state_manager, issue_manager, _ = self._create_manager()
-
-        release_plan = {
-            "repository": {
-                "target_release_tag": "r4.1",
-                "target_release_type": "pre-release-rc"
-            }
-        }
-
-        gh.search_issues.return_value = [
-            {
-                "number": 1,
-                "title": "Release r4.1 (RC)",
-                "body": f"{WORKFLOW_MARKER}\n<!-- release-automation:release-tag:r4.1 -->",
-                "labels": [{"name": "release-state:snapshot-active"}]
-            }
-        ]
-        gh.get_issue.return_value = {"number": 1, "title": "Release r4.1 (RC)"}
-        issue_manager.should_update_title.return_value = False
-        issue_manager.generate_state_section.return_value = "**State**: snapshot-active"
-        issue_manager.update_section.return_value = "updated body"
-
-        result = manager.sync_release_issue(
-            release_plan,
-            state_override=ReleaseState.SNAPSHOT_ACTIVE,
-            force_update=True,
-        )
-
-        assert result.action == "updated"
-        state_manager.derive_state.assert_not_called()
-
-    def test_uses_draft_release_url_override_for_draft_ready(self):
-        """Test draft release URL override is passed to the issue body generator."""
-        manager, gh, _, issue_manager, _ = self._create_manager()
-
-        release_plan = {
-            "repository": {
-                "target_release_tag": "r4.1",
-                "target_release_type": "pre-release-rc"
-            }
-        }
-
-        gh.search_issues.return_value = [
-            {
-                "number": 1,
-                "title": "Release r4.1 (RC)",
-                "body": f"{WORKFLOW_MARKER}\n<!-- release-automation:release-tag:r4.1 -->",
-                "labels": [{"name": "release-state:snapshot-active"}]
-            }
-        ]
-        gh.get_issue.return_value = {"number": 1, "title": "Release r4.1 (RC)"}
-        issue_manager.should_update_title.return_value = False
-        issue_manager.generate_state_section.return_value = "**State**: draft-ready"
-        issue_manager.update_section.return_value = "updated body"
-
-        draft_release_url = "https://github.com/org/repo/releases/tag/untagged-123"
-        result = manager.sync_release_issue(
-            release_plan,
-            state_override=ReleaseState.DRAFT_READY,
-            draft_release_url_override=draft_release_url,
-            force_update=True,
-        )
+        result = manager.sync_release_issue(self.PLAN, ReleaseView(state="draft-ready", issue_number="1", draft_release_url=url))
 
         assert result.action == "updated"
         issue_manager.generate_state_section.assert_called_once_with(
-            state=ReleaseState.DRAFT_READY.value,
-            snapshot_id="",
-            release_pr_url="",
-            draft_release_url=draft_release_url,
-            snapshot_branch_url=""
+            state="draft-ready", snapshot_id="", release_pr_url="", draft_release_url=url, snapshot_branch_url="",
         )
+
+    def test_snapshot_artifacts_reach_the_sections(self):
+        manager, gh, issue_manager = self._create_manager()
+        gh.repo = "org/repo"
+        gh.get_issue.return_value = self.issue(label="release-state:planned")
+        plan = {**self.PLAN, "apis": [{"api_name": "qod", "target_api_version": "1.0.0"}],
+                "dependencies": {"commonalities_release": "r4.3"}}
+
+        manager.sync_release_issue(plan, ReleaseView(
+            state="snapshot-active", issue_number="1", snapshot_branch="release-snapshot/r4.1-abc", release_pr_number="12",
+            api_versions={"qod": "1.0.0-rc.1"}, commonalities_release="r4.4",
+            common_cache_status="stale", common_cache_details="d", common_sync_pr_url="u",
+        ))
+
+        issue_manager.generate_state_section.assert_called_once_with(
+            state="snapshot-active", snapshot_id="r4.1-abc", release_pr_url="https://github.com/org/repo/pull/12",
+            draft_release_url="", snapshot_branch_url="https://github.com/org/repo/tree/release-snapshot/r4.1-abc",
+        )
+        issue_manager.generate_config_section.assert_called_once_with(
+            release_plan=plan, api_versions={"qod": "1.0.0-rc.1"}, commonalities_release="r4.4", icm_release="",
+            common_cache_status="stale", common_cache_details="d", common_sync_pr_url="u",
+        )
+        issue_manager.generate_actions_section.assert_called_once_with(
+            state="snapshot-active", release_pr_url="https://github.com/org/repo/pull/12", release_tag="r4.1",
+        )
+
+    def test_without_a_snapshot_the_dependencies_come_from_the_plan(self):
+        manager, gh, issue_manager = self._create_manager()
+        gh.get_issue.return_value = self.issue()
+        plan = {**self.PLAN, "dependencies": {"commonalities_release": "r4.3", "identity_consent_management_release": "r4.2"}}
+
+        manager.sync_release_issue(plan, ReleaseView(state="planned", issue_number="1"))
+
+        kwargs = issue_manager.generate_config_section.call_args.kwargs
+        assert (kwargs["api_versions"], kwargs["commonalities_release"], kwargs["icm_release"]) == ({}, "r4.3", "r4.2")
 
 
 class TestReleaseIssuesPerLine:
@@ -443,14 +261,8 @@ class TestReleaseIssuesPerLine:
         gh.search_issues.return_value = open_issues
         current = next(i for i in open_issues if current_tag in i["body"])
         gh.get_issue.return_value = current
-        state_manager = MagicMock()
-        state_manager.get_current_snapshot.return_value = None
-        state_manager.derive_state.return_value = ReleaseInfoResult(
-            success=True, state=ReleaseState.PLANNED, release_tag=current_tag,
-            source="release-plan.yaml", base_branch=base_branch,
-        )
-        manager = IssueSyncManager(gh, state_manager, IssueManager(), MagicMock(), base_branch=base_branch)
-        return manager, gh, state_manager
+        manager = IssueSyncManager(gh, IssueManager(), base_branch)
+        return manager, gh, ReleaseView(state="planned", issue_number=str(current["number"]))
 
     @staticmethod
     def plan(tag):
@@ -458,36 +270,34 @@ class TestReleaseIssuesPerLine:
 
     def test_sync_on_main_leaves_the_maintenance_issue_open(self):
         # spec 5.1
-        manager, gh, state_manager = self.manager("main", "r2.2", [self.issue(1, "r2.2"), self.issue(2, "r1.9")])
+        manager, gh, view = self.manager("main", "r2.2", [self.issue(1, "r2.2"), self.issue(2, "r1.9")])
 
-        manager.sync_release_issue(self.plan("r2.2"))
+        manager.sync_release_issue(self.plan("r2.2"), view)
 
         gh.close_issue.assert_not_called()
-        state_manager.derive_state.assert_called_once_with(retry_draft_release=True, base_branch="main")
 
     def test_sync_on_the_maintenance_line_leaves_mains_issue_open(self):
         # spec 5.2
-        manager, gh, state_manager = self.manager(self.MB, "r1.9", [self.issue(1, "r2.2"), self.issue(2, "r1.9")])
+        manager, gh, view = self.manager(self.MB, "r1.9", [self.issue(1, "r2.2"), self.issue(2, "r1.9")])
 
-        manager.sync_release_issue(self.plan("r1.9"))
+        manager.sync_release_issue(self.plan("r1.9"), view)
 
         gh.close_issue.assert_not_called()
-        state_manager.derive_state.assert_called_once_with(retry_draft_release=True, base_branch=self.MB)
 
     def test_superseded_issue_on_the_same_line_is_closed(self):
         # spec 5.3: main moves r2.2 -> r2.3
-        manager, gh, _ = self.manager(
+        manager, gh, view = self.manager(
             "main", "r2.3", [self.issue(1, "r2.2"), self.issue(2, "r1.9"), self.issue(3, "r2.3")]
         )
 
-        manager.sync_release_issue(self.plan("r2.3"))
+        manager.sync_release_issue(self.plan("r2.3"), view)
 
         gh.close_issue.assert_called_once_with(1, state_reason="not_planned")
 
     def test_case_b_issue_title_names_the_line(self):
         # spec 5.4
         gh = MagicMock()
-        manager = IssueSyncManager(gh, MagicMock(), IssueManager(), MagicMock(), base_branch=self.MB)
+        manager = IssueSyncManager(gh, IssueManager(), self.MB)
 
         manager.create_release_issue(
             {"repository": {"target_release_tag": "r1.9", "target_release_type": "maintenance-release"}}
@@ -507,7 +317,7 @@ class TestCreateReleaseIssue:
         issue_manager.generate_title.return_value = "Release r4.1 (RC)"
         issue_manager.generate_issue_body_template.return_value = f"Body\n{WORKFLOW_MARKER}"
 
-        manager = IssueSyncManager(gh, MagicMock(), issue_manager, MagicMock())
+        manager = IssueSyncManager(gh, issue_manager, "main")
 
         release_plan = {
             "repository": {
@@ -516,7 +326,7 @@ class TestCreateReleaseIssue:
             }
         }
 
-        manager.create_release_issue(release_plan, trigger_pr=123)
+        manager.create_release_issue(release_plan)
 
         gh.create_issue.assert_called_once()
         call_args = gh.create_issue.call_args
@@ -532,7 +342,7 @@ class TestCreateReleaseIssue:
         # Body without marker - should be added
         issue_manager.generate_issue_body_template.return_value = "### Release Highlights\nContent"
 
-        manager = IssueSyncManager(gh, MagicMock(), issue_manager, MagicMock())
+        manager = IssueSyncManager(gh, issue_manager, "main")
 
         release_plan = {
             "repository": {
@@ -555,7 +365,7 @@ class TestNeedsUpdate:
         issue_manager = MagicMock()
         issue_manager.should_update_title.return_value = False
 
-        manager = IssueSyncManager(MagicMock(), MagicMock(), issue_manager, MagicMock())
+        manager = IssueSyncManager(MagicMock(), issue_manager, "main")
 
         issue = {
             "labels": [{"name": "release-state:planned"}]
@@ -569,7 +379,7 @@ class TestNeedsUpdate:
         issue_manager = MagicMock()
         issue_manager.should_update_title.return_value = False
 
-        manager = IssueSyncManager(MagicMock(), MagicMock(), issue_manager, MagicMock())
+        manager = IssueSyncManager(MagicMock(), issue_manager, "main")
 
         issue = {
             "labels": [{"name": "release-state:snapshot-active"}]
@@ -588,7 +398,7 @@ class TestNeedsUpdate:
         issue_manager = MagicMock()
         issue_manager.should_update_title.return_value = False
 
-        manager = IssueSyncManager(MagicMock(), MagicMock(), issue_manager, MagicMock())
+        manager = IssueSyncManager(MagicMock(), issue_manager, "main")
 
         issue = {
             "labels": [{"name": "release-state:planned"}]
@@ -602,7 +412,7 @@ class TestNeedsUpdate:
         issue_manager = MagicMock()
         issue_manager.should_update_title.return_value = True
 
-        manager = IssueSyncManager(MagicMock(), MagicMock(), issue_manager, MagicMock())
+        manager = IssueSyncManager(MagicMock(), issue_manager, "main")
 
         issue = {
             "title": "Old title",
@@ -624,7 +434,7 @@ class TestUpdateReleaseIssue:
         issue_manager.generate_state_section.return_value = "new state"
         issue_manager.update_section.return_value = "same body"
 
-        manager = IssueSyncManager(gh, MagicMock(), issue_manager, MagicMock())
+        manager = IssueSyncManager(gh, issue_manager, "main")
 
         issue = {
             "number": 1,
@@ -632,7 +442,7 @@ class TestUpdateReleaseIssue:
             "labels": [{"name": "release-state:planned"}]
         }
 
-        manager._update_release_issue(issue, ReleaseState.SNAPSHOT_ACTIVE, {})
+        manager._update_release_issue(issue, ReleaseState.SNAPSHOT_ACTIVE, {}, ReleaseView(state="snapshot-active"))
 
         gh.remove_labels.assert_called_with(1, ["release-state:planned"])
         gh.add_labels.assert_called_with(1, ["release-state:snapshot-active"])
@@ -645,7 +455,7 @@ class TestUpdateReleaseIssue:
         issue_manager.generate_state_section.return_value = "new state"
         issue_manager.update_section.return_value = "same body"
 
-        manager = IssueSyncManager(gh, MagicMock(), issue_manager, MagicMock())
+        manager = IssueSyncManager(gh, issue_manager, "main")
 
         issue = {
             "number": 1,
@@ -653,7 +463,7 @@ class TestUpdateReleaseIssue:
             "labels": [{"name": "release-issue"}, {"name": "release-state:planned"}]
         }
 
-        manager._update_release_issue(issue, ReleaseState.PLANNED, {})
+        manager._update_release_issue(issue, ReleaseState.PLANNED, {}, ReleaseView(state="planned"))
 
         gh.remove_labels.assert_not_called()
         gh.add_labels.assert_not_called()
@@ -666,7 +476,7 @@ class TestUpdateReleaseIssue:
         issue_manager.generate_state_section.return_value = "new state"
         issue_manager.update_section.return_value = "same body"
 
-        manager = IssueSyncManager(gh, MagicMock(), issue_manager, MagicMock())
+        manager = IssueSyncManager(gh, issue_manager, "main")
 
         issue = {
             "number": 1,
@@ -677,7 +487,7 @@ class TestUpdateReleaseIssue:
             ]
         }
 
-        manager._update_release_issue(issue, ReleaseState.PLANNED, {})
+        manager._update_release_issue(issue, ReleaseState.PLANNED, {}, ReleaseView(state="planned"))
 
         gh.remove_labels.assert_called_with(1, ["release-state:snapshot-active"])
         gh.add_labels.assert_not_called()
@@ -690,7 +500,7 @@ class TestUpdateReleaseIssue:
         issue_manager.generate_state_section.return_value = "new state"
         issue_manager.update_section.return_value = "new body"  # Different from current
 
-        manager = IssueSyncManager(gh, MagicMock(), issue_manager, MagicMock())
+        manager = IssueSyncManager(gh, issue_manager, "main")
 
         issue = {
             "number": 1,
@@ -698,7 +508,7 @@ class TestUpdateReleaseIssue:
             "labels": []
         }
 
-        manager._update_release_issue(issue, ReleaseState.PLANNED, {})
+        manager._update_release_issue(issue, ReleaseState.PLANNED, {}, ReleaseView(state="planned"))
 
         gh.update_issue.assert_called()
         call_args = gh.update_issue.call_args
@@ -710,7 +520,7 @@ class TestGetStateLabel:
 
     def test_returns_correct_label_for_each_state(self):
         """Test correct label returned for each state."""
-        manager = IssueSyncManager(MagicMock(), MagicMock(), MagicMock(), MagicMock())
+        manager = IssueSyncManager(MagicMock(), MagicMock(), "main")
 
         assert manager.get_state_label(ReleaseState.PLANNED) == "release-state:planned"
         assert manager.get_state_label(ReleaseState.SNAPSHOT_ACTIVE) == "release-state:snapshot-active"
@@ -738,7 +548,7 @@ class TestEnsureLabelsExist:
         gh = MagicMock()
         gh.get_label.return_value = None  # All labels missing
 
-        manager = IssueSyncManager(gh, MagicMock(), MagicMock(), MagicMock())
+        manager = IssueSyncManager(gh, MagicMock(), "main")
         created = manager.ensure_labels_exist()
 
         assert len(created) == 6
@@ -750,7 +560,7 @@ class TestEnsureLabelsExist:
         # Only release-issue exists
         gh.get_label.side_effect = lambda name: {"name": name} if name == "release-issue" else None
 
-        manager = IssueSyncManager(gh, MagicMock(), MagicMock(), MagicMock())
+        manager = IssueSyncManager(gh, MagicMock(), "main")
         created = manager.ensure_labels_exist()
 
         assert len(created) == 5  # 6 - 1 = 5 created
@@ -762,7 +572,7 @@ class TestEnsureLabelsExist:
         gh = MagicMock()
         gh.get_label.return_value = None
 
-        manager = IssueSyncManager(gh, MagicMock(), MagicMock(), MagicMock())
+        manager = IssueSyncManager(gh, MagicMock(), "main")
 
         # First call
         created1 = manager.ensure_labels_exist()
@@ -780,7 +590,7 @@ class TestEnsureLabelsExist:
         gh = MagicMock()
         gh.get_label.return_value = None
 
-        manager = IssueSyncManager(gh, MagicMock(), MagicMock(), MagicMock())
+        manager = IssueSyncManager(gh, MagicMock(), "main")
         created = manager.ensure_labels_exist()
 
         expected_names = RELEASE_ISSUE_LABELS
@@ -791,7 +601,7 @@ class TestEnsureLabelsExist:
         gh = MagicMock()
         gh.get_label.return_value = None
 
-        manager = IssueSyncManager(gh, MagicMock(), MagicMock(), MagicMock())
+        manager = IssueSyncManager(gh, MagicMock(), "main")
         manager.ensure_labels_exist()
 
         # Check one specific label
@@ -809,22 +619,12 @@ class TestSyncReleaseIssueWithLabels:
     def test_ensures_labels_before_operations(self):
         """Test ensure_labels_exist is called during sync."""
         gh = MagicMock()
-        state_manager = MagicMock()
         gh.get_label.return_value = None  # All labels missing
-        state_manager.derive_state.return_value = ReleaseInfoResult(
-            success=True, state=ReleaseState.NOT_PLANNED,
-            release_tag="r4.1", source="release-plan.yaml")
         gh.search_issues.return_value = []
 
-        manager = IssueSyncManager(gh, state_manager, MagicMock(), MagicMock())
+        manager = IssueSyncManager(gh, MagicMock(), "main")
 
-        release_plan = {
-            "repository": {
-                "target_release_tag": "r4.1"
-            }
-        }
-
-        manager.sync_release_issue(release_plan)
+        manager.sync_release_issue({"repository": {"target_release_tag": "r4.1"}}, ReleaseView(state="not-planned"))
 
         # Labels should have been ensured
         assert gh.create_label.call_count == 6
@@ -851,7 +651,7 @@ class TestFinalizePublishedIssue:
             "body": PUBLISHED_BODY,
             "labels": [{"name": "release-issue"}, {"name": "release-state:draft-ready"}],
         }
-        manager = IssueSyncManager(gh, issue_manager=IssueManager())
+        manager = IssueSyncManager(gh, issue_manager=IssueManager(), base_branch="main")
         return manager.finalize_published_issue(
             issue_number=42,
             release_tag="r4.1",
@@ -951,74 +751,56 @@ def test_post_publish_warnings(publish_warnings, sync_status, expected):
 
 
 
-# ── sync_for_workflow: the former sync-release-issue composite ───────────────
+# ── sync_for_workflow: the Release Issue sync of the finalize job ────────────
 
-from release_automation.scripts import issue_sync as issue_sync_mod  # noqa: E402
 from release_automation.scripts.issue_sync import WorkflowSync, sync_for_workflow  # noqa: E402
 
 PLAN_YAML = "repository:\n  target_release_tag: r4.1\n  target_release_type: pre-release-alpha\n"
 
 
 class TestSyncForWorkflow:
-    def run(self, monkeypatch, tmp_path, result=None, plan=PLAN_YAML, raises=None, **kwargs):
+    def run(self, monkeypatch, tmp_path, result=None, plan=PLAN_YAML, raises=None, view=None, **plan_fields):
         gh = MagicMock()
         gh.get_file_content.return_value = plan
         calls = {}
 
-        def fake_sync(self, release_plan, **kw):
-            calls.update(release_plan=release_plan, **kw)
+        def fake_sync(self, release_plan, view):
+            calls.update(release_plan=release_plan, view=view, base_branch=self.base_branch)
             if raises:
                 raise raises
             return result
 
         monkeypatch.setattr(IssueSyncManager, "sync_release_issue", fake_sync)
         summary = tmp_path / "summary"
-        args = dict(release_tag="r4.1", state="planned")
-        args.update(kwargs)
-        outcome = sync_for_workflow(gh, summary_path=str(summary), **args)
-        return outcome, calls, summary.read_text() if summary.exists() else ""
+        document = make_plan(**{"release_tag": "r4.1", "state": "planned", "base_branch": "main", **plan_fields})
+        outcome = sync_for_workflow(gh, document, view or ReleaseView(state=document.state), summary_path=str(summary))
+        return outcome, calls, summary.read_text() if summary.exists() else "", gh
 
     def test_created(self, monkeypatch, tmp_path):
         issue = {"number": 7, "html_url": "https://github.com/o/r/issues/7"}
+        view = ReleaseView(state="snapshot-active", snapshot_branch="release-snapshot/r4.1-abc", release_pr_number="12",
+                           common_cache_status="stale", common_cache_details="d", common_sync_pr_url="u")
 
-        outcome, calls, _ = self.run(
-            monkeypatch, tmp_path, SyncResult(action="created", issue=issue),
-            state_override="snapshot-active", snapshot_branch_override="release-snapshot/r4.1-abc",
-            release_pr_number_override="12", force_update=True,
-            common_cache_status="stale", common_cache_details="d", common_sync_pr_url="u",
-        )
+        outcome, calls, _, _ = self.run(monkeypatch, tmp_path, SyncResult(action="created", issue=issue), view=view)
 
         assert outcome == WorkflowSync(issue_number="7", issue_action="created", issue_url="https://github.com/o/r/issues/7")
         assert calls["release_plan"]["repository"]["target_release_tag"] == "r4.1"
-        assert calls["state_override"] == ReleaseState.SNAPSHOT_ACTIVE
-        assert calls["snapshot_branch_override"] == "release-snapshot/r4.1-abc"
-        assert calls["release_pr_number_override"] == "12"
-        assert calls["draft_release_url_override"] is None
-        assert calls["force_update"] is True
-        assert (calls["common_cache_status"], calls["common_cache_details"], calls["common_sync_pr_url"]) == ("stale", "d", "u")
+        assert calls["view"] is view
 
     def test_reads_the_plan_of_the_base_branch(self, monkeypatch, tmp_path):
-        gh = MagicMock()
-        gh.get_file_content.return_value = PLAN_YAML
-        seen = {}
-        monkeypatch.setattr(
-            IssueSyncManager, "sync_release_issue",
-            lambda self, release_plan, **kw: seen.setdefault("base", self.base_branch) and SyncResult(action="none"),
-        )
-
-        sync_for_workflow(gh, release_tag="r4.1", state="planned", base_branch="maintenance/r4")
+        _, calls, _, gh = self.run(monkeypatch, tmp_path, SyncResult(action="none"), base_branch="maintenance/r4")
 
         gh.get_file_content.assert_called_once_with("release-plan.yaml", ref="maintenance/r4")
-        assert seen["base"] == "maintenance/r4"
+        assert calls["base_branch"] == "maintenance/r4"
 
     def test_no_action_is_unchanged(self, monkeypatch, tmp_path):
-        outcome, _, summary = self.run(monkeypatch, tmp_path, SyncResult(action="none", reason="up_to_date"))
+        outcome, _, summary, _ = self.run(monkeypatch, tmp_path, SyncResult(action="none", reason="up_to_date"))
 
         assert outcome == WorkflowSync(issue_action="unchanged")
         assert summary == ""
 
     def test_no_planned_release_writes_summary(self, monkeypatch, tmp_path):
-        outcome, _, summary = self.run(monkeypatch, tmp_path, SyncResult(action="none", reason="no_planned_release"))
+        outcome, _, summary, _ = self.run(monkeypatch, tmp_path, SyncResult(action="none", reason="no_planned_release"))
 
         assert outcome == WorkflowSync(issue_action="unchanged")
         assert summary == (
@@ -1027,9 +809,8 @@ class TestSyncForWorkflow:
             "No open Release Issue exists.\n"
         )
 
-    @pytest.mark.parametrize("state,override", [("published", ""), ("planned", "published")])
-    def test_published_is_skipped_with_summary(self, monkeypatch, tmp_path, state, override):
-        outcome, calls, summary = self.run(monkeypatch, tmp_path, state=state, state_override=override)
+    def test_published_is_skipped_with_summary(self, monkeypatch, tmp_path):
+        outcome, calls, summary, _ = self.run(monkeypatch, tmp_path, view=ReleaseView(state="published"))
 
         assert outcome == WorkflowSync(issue_action="skipped")
         assert calls == {}
@@ -1039,36 +820,19 @@ class TestSyncForWorkflow:
         )
 
     def test_without_release_tag_is_skipped(self, monkeypatch, tmp_path):
-        outcome, calls, _ = self.run(monkeypatch, tmp_path, release_tag="")
+        outcome, calls, _, _ = self.run(monkeypatch, tmp_path, release_tag="")
 
         assert outcome == WorkflowSync(issue_action="skipped")
         assert calls == {}
 
     @pytest.mark.parametrize("plan", [None, "a: [", "- just a list\n"])
     def test_unreadable_release_plan_is_skipped(self, monkeypatch, tmp_path, plan):
-        outcome, calls, _ = self.run(monkeypatch, tmp_path, plan=plan)
+        outcome, calls, _, _ = self.run(monkeypatch, tmp_path, plan=plan)
 
         assert outcome == WorkflowSync(issue_action="skipped")
         assert calls == {}
 
-    def test_unknown_override_is_an_error(self, monkeypatch, tmp_path):
-        outcome, calls, _ = self.run(monkeypatch, tmp_path, state_override="bogus")
-
-        assert outcome == WorkflowSync(issue_action="error")
-        assert calls == {}
-
-    @pytest.mark.parametrize("value,state", [
-        ("draft-ready", ReleaseState.DRAFT_READY),
-        ("draft_ready", ReleaseState.DRAFT_READY),
-        ("PLANNED", ReleaseState.PLANNED),
-        ("not-planned", ReleaseState.NOT_PLANNED),
-    ])
-    def test_override_spellings(self, monkeypatch, tmp_path, value, state):
-        _, calls, _ = self.run(monkeypatch, tmp_path, SyncResult(action="none"), state_override=value)
-
-        assert calls["state_override"] == state
-
     def test_sync_exception_is_an_error(self, monkeypatch, tmp_path):
-        outcome, _, _ = self.run(monkeypatch, tmp_path, raises=RuntimeError("boom"))
+        outcome, _, _, _ = self.run(monkeypatch, tmp_path, raises=RuntimeError("boom"))
 
         assert outcome == WorkflowSync(issue_action="error")

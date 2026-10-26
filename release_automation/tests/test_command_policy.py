@@ -90,7 +90,7 @@ def slash(command, user="alice", args="", confirm_tag=""):
 
 def info(state, release_tag="r1.2", release_type="pre-release-alpha"):
     return ReleaseInfoResult(
-        success=True, release_tag=release_tag, state=state, release_type=release_type
+        success=True, release_tag=release_tag, state=state, release_type=release_type, base_branch="main"
     )
 
 
@@ -400,6 +400,7 @@ def test_slash_command_plan_responds_with_interim(command):
         release_tag="r1.2",
         state=state.value,
         release_type="pre-release-alpha",
+        base_branch="main",
         response="interim_processing",
         action="" if command == "sync-issue" else command,
     )
@@ -430,6 +431,7 @@ def test_non_slash_triggers_are_not_validated(trigger, state):
         release_tag="r1.2",
         state=state.value,
         release_type="pre-release-alpha",
+        base_branch="main",
         response="",
         action=policy.action_for(result),
     )
@@ -580,8 +582,8 @@ def test_plan_and_rejection_serialise_to_json():
         "release_tag": "r1.2",
         "state": "draft-ready",
         "release_type": "pre-release-alpha",
-        "confirm_tag": "",
         "base_branch": "main",
+        "confirm_tag": "",
         "publish_mode": "draft",
         "response": "publish_confirmation",
         "action": "",

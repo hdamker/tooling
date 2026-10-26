@@ -238,10 +238,26 @@ def test_finalize_and_act_read_the_typed_plan_document():
         assert "PlanDocument" in source, name
         assert not re.search(r'plan\["|\.plan\("', source), name
     jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
-    # The workflow reads two top-level fields of the document and one nested one
+    # The workflow reads one field of the document (the checkout ref); the steps take the document
     text = WORKFLOW.read_text(encoding="utf-8")
-    assert set(re.findall(r"fromJSON\(needs\.plan\.outputs\.plan\)\.([a-z_.]+)", text)) == {"base_branch", "release.release_tag"}
+    assert set(re.findall(r"fromJSON\(needs\.plan\.outputs\.plan\)\.([a-z_.]+)", text)) == {"base_branch"}
     assert jobs["act"]["steps"][-1]["env"]["PLAN_JSON"] == "${{ needs.plan.outputs.plan }}"
+    create = _step_by_name(jobs["snapshot"]["steps"], "Create Snapshot")
+    assert create["env"]["PLAN_JSON"] == "${{ needs.plan.outputs.plan }}"
+
+
+def test_snapshot_creation_is_a_module_step_on_the_plan():
+    # 107 D3: the create-snapshot composite is gone; the step takes the plan document
+    steps = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["snapshot"]["steps"]
+    create = _step_by_name(steps, "Create Snapshot")
+
+    assert create["id"] == "create"
+    assert create["run"].strip() == "python -m release_automation.scripts.snapshot_prep create"
+    assert create["env"]["GITHUB_TOKEN"] == "${{ steps.app-token.outputs.token || github.token }}"
+    assert create["env"]["TOOLING_PATH"] == "${{ github.workspace }}/_tooling"
+    assert create["env"]["BOT_NAME"] == "${{ steps.bot-identity.outputs.bot_name }}"
+    assert not [s for s in steps if str(s.get("uses", "")).startswith("./_tooling/shared-actions/create-snapshot")]
+    assert not (ROOT / "shared-actions" / "create-snapshot").exists()
 
 
 def test_snapshot_glue_runs_in_python_with_inputs_in_env():

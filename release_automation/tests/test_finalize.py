@@ -21,9 +21,9 @@ from release_automation.scripts.finalize import (
     result_due,
     reported_state,
     result_template,
-    sync_overrides,
+    release_view,
 )
-from release_automation.scripts.issue_sync import WorkflowSync
+from release_automation.scripts.issue_sync import ReleaseView, WorkflowSync
 from release_automation.scripts.sync_pr import SyncPrOutcome
 from release_automation.tests.plans import make_plan
 
@@ -123,57 +123,92 @@ def test_result_due(plan, due):
     assert result_due(make_run(plan)) is due
 
 
-# ── Resolve Sync Context ─────────────────────────────────────────────────────
+# ── the release view the issue sync shows (107 D3: no re-derivation in finalize) ──
 
 
-def test_overrides_after_create_snapshot():
-    run = make_run(jobs={"create-snapshot": ok(snapshot_branch="release-snapshot/r4.1-new", release_pr_number="12")})
+def test_view_after_create_snapshot():
+    apis = json.dumps([{"api_name": "qod", "api_version": "1.0.0-rc.1"}])
+    run = make_run(jobs={"create-snapshot": ok(
+        snapshot_id="r4.1-new", snapshot_branch="release-snapshot/r4.1-new", release_pr_number="12", apis_json=apis,
+    )})
 
-    assert sync_overrides(run) == {
-        "state_override": "snapshot-active",
-        "snapshot_branch_override": "release-snapshot/r4.1-new",
-        "release_pr_number_override": "12",
-        "draft_release_url_override": "",
-        "force_update": True,
-    }
+    assert release_view(run) == ReleaseView(
+        state="snapshot-active", issue_number="42", snapshot_id="r4.1-new",
+        snapshot_branch="release-snapshot/r4.1-new", release_pr_number="12",
+        api_versions={"qod": "1.0.0-rc.1"}, commonalities_release="r4.3", refresh=True,
+    )
 
 
-def test_overrides_after_draft_creation():
+def test_view_after_draft_creation():
     run = make_run(
-        {"trigger_type": "pr_merge"},
+        {"trigger_type": "pr_merge", "state": "snapshot-active", "snapshot_id": "r4.1-abc1234",
+         "release_pr_number": "13", "apis": [{"api_name": "qod", "api_version": "1.0.0-rc.1"}]},
         {"create-draft": ok(draft_release_url="https://github.com/camaraproject/Example/releases/tag/untagged-1",
                             release_pr_number="14")},
     )
 
-    assert sync_overrides(run) == {
-        "state_override": "draft-ready",
-        "snapshot_branch_override": "release-snapshot/r4.1-abc1234",
-        "release_pr_number_override": "14",
-        "draft_release_url_override": "https://github.com/camaraproject/Example/releases/tag/untagged-1",
-        "force_update": True,
-    }
+    view = release_view(run)
+
+    assert (view.state, view.issue_number, view.refresh) == ("draft-ready", "42", True)
+    # The plan's snapshot, the merged PR of the outcome
+    assert (view.snapshot_id, view.snapshot_branch, view.release_pr_number) == ("r4.1-abc1234", "release-snapshot/r4.1-abc1234", "14")
+    assert view.draft_release_url == "https://github.com/camaraproject/Example/releases/tag/untagged-1"
+    assert view.api_versions == {"qod": "1.0.0-rc.1"}
 
 
 @pytest.mark.parametrize("job", ["discard-snapshot", "delete-draft"])
-def test_overrides_after_discard_or_delete(job):
-    assert sync_overrides(make_run(jobs={job: ok()})) == {
-        "state_override": "planned",
-        "snapshot_branch_override": "",
-        "release_pr_number_override": "",
-        "draft_release_url_override": "",
-        "force_update": True,
-    }
+def test_view_after_discard_or_delete_has_no_artifacts(job):
+    run = make_run({"state": "snapshot-active", "snapshot_id": "r4.1-abc1234", "release_pr_number": "13",
+                    "apis": [{"api_name": "qod", "api_version": "1.0.0-rc.1"}]}, jobs={job: ok()})
+
+    view = release_view(run)
+
+    assert (view.state, view.refresh) == ("planned", True)
+    assert (view.snapshot_id, view.snapshot_branch, view.release_pr_number, view.draft_release_url) == ("", "", "", "")
+    assert view.api_versions == {} and view.commonalities_release == ""
 
 
-@pytest.mark.parametrize("plan,force", [({"command": "sync-issue"}, True), ({"trigger_type": "issue_close", "command": ""}, False)])
-def test_overrides_without_a_state_change(plan, force):
-    assert sync_overrides(make_run(plan)) == {
-        "state_override": "",
-        "snapshot_branch_override": "",
-        "release_pr_number_override": "",
-        "draft_release_url_override": "",
-        "force_update": force,
-    }
+def test_view_of_a_failed_command_keeps_the_plans_state():
+    run = make_run({"state": "planned"}, jobs={"create-snapshot": failed(error_message="boom")})
+
+    assert release_view(run).state == "planned"
+
+
+@pytest.mark.parametrize("plan,refresh", [
+    ({"command": "sync-issue"}, True),
+    ({"trigger_type": "push", "command": "sync-issue"}, True),
+    ({"trigger_type": "issue_close", "command": ""}, False),
+    ({"trigger_type": "issue_reopen", "command": ""}, False),
+])
+def test_view_refreshes_except_on_issue_events(plan, refresh):
+    assert release_view(make_run(plan)).refresh is refresh
+
+
+def test_view_of_a_sync_in_snapshot_active_takes_the_plans_artifacts():
+    run = make_run({"command": "sync-issue", "state": "snapshot-active", "snapshot_id": "r4.1-abc1234",
+                    "release_pr_number": "13", "apis": [{"api_name": "qod", "api_version": "1.0.0-rc.1"}],
+                    "common_cache_status": "stale", "common_cache_details": "d", "common_sync_pr_url": "u"})
+
+    view = release_view(run, "https://x/pull/40")
+
+    assert (view.snapshot_id, view.release_pr_number, view.api_versions) == ("r4.1-abc1234", "13", {"qod": "1.0.0-rc.1"})
+    assert (view.common_cache_status, view.common_cache_details, view.common_sync_pr_url) == ("stale", "d", "https://x/pull/40")
+
+
+def test_view_after_reopen_names_the_reopened_issue():
+    # The plan found no open issue (it was closed); the sync writes the one act reopened
+    run = make_run({"trigger_type": "issue_close", "command": "", "state": "snapshot-active",
+                    "release_issue_number": "", "issue_number": "42"},
+                   {"reopen-issue": ok(action_taken="reopened")})
+
+    assert release_view(run).issue_number == "42"
+
+
+def test_view_after_a_close_in_planned_names_no_issue():
+    # A new Release Issue gets created; the closed one stays closed
+    run = make_run({"trigger_type": "issue_close", "command": "", "state": "planned", "release_issue_number": "", "issue_number": "42"})
+
+    assert release_view(run).issue_number == ""
 
 
 # ── notifications after the issue sync ───────────────────────────────────────
@@ -482,9 +517,9 @@ def stubs(monkeypatch):
         gh.events.append(("common-sync", release, None))
         return calls.get("common_outcome", CommonSyncOutcome(status="created", pr_url="https://github.com/camaraproject/Example/pull/40", pr_number="40"))
 
-    def fake_issue_sync(gh, **kwargs):
-        calls["issue_sync"] = kwargs
-        gh.events.append(("issue-sync", kwargs["release_tag"], None))
+    def fake_issue_sync(gh, plan, view, summary_path=""):
+        calls["issue_sync"] = view
+        gh.events.append(("issue-sync", plan.release_tag, None))
         return calls.get("issue_sync_outcome", WorkflowSync(issue_number="42", issue_action="updated", issue_url="u"))
 
     monkeypatch.setattr(sync_pr_mod, "create_sync_pr", fake_sync_pr)
@@ -653,7 +688,7 @@ def test_sync_issue_command(stubs, tmp_path):
     report = run_finalize(make_run({"command": "sync-issue"}), clients(gh, tmp_path))
 
     assert kinds(gh) == ["issue-sync", "update"]
-    assert stubs["issue_sync"]["force_update"] is True
+    assert stubs["issue_sync"].refresh is True
     body = gh.events[1][2]
     assert body.startswith("<!-- release-bot:r4.1 -->\n**🔄 Release Issue synced — State: `planned`**")
     assert "**Valid actions:**<br>→ **`/create-snapshot` — begin the release process**" in body
@@ -676,7 +711,7 @@ def test_stale_cache_runs_common_sync_before_the_issue_sync(stubs, tmp_path):
         "commonalities": ("camaraproject/Commonalities", None),
         "release": "r4.3",
     }
-    assert stubs["issue_sync"]["common_sync_pr_url"] == "https://github.com/camaraproject/Example/pull/40"
+    assert stubs["issue_sync"].common_sync_pr_url == "https://github.com/camaraproject/Example/pull/40"
     _, issue, body = gh.events[2]
     assert issue == 42
     assert body.startswith("<!-- release-bot:r4.1 -->\n**Common file sync: [sync PR](https://github.com/camaraproject/Example/pull/40) created**")
@@ -689,7 +724,7 @@ def test_issue_sync_falls_back_to_the_plans_sync_pr(stubs, tmp_path):
 
     run_finalize(run, clients(FakeGitHub(), tmp_path))
 
-    assert stubs["issue_sync"]["common_sync_pr_url"] == "https://x/pull/3"
+    assert stubs["issue_sync"].common_sync_pr_url == "https://x/pull/3"
 
 
 def test_issue_sync_error_posts_no_notifications_but_the_result(stubs, tmp_path):

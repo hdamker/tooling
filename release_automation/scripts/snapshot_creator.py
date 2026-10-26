@@ -25,7 +25,6 @@ from .mechanical_transformer import MechanicalTransformer, TransformationContext
 from .metadata_generator import MetadataGenerator
 from .readme_updater import ReadmeUpdater, ReadmeUpdateError
 from .release_line import tag_version
-from .state_manager import ReleaseState, ReleaseStateManager
 from .template_loader import render_template
 from .version_calculator import VersionCalculator
 from .wip_checker import check_wip_versions
@@ -36,11 +35,16 @@ COMPARE_BASE_UNSET = object()
 
 @dataclass
 class SnapshotConfig:
-    """Configuration for snapshot creation."""
+    """
+    What the snapshot is cut from: the plan's release tag and base branch, and
+    the Release Issue the Release PR links (both from the plan document; the
+    plan decided that the state allows a snapshot).
+    """
     release_tag: str
-    base_branch: str = "main"
+    base_branch: str
     src_commit_sha: Optional[str] = None
     dry_run: bool = False
+    release_issue_number: Optional[int] = None
     # Note: commonalities_release and icm_release are derived from
     # release_plan['dependencies'], not passed via config
 
@@ -93,11 +97,6 @@ class SnapshotCreatorError(Exception):
     pass
 
 
-class InvalidStateError(SnapshotCreatorError):
-    """Raised when snapshot creation attempted in invalid state."""
-    pass
-
-
 class TransformationError(SnapshotCreatorError):
     """Raised when transformations fail critically."""
     pass
@@ -129,7 +128,6 @@ class SnapshotCreator:
         version_calculator: VersionCalculator,
         transformer: MechanicalTransformer,
         metadata_generator: MetadataGenerator,
-        state_manager: ReleaseStateManager,
         bot_name: str = "github-actions[bot]",
         bot_email: str = "41898282+github-actions[bot]@users.noreply.github.com",
     ):
@@ -141,7 +139,6 @@ class SnapshotCreator:
             version_calculator: VersionCalculator for API version extensions
             transformer: MechanicalTransformer for placeholder replacements
             metadata_generator: MetadataGenerator for release-metadata.yaml
-            state_manager: ReleaseStateManager for state validation
             bot_name: Git committer name for snapshot commits
             bot_email: Git committer email for snapshot commits
         """
@@ -149,7 +146,6 @@ class SnapshotCreator:
         self.version_calc = version_calculator
         self.transformer = transformer
         self.metadata_gen = metadata_generator
-        self.state_manager = state_manager
         self.bot_name = bot_name
         self.bot_email = bot_email
 
@@ -174,13 +170,8 @@ class SnapshotCreator:
         release_review_branch = None
 
         try:
-            # Step 1: Validate preconditions
-            errors = self.validate_preconditions(config.release_tag, config.base_branch)
-            if errors:
-                result.errors = errors
-                return result
-
-            # Step 2: Get source commit SHA
+            # Step 2: Get source commit SHA (the plan job decided that the
+            # state allows a snapshot; the concurrency group holds since)
             if config.src_commit_sha:
                 base_sha = config.src_commit_sha
             else:
@@ -361,14 +352,13 @@ class SnapshotCreator:
                 api_versions,
                 release_plan,
                 api_comparison_baselines,
+                release_issue_number=config.release_issue_number,
             )
             result.release_pr_number = pr_info.number
             result.release_pr_url = pr_info.url
 
             result.success = True
 
-        except InvalidStateError as e:
-            result.errors.append(str(e))
         except DependencyResolutionError as e:
             result.errors.append(str(e))
         except TransformationError as e:
@@ -473,59 +463,6 @@ class SnapshotCreator:
                 "version": icm_version,
             }
         return enriched_plan
-
-    def validate_preconditions(self, release_tag: str, base_branch: str = "main") -> List[str]:
-        """
-        Validate all preconditions for snapshot creation.
-
-        Checks:
-        1. Current state is PLANNED
-        2. No existing snapshot branch for this release
-
-        Args:
-            release_tag: Release tag to validate
-
-        Returns:
-            List of error messages (empty if valid)
-        """
-        errors = []
-
-        # Check current state
-        release_info = self.state_manager.derive_state(base_branch=base_branch)
-        if not release_info.success:
-            errors.append(
-                f"Configuration error: {release_info.config_error.message}"
-            )
-            return errors
-        state = release_info.state
-
-        if state == ReleaseState.PUBLISHED:
-            errors.append(
-                f"Release {release_tag} is already published. "
-                "Cannot create snapshot for a published release."
-            )
-        elif state == ReleaseState.SNAPSHOT_ACTIVE:
-            errors.append(
-                f"A snapshot already exists for {release_tag}. "
-                "Use /discard-snapshot first if you want to create a new one."
-            )
-        elif state == ReleaseState.DRAFT_READY:
-            errors.append(
-                f"A draft release already exists for {release_tag}. "
-                "Use /delete-draft first if you want to start over."
-            )
-        elif state == ReleaseState.NOT_PLANNED:
-            errors.append(
-                f"Release {release_tag} is not planned. "
-                "Update release-plan.yaml to set target_release_type to a valid value."
-            )
-        elif state != ReleaseState.PLANNED:
-            errors.append(
-                f"Unexpected state '{state.value}' for {release_tag}. "
-                "Expected PLANNED state for snapshot creation."
-            )
-
-        return errors
 
     def generate_snapshot_id(self, release_tag: str, commit_sha: str) -> str:
         """
@@ -655,6 +592,7 @@ class SnapshotCreator:
         api_versions: Dict[str, str],
         release_plan: Dict[str, Any],
         api_comparison_baselines: Optional[Dict[str, str]] = None,
+        release_issue_number: Optional[int] = None,
     ) -> PullRequestInfo:
         """
         Create the Release PR.
@@ -666,6 +604,7 @@ class SnapshotCreator:
             api_versions: Calculated API versions
             release_plan: Release plan dict
             api_comparison_baselines: Previous API version by api_name
+            release_issue_number: The Release Issue the PR body links, if one exists
 
         Returns:
             PullRequestInfo with PR number and URL
@@ -728,7 +667,6 @@ class SnapshotCreator:
             f"https://github.com/{self.gh.repo}/tree/"
             f"{self.SNAPSHOT_BRANCH_PREFIX}/{snapshot_id}"
         )
-        release_issue_number = self.state_manager.find_release_issue(release_tag)
         release_issue_url = (
             f"https://github.com/{self.gh.repo}/issues/{release_issue_number}"
             if release_issue_number else ""

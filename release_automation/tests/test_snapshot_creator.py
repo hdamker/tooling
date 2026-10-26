@@ -9,21 +9,15 @@ These tests verify the orchestration of snapshot creation including:
 - Error handling and cleanup
 """
 
-import os
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from dataclasses import dataclass
 
 from release_automation.scripts.snapshot_creator import (
     SnapshotCreator,
     SnapshotConfig,
     SnapshotResult,
-    SnapshotCreatorError,
-    InvalidStateError,
-    TransformationError,
 )
 from release_automation.scripts.version_calculator import VersionCalculator
-from release_automation.scripts.state_manager import ReleaseInfoResult, ReleaseState
 from release_automation.scripts.mechanical_transformer import TransformationResult
 from release_automation.scripts.git_operations import PullRequestInfo, GitOperationsError
 
@@ -87,16 +81,6 @@ def mock_metadata_generator():
 
 
 @pytest.fixture
-def mock_state_manager():
-    """Create a mock ReleaseStateManager."""
-    mgr = Mock()
-    mgr.derive_state.return_value = ReleaseInfoResult(
-        success=True, state=ReleaseState.PLANNED,
-        release_tag="r4.1", source="release-plan.yaml")
-    return mgr
-
-
-@pytest.fixture
 def sample_release_plan():
     """Sample release plan for testing."""
     return {
@@ -130,7 +114,6 @@ def snapshot_creator(
     mock_version_calculator,
     mock_transformer,
     mock_metadata_generator,
-    mock_state_manager,
 ):
     """Create a SnapshotCreator with all mocked dependencies."""
     return SnapshotCreator(
@@ -138,7 +121,6 @@ def snapshot_creator(
         version_calculator=mock_version_calculator,
         transformer=mock_transformer,
         metadata_generator=mock_metadata_generator,
-        state_manager=mock_state_manager,
     )
 
 
@@ -148,14 +130,15 @@ class TestSnapshotConfig:
     """Tests for SnapshotConfig dataclass."""
 
     def test_default_values(self):
-        """Test SnapshotConfig with default values."""
-        config = SnapshotConfig(release_tag="r4.1")
+        """Test SnapshotConfig with default values; base_branch has none (F12)."""
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         assert config.release_tag == "r4.1"
         assert config.base_branch == "main"
         assert config.src_commit_sha is None
         assert config.dry_run is False
-        # Note: commonalities_release and icm_release are now derived from
-        # release_plan['dependencies'], not passed via SnapshotConfig
+        assert config.release_issue_number is None
+        with pytest.raises(TypeError):
+            SnapshotConfig(release_tag="r4.1")
 
     def test_custom_values(self):
         """Test SnapshotConfig with custom values."""
@@ -279,88 +262,6 @@ class TestChangelogUrl:
         )
 
 
-# --- Tests for validate_preconditions ---
-
-
-class TestValidatePreconditions:
-    """Tests for precondition validation."""
-
-    def _make_result(self, state):
-        """Helper to create a ReleaseInfoResult for a given state."""
-        return ReleaseInfoResult(
-            success=True, state=state,
-            release_tag="r4.1", source="release-plan.yaml")
-
-    def test_valid_planned_state(self, snapshot_creator, mock_state_manager):
-        """Test validation passes for PLANNED state."""
-        mock_state_manager.derive_state.return_value = self._make_result(
-            ReleaseState.PLANNED)
-
-        errors = snapshot_creator.validate_preconditions("r4.1")
-
-        assert errors == []
-
-    def test_state_is_derived_on_the_base_branch(self, snapshot_creator, mock_state_manager):
-        mock_state_manager.derive_state.return_value = self._make_result(ReleaseState.PLANNED)
-
-        snapshot_creator.validate_preconditions("r1.8", base_branch="maintenance/r1")
-
-        mock_state_manager.derive_state.assert_called_once_with(base_branch="maintenance/r1")
-
-    def test_invalid_published_state(self, snapshot_creator, mock_state_manager):
-        """Test validation fails for PUBLISHED state."""
-        mock_state_manager.derive_state.return_value = self._make_result(
-            ReleaseState.PUBLISHED)
-
-        errors = snapshot_creator.validate_preconditions("r4.1")
-
-        assert len(errors) == 1
-        assert "already published" in errors[0]
-
-    def test_invalid_snapshot_active_state(self, snapshot_creator, mock_state_manager):
-        """Test validation fails for SNAPSHOT_ACTIVE state."""
-        mock_state_manager.derive_state.return_value = self._make_result(
-            ReleaseState.SNAPSHOT_ACTIVE)
-
-        errors = snapshot_creator.validate_preconditions("r4.1")
-
-        assert len(errors) == 1
-        assert "snapshot already exists" in errors[0]
-
-    def test_invalid_draft_ready_state(self, snapshot_creator, mock_state_manager):
-        """Test validation fails for DRAFT_READY state."""
-        mock_state_manager.derive_state.return_value = self._make_result(
-            ReleaseState.DRAFT_READY)
-
-        errors = snapshot_creator.validate_preconditions("r4.1")
-
-        assert len(errors) == 1
-        assert "draft release already exists" in errors[0]
-
-    def test_invalid_not_planned_state(self, snapshot_creator, mock_state_manager):
-        """Test validation fails for NOT_PLANNED state."""
-        mock_state_manager.derive_state.return_value = self._make_result(
-            ReleaseState.NOT_PLANNED)
-
-        errors = snapshot_creator.validate_preconditions("r4.1")
-
-        assert len(errors) == 1
-        assert "not planned" in errors[0]
-
-    def test_config_error_returns_error(self, snapshot_creator, mock_state_manager):
-        """Test that config errors from derive_state() are surfaced."""
-        from release_automation.scripts.state_manager import ConfigurationError
-        mock_state_manager.derive_state.return_value = ReleaseInfoResult(
-            success=False,
-            config_error=ConfigurationError(
-                error_type="missing_file",
-                message="No release-plan.yaml found",
-                file_path="release-plan.yaml"))
-
-        errors = snapshot_creator.validate_preconditions("r4.1")
-
-        assert len(errors) == 1
-        assert "Configuration error" in errors[0]
 
 
 # --- Tests for create_snapshot ---
@@ -390,7 +291,7 @@ class TestCreateSnapshot:
             number=42, url="https://github.com/owner/repo/pull/42"
         )
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         assert result.success is True
@@ -421,7 +322,7 @@ class TestCreateSnapshot:
 
         with patch.object(snapshot_creator, "_bundle_specs", return_value=2):
             result = snapshot_creator.create_snapshot(
-                sample_release_plan, SnapshotConfig(release_tag="r4.1")
+                sample_release_plan, SnapshotConfig(release_tag="r4.1", base_branch="main")
             )
 
         assert result.success is True
@@ -463,7 +364,7 @@ class TestCreateSnapshot:
         )
         mock_changelog_cls.return_value = mock_changelog_instance
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         assert result.success is True
@@ -546,7 +447,7 @@ class TestCreateSnapshot:
         )
         mock_changelog_cls.return_value = mock_changelog_instance
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         snapshot_creator.create_snapshot(sample_release_plan, config)
 
         draft_metadata = mock_changelog_instance.generate_draft.call_args.kwargs[
@@ -573,30 +474,13 @@ class TestCreateSnapshot:
         sample_release_plan,
     ):
         """Test dry run mode doesn't create actual branches."""
-        config = SnapshotConfig(release_tag="r4.1", dry_run=True)
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main", dry_run=True)
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         assert result.success is True
         assert "Dry run" in result.warnings[0]
         # GitOperations should not have been instantiated
         mock_git_ops_class.assert_not_called()
-
-    def test_validation_failure_returns_early(
-        self,
-        snapshot_creator,
-        mock_state_manager,
-        sample_release_plan,
-    ):
-        """Test that validation failure returns early without creating snapshot."""
-        mock_state_manager.derive_state.return_value = ReleaseInfoResult(
-            success=True, state=ReleaseState.PUBLISHED,
-            release_tag="r4.1", source="tag")
-
-        config = SnapshotConfig(release_tag="r4.1")
-        result = snapshot_creator.create_snapshot(sample_release_plan, config)
-
-        assert result.success is False
-        assert "already published" in result.errors[0]
 
     def test_calculates_api_versions(
         self,
@@ -605,7 +489,7 @@ class TestCreateSnapshot:
         sample_release_plan,
     ):
         """Test that API versions are calculated."""
-        config = SnapshotConfig(release_tag="r4.1", dry_run=True)
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main", dry_run=True)
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         mock_version_calculator.calculate_versions_for_plan.assert_called_once_with(
@@ -636,7 +520,7 @@ class TestCreateSnapshot:
         mock_git_ops_class.return_value = mock_git_ops
         mock_git_ops.create_pr.return_value = PullRequestInfo(number=1, url="url")
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         mock_transformer.apply_all.assert_called_once()
@@ -661,7 +545,7 @@ class TestCreateSnapshot:
         mock_git_ops_class.return_value = mock_git_ops
         mock_git_ops.create_pr.return_value = PullRequestInfo(number=1, url="url")
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         assert result.snapshot_branch.startswith("release-snapshot/r4.1-")
@@ -676,7 +560,7 @@ class TestCreateSnapshot:
         """Test error when base branch doesn't exist."""
         mock_github_client.list_branches.return_value = []
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         assert result.success is False
@@ -710,7 +594,7 @@ class TestErrorHandling:
             errors=["Transformation failed"],
         )
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         assert result.success is False
@@ -733,7 +617,7 @@ class TestErrorHandling:
         mock_git_ops_class.return_value = mock_git_ops
         mock_git_ops.clone.side_effect = GitOperationsError("Clone failed")
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         assert result.success is False
@@ -760,7 +644,7 @@ class TestErrorHandling:
         mock_git_ops_class.return_value = mock_git_ops
         mock_git_ops.create_pr.side_effect = GitOperationsError("PR creation failed")
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         assert result.success is False
@@ -794,7 +678,7 @@ class TestErrorHandling:
             snapshot_creator, '_cleanup_branches',
             return_value=["Failed to delete release-review/r4.1-abc1234: permission denied"]
         ):
-            config = SnapshotConfig(release_tag="r4.1")
+            config = SnapshotConfig(release_tag="r4.1", base_branch="main")
             result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         assert result.success is False
@@ -828,7 +712,7 @@ class TestErrorHandling:
         dirs_before = set(os.listdir(temp_base))
 
         # Run with validation failure (doesn't create temp dir)
-        config = SnapshotConfig(release_tag="r4.1", dry_run=True)
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main", dry_run=True)
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         # Verify result is successful (dry run)
@@ -866,7 +750,7 @@ class TestMetadataIntegration:
         mock_git_ops_class.return_value = mock_git_ops
         mock_git_ops.create_pr.return_value = PullRequestInfo(number=1, url="url")
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         snapshot_creator.create_snapshot(sample_release_plan, config)
 
         mock_metadata_generator.generate.assert_called_once()
@@ -892,7 +776,7 @@ class TestMetadataIntegration:
         mock_git_ops_class.return_value = mock_git_ops
         mock_git_ops.create_pr.return_value = PullRequestInfo(number=1, url="url")
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         snapshot_creator.create_snapshot(sample_release_plan, config)
 
         call_args = mock_metadata_generator.generate.call_args
@@ -925,7 +809,7 @@ class TestMetadataIntegration:
 
         snapshot_creator.create_snapshot(
             sample_release_plan,
-            SnapshotConfig(release_tag="r4.1"),
+            SnapshotConfig(release_tag="r4.1", base_branch="main"),
         )
 
         metadata_plan = mock_metadata_generator.generate.call_args[0][0]
@@ -951,7 +835,7 @@ class TestVersionCalculatorIntegration:
         sample_release_plan,
     ):
         """Test that version calculator is called with full plan."""
-        config = SnapshotConfig(release_tag="r4.1", dry_run=True)
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main", dry_run=True)
         snapshot_creator.create_snapshot(sample_release_plan, config)
 
         mock_version_calculator.calculate_versions_for_plan.assert_called_with(
@@ -979,7 +863,7 @@ class TestVersionCalculatorIntegration:
         mock_git_ops_class.return_value = mock_git_ops
         mock_git_ops.create_pr.return_value = PullRequestInfo(number=1, url="url")
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         snapshot_creator.create_snapshot(sample_release_plan, config)
 
         call_args = mock_transformer.apply_all.call_args
@@ -996,7 +880,6 @@ class TestVersionCalculatorIntegration:
         mock_github_client,
         mock_transformer,
         mock_metadata_generator,
-        mock_state_manager,
     ):
         """End-to-end: a repo-split seed continues rc numbering with no
         release history of its own (the QoSProfiles r1.1 case)."""
@@ -1008,7 +891,6 @@ class TestVersionCalculatorIntegration:
             version_calculator=version_calc,
             transformer=mock_transformer,
             metadata_generator=mock_metadata_generator,
-            state_manager=mock_state_manager,
         )
 
         release_plan = {
@@ -1041,7 +923,7 @@ class TestVersionCalculatorIntegration:
             },
         }
 
-        config = SnapshotConfig(release_tag="r1.1", dry_run=True)
+        config = SnapshotConfig(release_tag="r1.1", base_branch="main", dry_run=True)
         result = creator.create_snapshot(release_plan, config)
 
         assert result.api_versions == {"qos-profiles": "1.2.0-rc.4"}
@@ -1072,7 +954,7 @@ class TestTransformationIntegration:
         mock_git_ops_class.return_value = mock_git_ops
         mock_git_ops.create_pr.return_value = PullRequestInfo(number=1, url="url")
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         # Dependencies are derived from release_plan, not config
         snapshot_creator.create_snapshot(sample_release_plan, config)
 
@@ -1110,7 +992,7 @@ class TestTransformationIntegration:
 
         result = snapshot_creator.create_snapshot(
             sample_release_plan,
-            SnapshotConfig(release_tag="r4.1"),
+            SnapshotConfig(release_tag="r4.1", base_branch="main"),
         )
 
         assert result.success is False
@@ -1143,7 +1025,7 @@ class TestTransformationIntegration:
 
         result = snapshot_creator.create_snapshot(
             sample_release_plan,
-            SnapshotConfig(release_tag="r4.1"),
+            SnapshotConfig(release_tag="r4.1", base_branch="main"),
         )
 
         assert result.success is False
@@ -1177,7 +1059,7 @@ class TestTransformationIntegration:
             warnings=["Warning 1", "Warning 2"],
         )
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         assert "Warning 1" in result.warnings
@@ -1205,7 +1087,7 @@ class TestTransformationIntegration:
             errors=["Critical error in transformation"],
         )
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         assert result.success is False
@@ -1229,6 +1111,7 @@ class TestCustomBaseCommit:
 
         config = SnapshotConfig(
             release_tag="r4.1",
+            base_branch="main",
             src_commit_sha="custom123456789",
             dry_run=True,
         )
@@ -1247,7 +1130,7 @@ class TestCustomBaseCommit:
         sample_release_plan,
     ):
         """Test that SHA is fetched when not provided."""
-        config = SnapshotConfig(release_tag="r4.1", dry_run=True)
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main", dry_run=True)
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         mock_github_client.list_branches.assert_called_with("main")
@@ -1675,7 +1558,7 @@ class TestReleaseDocumentation:
         self, snapshot_creator, tmp_path, sample_release_plan
     ):
         """Returns False when README.md doesn't exist."""
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         result = snapshot_creator._update_readme(
             str(tmp_path), config, sample_release_plan, {}, {}
         )
@@ -1698,7 +1581,7 @@ class TestReleaseDocumentation:
         mock_updater_cls.return_value = mock_instance
         mock_updater_cls.format_api_links = Mock(return_value="")
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         metadata = {"repository": {"release_type": "pre-release-rc"}}
         snapshot_creator._update_readme(
             str(tmp_path), config, sample_release_plan,
@@ -1722,7 +1605,7 @@ class TestReleaseDocumentation:
         mock_instance.write_changelog.return_value = "CHANGELOG/CHANGELOG-r4.md"
         mock_gen_cls.return_value = mock_instance
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         metadata = {"repository": {"release_type": "pre-release-alpha"}, "apis": [], "dependencies": {}}
         result = snapshot_creator._generate_changelog(
             str(tmp_path), config, {}, {}, metadata, "TestRepo-QoD"
@@ -1755,7 +1638,7 @@ class TestReleaseDocumentation:
 
         snapshot_creator._generate_changelog(
             str(tmp_path),
-            SnapshotConfig(release_tag="r4.1"),
+            SnapshotConfig(release_tag="r4.1", base_branch="main"),
             {},
             {},
             metadata,
@@ -1795,7 +1678,7 @@ class TestReleaseDocumentation:
 
         snapshot_creator._generate_changelog(
             str(tmp_path),
-            SnapshotConfig(release_tag="r4.2"),
+            SnapshotConfig(release_tag="r4.2", base_branch="main"),
             {},
             {},
             metadata,
@@ -1827,7 +1710,7 @@ class TestReleaseDocumentation:
         mock_instance.write_changelog.return_value = "CHANGELOG/CHANGELOG-r4.md"
         mock_gen_cls.return_value = mock_instance
 
-        config = SnapshotConfig(release_tag="r4.2")
+        config = SnapshotConfig(release_tag="r4.2", base_branch="main")
         metadata = {"repository": {"release_type": "pre-release-rc"}, "apis": [], "dependencies": {}}
         snapshot_creator._generate_changelog(
             str(tmp_path), config, {}, {}, metadata, "TestRepo-QoD"
@@ -1852,7 +1735,7 @@ class TestReleaseDocumentation:
         mock_instance.write_changelog.return_value = "CHANGELOG/CHANGELOG-r4.md"
         mock_gen_cls.return_value = mock_instance
 
-        config = SnapshotConfig(release_tag="r4.2")
+        config = SnapshotConfig(release_tag="r4.2", base_branch="main")
         metadata = {"repository": {"release_type": "pre-release-alpha"}, "apis": [], "dependencies": {}}
         snapshot_creator._generate_changelog(
             str(tmp_path), config, {}, {}, metadata, "TestRepo-QoD"
@@ -1884,7 +1767,7 @@ class TestReleaseDocumentation:
              patch("release_automation.scripts.snapshot_creator.ReadmeUpdater.format_api_links", return_value="formatted-links"):
             result = snapshot_creator._update_readme(
                 temp_dir="/tmp/test-dir",
-                config=SnapshotConfig(release_tag="r4.1"),
+                config=SnapshotConfig(release_tag="r4.1", base_branch="main"),
                 release_plan={},
                 api_versions={"qod": "v1.1.0-rc.1"},
                 metadata={"repository": {"release_type": "pre-release-rc"}},
@@ -1929,7 +1812,7 @@ class TestWipCheckIntegration:
             ],
         )
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         assert result.success is False
@@ -1963,7 +1846,7 @@ class TestWipCheckIntegration:
 
         mock_check_wip.return_value = WipCheckResult(compliant=True)
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         assert result.success is True
@@ -2002,7 +1885,7 @@ class TestWipCheckIntegration:
             warnings=["No code/Test_definitions/ directory found"],
         )
 
-        config = SnapshotConfig(release_tag="r4.1")
+        config = SnapshotConfig(release_tag="r4.1", base_branch="main")
         result = snapshot_creator.create_snapshot(sample_release_plan, config)
 
         assert result.success is False

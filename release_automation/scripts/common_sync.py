@@ -122,9 +122,9 @@ def detect(api_repo: Path, commonalities_release: str, icm_release: str = "") ->
     return CacheCheck(status="stale", details=details)
 
 
-def sync_branch(release: str, base_branch: str = MAIN_BRANCH) -> str:
+def sync_branch(release: str, base_branch: str) -> str:
     """sync-common/<release> for main, sync-common/<base_branch>/<release> for other lines."""
-    if not base_branch or base_branch == MAIN_BRANCH:
+    if base_branch == MAIN_BRANCH:
         return f"{SYNC_BRANCH_PREFIX}{release}"
     return f"{SYNC_BRANCH_PREFIX}{base_branch}/{release}"
 
@@ -140,7 +140,7 @@ def _sync_branch_line(head: str) -> str:
     return MAIN_BRANCH
 
 
-def find_sync_pr(gh, release: str, base_branch: str = MAIN_BRANCH) -> str:
+def find_sync_pr(gh, release: str, base_branch: str) -> str:
     """URL of the open sync PR for exactly this release's branch on this line, or ""."""
     found = gh.find_open_pr(sync_branch(release, base_branch))
     return found[1] if found else ""
@@ -197,7 +197,7 @@ def copy_common_files(source_dir: Path, api_repo: Path, release: str) -> Dict[st
     return files
 
 
-def pr_body(release: str, unexpected: Tuple[str, ...] = (), base_branch: str = MAIN_BRANCH) -> str:
+def pr_body(release: str, base_branch: str, unexpected: Tuple[str, ...] = ()) -> str:
     body = (
         "> [!WARNING]\n"
         f"> This branch is owned by Release Automation and is rebuilt from `{base_branch}` on every run.\n"
@@ -241,7 +241,7 @@ def _close_superseded_prs(gh, branch: str, release: str, base_branch: str) -> No
         print(f"Could not list open PRs: {e}")
         return
     for pr in prs:
-        if pr["head"] != branch and _sync_branch_line(pr["head"]) == (base_branch or MAIN_BRANCH):
+        if pr["head"] != branch and _sync_branch_line(pr["head"]) == base_branch:
             print(f"Closing stale sync PR #{pr['number']}")
             try:
                 gh.close_pr(pr["number"], comment=f"Superseded by sync to Commonalities {release}")
@@ -250,8 +250,7 @@ def _close_superseded_prs(gh, branch: str, release: str, base_branch: str) -> No
 
 
 def sync_common(
-    api_git, commonalities_git, gh, release: str, bot_name: str, bot_email: str,
-    base_branch: str = MAIN_BRANCH,
+    api_git, commonalities_git, gh, release: str, bot_name: str, bot_email: str, base_branch: str,
 ) -> CommonSyncOutcome:
     """
     Rebuild code/common/ from the Commonalities release and open or reuse its sync PR.
@@ -269,7 +268,6 @@ def sync_common(
     Returns:
         CommonSyncOutcome; every failed step is status "failed", nothing raises
     """
-    base_branch = base_branch or MAIN_BRANCH
     branch = sync_branch(release, base_branch)
     api_repo = Path(api_git.work_dir)
     try:
@@ -324,7 +322,7 @@ def sync_common(
     try:
         number, url = gh.create_pr(
             title=f"Sync common files from Commonalities {release}",
-            body=pr_body(release, unexpected, base_branch),
+            body=pr_body(release, base_branch, unexpected),
             head=branch,
             base=base_branch,
         )

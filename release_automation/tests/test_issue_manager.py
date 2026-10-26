@@ -120,7 +120,8 @@ class TestIssueManagerGenerateTitle:
         title = manager.generate_title(
             release_tag="r4.1",
             release_type="pre-release-rc",
-            meta_release="Sync26"
+            meta_release="Sync26",
+            base_branch="main",
         )
 
         assert title == "Release r4.1 (RC) — Sync26"
@@ -131,7 +132,9 @@ class TestIssueManagerGenerateTitle:
 
         title = manager.generate_title(
             release_tag="r4.2",
-            release_type="pre-release-alpha"
+            release_type="pre-release-alpha",
+            meta_release=None,
+            base_branch="main",
         )
 
         assert title == "Release r4.2 (alpha)"
@@ -143,7 +146,8 @@ class TestIssueManagerGenerateTitle:
         title = manager.generate_title(
             release_tag="r4.0",
             release_type="public-release",
-            meta_release="Spring26"
+            meta_release="Spring26",
+            base_branch="main",
         )
 
         assert title == "Release r4.0 (public) — Spring26"
@@ -154,7 +158,9 @@ class TestIssueManagerGenerateTitle:
 
         title = manager.generate_title(
             release_tag="r4.1",
-            release_type="pre-release-rc"
+            release_type="pre-release-rc",
+            meta_release=None,
+            base_branch="main",
         )
 
         assert title == "Release r4.1 (RC)"
@@ -166,7 +172,9 @@ class TestIssueManagerGenerateTitle:
 
         title = manager.generate_title(
             release_tag="r4.0.1",
-            release_type="maintenance-release"
+            release_type="maintenance-release",
+            meta_release=None,
+            base_branch="main",
         )
 
         assert title == "Release r4.0.1 (maintenance)"
@@ -182,7 +190,7 @@ class TestIssueManagerGenerateTitle:
 
     def test_generate_title_on_main_has_no_line(self):
         title = IssueManager().generate_title(
-            release_tag="r1.8", release_type="maintenance-release", base_branch="main"
+            release_tag="r1.8", release_type="maintenance-release", meta_release=None, base_branch="main"
         )
 
         assert title == "Release r1.8 (maintenance)"
@@ -213,7 +221,7 @@ class TestIssueManagerShouldUpdateTitle:
 
         current_title = "Release r4.1 (RC) — Sync26"
 
-        assert manager.should_update_title(current_title, release_plan) is False
+        assert manager.should_update_title(current_title, release_plan, base_branch="main") is False
 
     def test_title_differs_update_needed(self):
         """Test when current title differs from expected."""
@@ -230,7 +238,7 @@ class TestIssueManagerShouldUpdateTitle:
         # Outdated title
         current_title = "Release r4.1 (alpha)"
 
-        assert manager.should_update_title(current_title, release_plan) is True
+        assert manager.should_update_title(current_title, release_plan, base_branch="main") is True
 
 
 class TestIssueManagerGenerateStateSection:
