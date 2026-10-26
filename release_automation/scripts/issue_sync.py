@@ -8,25 +8,18 @@ with the release as the plan derived it and the run's action changed it
 
 from dataclasses import dataclass, field
 import json
-import re
 import traceback
 from typing import Any, Dict, List, Optional
 
 import yaml
 
+from .config import RELEASE_ISSUE_LABEL, RELEASE_TAG_MARKER_RE, WORKFLOW_MARKER  # noqa: F401  (re-exported)
 from .github_client import GitHubClient
 from .release_line import line_of
 from .state_manager import ReleaseState
 from .issue_manager import IssueManager
 from .labels import RELEASE_ISSUE_LABELS, ensure_labels
 from .plan_document import PlanDocument
-
-
-# Marker to identify workflow-owned issues
-WORKFLOW_MARKER = "<!-- release-automation:workflow-owned -->"
-RELEASE_TAG_MARKER_RE = re.compile(
-    r"<!--\s*release-automation:release-tag:(?P<tag>.*?)\s*-->"
-)
 
 # Triggers that only refresh the issue on a state change; everything else
 # (commands, syncs) rewrites the managed sections
@@ -99,7 +92,7 @@ class IssueSyncManager:
     """
 
     # Labels used for Release Issues
-    RELEASE_ISSUE_LABEL = "release-issue"
+    RELEASE_ISSUE_LABEL = RELEASE_ISSUE_LABEL
     STATE_LABEL_PREFIX = "release-state:"
 
     def __init__(

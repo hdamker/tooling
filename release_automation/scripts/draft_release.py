@@ -22,6 +22,7 @@ import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+from . import config
 from .github_client import GitHubClientError
 from .release_publisher import PublishOutcome, ReleasePublisher, complete_publication
 
@@ -60,7 +61,7 @@ class CleanupOutcome:
 
 
 def is_prerelease(release_type: str) -> bool:
-    return release_type.startswith("pre-release")
+    return config.is_prerelease(release_type)
 
 
 # ── CHANGELOG ────────────────────────────────────────────────────────────────

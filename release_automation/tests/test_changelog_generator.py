@@ -12,7 +12,6 @@ from release_automation.scripts.changelog_generator import (
     CANDIDATE_CHANGES_END_MARKER,
     CANDIDATE_CHANGES_START_MARKER,
     ChangelogGenerator,
-    RELEASE_TYPE_MAP,
     TOC_START_MARKER,
     TOC_END_MARKER,
 )

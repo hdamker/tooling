@@ -21,10 +21,10 @@ import sys
 from dataclasses import asdict
 from typing import Optional, Tuple
 
+from .config import MAIN_BRANCH  # noqa: F401  (re-exported)
 from .github_client import GitHubClient
 from .trigger import Trigger, parse_trigger, write_outputs
 
-MAIN_BRANCH = "main"
 MAINTENANCE_BRANCH_PREFIX = "maintenance/"
 MAINTENANCE_BRANCH_RE = re.compile(r"^maintenance/r[1-9]\d*$")
 

@@ -7,8 +7,8 @@ checked in a fixed order — state table, common-cache gate, permission,
 publisher authorization, confirm tag — and the first failing check names the
 rejection. Other triggers are not validated.
 
-Policy values that are expected to change (RM#675) sit in PUBLISH_MODES and
-PUBLISHERS; the initial values reproduce the behaviour before this module.
+Policy values that are expected to change (RM#675) are the publish_mode and
+publishers of config.RELEASE_TYPES.
 
 A Plan names the action the snapshot or act job executes (action_for).
 
@@ -35,32 +35,9 @@ from .github_client import GitHubClient, GitHubClientError
 from .maintenance_branch import BranchPlan
 from .maintenance_branch import check as check_maintenance_branch
 from .plan_document import CommonCache, PlanDocument  # noqa: F401  (CommonCache re-exported)
-from .release_line import MAIN_BRANCH
+from .config import MAIN_BRANCH, PUBLISH_MODE_DRAFT, PUBLISH_MODE_ON_MERGE, PUBLISHERS_CODEOWNERS  # noqa: F401
 from .state_manager import ConfigurationError, ReleaseInfoResult, ReleaseStateManager
 from .trigger import DISPATCH_CREATE_MAINTENANCE_BRANCH, TRIGGER_SLASH_COMMAND, Trigger
-
-# How a release is published once its Release PR is merged:
-#   draft    — merge creates a draft release; /publish-release --confirm publishes it
-#   on_merge — merge publishes directly
-PUBLISH_MODE_DRAFT = "draft"
-PUBLISH_MODE_ON_MERGE = "on_merge"
-PUBLISH_MODES = {
-    "pre-release-alpha": PUBLISH_MODE_DRAFT,
-    "pre-release-rc": PUBLISH_MODE_DRAFT,
-    "public-release": PUBLISH_MODE_DRAFT,
-    "maintenance-release": PUBLISH_MODE_DRAFT,
-}
-
-# Who may post /publish-release, per release type:
-#   codeowners — users on the first "*" line of CODEOWNERS (main); maintain
-#                and admin bypass; no list means write access suffices
-PUBLISHERS_CODEOWNERS = "codeowners"
-PUBLISHERS = {
-    "pre-release-alpha": PUBLISHERS_CODEOWNERS,
-    "pre-release-rc": PUBLISHERS_CODEOWNERS,
-    "public-release": PUBLISHERS_CODEOWNERS,
-    "maintenance-release": PUBLISHERS_CODEOWNERS,
-}
 
 WRITE_PERMISSIONS = ("admin", "maintain", "write")
 
@@ -141,7 +118,8 @@ class Rejection:
 
 
 def publish_mode_for(release_type: Optional[str]) -> str:
-    return PUBLISH_MODES.get(release_type or "", PUBLISH_MODE_DRAFT)
+    known = config.release_type(release_type)
+    return known.publish_mode if known else PUBLISH_MODE_DRAFT
 
 
 def _state_value(release_info: ReleaseInfoResult) -> str:
@@ -183,8 +161,9 @@ def parse_codeowners(content: str) -> list:
 
 
 def _check_publisher(user: str, permission: str, release_type: str, client) -> Optional[str]:
-    """Publisher authorization for /publish-release (PUBLISHERS)."""
-    rule = PUBLISHERS.get(release_type, PUBLISHERS_CODEOWNERS)
+    """Publisher authorization for /publish-release (config.RELEASE_TYPES[...].publishers)."""
+    known = config.release_type(release_type)
+    rule = known.publishers if known else PUBLISHERS_CODEOWNERS
     if rule == PUBLISHERS_CODEOWNERS:
         # Break glass: maintain and admin bypass the CODEOWNERS list.
         if permission != "write":

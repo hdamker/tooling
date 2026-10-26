@@ -87,7 +87,6 @@ tooling/
 │   │   │
 │   │   ├── pr_bodies/
 │   │   │   ├── release_review_pr.mustache
-│   │   │   └── sync_pr.mustache
 │   │   │
 │   │   ├── readme/
 │   │   │   ├── release-info-no-release.mustache
@@ -294,7 +293,6 @@ The "Valid actions" block of every comment and of the Release Issue body is the 
 
 **PR body templates** (`release_automation/templates/pr_bodies/`):
 - `release_review_pr.mustache` — Release Review PR body with checklist
-- `sync_pr.mustache` — Post-release sync PR body
 
 **Other templates:**
 - `readme/*.mustache` — 4 README Release Information templates (ported from campaign workflow)
