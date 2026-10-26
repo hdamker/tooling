@@ -321,6 +321,39 @@ def test_callers_need_no_oidc_token_and_stay_on_v1_rc():
     assert _on(vf)["pull_request"]["branches"] == ["main", "release-snapshot/**", "maintenance/**"]
 
 
+RA_BOT = "camara-release-automation[bot]"
+
+
+def test_ra_caller_serializes_at_job_level():
+    # spec 5.7: runs skipped by the job's if: never join the concurrency group
+    ra = yaml.safe_load(RA_CALLER.read_text(encoding="utf-8"))
+
+    assert "concurrency" not in ra
+    assert ra["jobs"]["release-automation"]["concurrency"] == {
+        "group": "release-automation-${{ github.repository }}",
+        "cancel-in-progress": False,
+    }
+
+
+def test_ra_caller_skips_comments_and_issue_events_of_the_ra_bot():
+    condition = yaml.safe_load(RA_CALLER.read_text(encoding="utf-8"))["jobs"]["release-automation"]["if"]
+
+    assert f"github.event.comment.user.login != '{RA_BOT}'" in condition
+    issues_clause = condition[condition.index("github.event_name == 'issues'"):]
+    assert issues_clause.index(f"github.event.sender.login != '{RA_BOT}'") < issues_clause.index("pull_request")
+
+
+def test_release_issue_writes_use_github_token():
+    # spec 5.7: the App token stays for branches, commits, PRs and releases
+    plan = _job_steps("plan")
+    assert "Generate App Token" not in [s.get("name") for s in plan]
+    assert _step_by_name(plan, "Post Response")["with"]["github_token"] == "${{ github.token }}"
+    for job in ("act", "finalize"):
+        (step,) = [s for s in _job_steps(job) if "release_automation.scripts" in s.get("run", "")]
+        assert step["env"]["GITHUB_TOKEN"] == "${{ steps.app-token.outputs.token || github.token }}"
+        assert step["env"]["ISSUE_TOKEN"] == "${{ github.token }}"
+
+
 def test_validation_checks_tooling_out_at_its_own_commit():
     text = VF_WORKFLOW.read_text(encoding="utf-8")
     workflow = yaml.safe_load(text)

@@ -236,28 +236,16 @@ jobs:
         run: python -m release_automation.scripts.command_policy
 
       # ── Response: one bot comment, template chosen by the policy ──
-      # interim_processing and command_rejected update the ack with GITHUB_TOKEN
-      # (no extra issue_comment runs); config_error and publish_confirmation use
-      # the App token, as their former jobs did. A failed interim post does not
-      # stop the command (finalize then posts no result comment, as before).
-      - name: Generate App Token
-        id: app-token
-        if: |
-          (steps.policy.outputs.response == 'config_error' ||
-           steps.policy.outputs.response == 'publish_confirmation') &&
-          vars.RELEASE_APP_CLIENT_ID != ''
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
+      # GITHUB_TOKEN, like every Release Issue write (no extra caller runs).
+      # A failed interim post does not stop the command (finalize then posts
+      # no result comment, as before).
       - name: Post Response
         id: respond
         if: steps.policy.outputs.response != ''
         continue-on-error: ${{ steps.policy.outputs.response == 'interim_processing' }}
         uses: ./_tooling/shared-actions/post-bot-comment
         with:
-          github_token: ${{ (steps.policy.outputs.response == 'config_error' || steps.policy.outputs.response == 'publish_confirmation') && steps.app-token.outputs.token || github.token }}
+          github_token: ${{ github.token }}
           issue_number: ${{ steps.detect.outputs.issue_number }}
           release_tag: ${{ steps.policy.outputs.response_release_tag }}
           run_id: ${{ github.run_id }}
@@ -442,6 +430,7 @@ jobs:
         working-directory: _tooling
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          ISSUE_TOKEN: ${{ github.token }}
           APP_TOKEN_USED: ${{ steps.app-token.outputs.token != '' }}
           RELEASE_APP_SLUG: ${{ vars.RELEASE_APP_SLUG }}
         run: python -m release_automation.scripts.snapshot_prep bot-identity
@@ -472,7 +461,8 @@ jobs:
   # publish-release, create-draft, publish-on-merge, reopen-issue,
   # create-maintenance-branch), dispatched by release_automation/scripts/act.py.
   # The App token writes .github/workflows/* for create-maintenance-branch
-  # (workflows permission) and bypasses maintenance-branch-protection.
+  # (workflows permission) and bypasses maintenance-branch-protection;
+  # Release Issue writes use ISSUE_TOKEN (GITHUB_TOKEN, triggers no run).
   # ─────────────────────────────────────────────────────────────────────────────
   act:
     needs: [plan]
@@ -518,13 +508,15 @@ jobs:
         env:
           PLAN_JSON: ${{ needs.plan.outputs.plan }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          ISSUE_TOKEN: ${{ github.token }}
         run: python -m release_automation.scripts.act
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Finalize — post-release sync PR, common sync, Release Issue sync
   # and notifications, result comment, published Release Issue. Runs after
   # snapshot/act even when they failed; release_automation/scripts/finalize.py
-  # decides which parts apply from the plan and the outcome.
+  # decides which parts apply from the plan and the outcome. Sync PRs and
+  # common sync use the App token, Release Issue writes ISSUE_TOKEN.
   # ─────────────────────────────────────────────────────────────────────────────
   finalize:
     needs: [plan, snapshot, act]
@@ -565,6 +557,7 @@ jobs:
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          ISSUE_TOKEN: ${{ github.token }}
           APP_TOKEN_USED: ${{ steps.app-token.outputs.token != '' }}
           RELEASE_APP_SLUG: ${{ vars.RELEASE_APP_SLUG }}
         run: python -m release_automation.scripts.finalize

@@ -18,6 +18,10 @@ after plan for push, workflow_dispatch and /sync-issue. In order:
 What ran before comes from toJSON(needs): the plan job's JSON plan, and the
 result and JSON outcome of the snapshot or act job that executed its action.
 
+Sync PRs and common sync use the repository client (App token: commits and
+PRs); every Release Issue write uses the issue client (GITHUB_TOKEN), so no
+write to the issue triggers a caller run.
+
 Usage (workflow step):
     python3 -m release_automation.scripts.finalize
 """
@@ -268,13 +272,18 @@ def result_context(run: Run, sync: Optional[SyncPrOutcome]) -> Dict[str, str]:
 @dataclass
 class Clients:
     """Network-facing collaborators; tests replace them."""
-    gh: Any
+    gh: Any  # repository client
     git_factory: Any  # (repo, work_dir, token) -> git client
+    issue_gh: Any = None  # Release Issue client; the repository client if unset
     token: str = ""
     app_slug: str = ""
     app_token_used: bool = False
     work_root: Path = field(default_factory=lambda: Path(tempfile.mkdtemp()))
     _bot: Optional[Tuple[str, str]] = None
+
+    @property
+    def issues(self):
+        return self.issue_gh or self.gh
 
     def git(self, repo: str, name: str, token: Optional[str] = None):
         return self.git_factory(repo, str(self.work_root / name), token)
@@ -300,7 +309,7 @@ class Report:
 def post_comment(clients: Clients, run: Run, template: str, issue: str, delta: Dict[str, Any], comment_id: str = "") -> None:
     from .bot_responder import post_comment as post
 
-    post(clients.gh, template, issue, run.base_context, delta, run.plan("release_tag"), comment_id=comment_id)
+    post(clients.issues, template, issue, run.base_context, delta, run.plan("release_tag"), comment_id=comment_id)
 
 
 def run_sync_pr(run: Run, clients: Clients) -> SyncPrOutcome:
@@ -352,7 +361,7 @@ def run_issue_sync(run: Run, clients: Clients, report: Report, summary_path: str
         print(f"Common sync: {report.common_sync.status}")
 
     sync = sync_for_workflow(
-        clients.gh,
+        clients.issues,
         release_tag=run.plan("release_tag"),
         state=run.plan("state"),
         common_cache_status=run.plan("common_cache_status"),
@@ -420,7 +429,7 @@ def finalize_published(run: Run, clients: Clients, report: Report) -> None:
     if run.published and run.plan("release_issue_number"):
         sync = report.sync_pr or SyncPrOutcome(status="")
         print(f"Updating release issue #{run.plan('release_issue_number')} after publish (sync status: {sync.status})")
-        report.issue_finalized = IssueSyncManager(clients.gh, issue_manager=IssueManager()).finalize_published_issue(
+        report.issue_finalized = IssueSyncManager(clients.issues, issue_manager=IssueManager()).finalize_published_issue(
             issue_number=int(run.plan("release_issue_number")),
             release_tag=run.plan("release_tag"),
             release_url=run.out("release_url"),
@@ -510,6 +519,7 @@ def main(clients: Optional[Clients] = None) -> int:
         token = env.get("GITHUB_TOKEN", "")
         clients = Clients(
             gh=GitHubClient(repo=run.repository, token=token or None),
+            issue_gh=GitHubClient(repo=run.repository, token=env.get("ISSUE_TOKEN") or token or None),
             git_factory=lambda repo, work_dir, tok: GitOperations(repo=repo, work_dir=work_dir, token=tok),
             token=token,
             app_slug=env.get("RELEASE_APP_SLUG", ""),

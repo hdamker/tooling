@@ -499,6 +499,28 @@ def test_publish_runs_sync_pr_then_result_then_closes(stubs, tmp_path):
     assert report.errors == [] and report.issue_finalized is True
 
 
+def test_release_issue_writes_use_the_issue_client(stubs, tmp_path):
+    # spec 5.7: sync PR and common sync on the repository client (App), the issue on GITHUB_TOKEN
+    gh, issues = FakeGitHub(), FakeGitHub()
+    two = Clients(gh=gh, issue_gh=issues, git_factory=FakeGit, token="app-token", app_slug="release-bot",
+                  app_token_used=True, work_root=tmp_path)
+
+    run_finalize(make_run(PUBLISH_PLAN, publish()), two)
+    run_finalize(make_run({
+        "trigger_type": "push", "command": "sync-issue", "result_comment_id": "",
+        "common_cache_status": "stale", "common_cache_details": "stale", "common_sync_pr_url": "",
+    }), two)
+
+    assert kinds(gh) == ["sync-pr", "common-sync"]
+    assert kinds(issues) == ["update", "issue-body", "remove-labels", "add-labels", "close", "issue-sync", "comment"]
+
+
+def test_issue_client_defaults_to_the_repository_client(tmp_path):
+    gh = FakeGitHub()
+
+    assert Clients(gh=gh, git_factory=FakeGit).issues is gh
+
+
 LINE_PR = SyncPrOutcome(status="created", pr_url="https://github.com/camaraproject/Example/pull/21", pr_number="21")
 
 
