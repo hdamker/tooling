@@ -174,7 +174,7 @@ class SnapshotCreator:
 
         try:
             # Step 1: Validate preconditions
-            errors = self.validate_preconditions(config.release_tag)
+            errors = self.validate_preconditions(config.release_tag, config.base_branch)
             if errors:
                 result.errors = errors
                 return result
@@ -289,6 +289,7 @@ class SnapshotCreator:
                 base_sha,
                 api_titles,
                 repo=self.gh.repo,
+                base_branch=config.base_branch,
             )
             metadata_path = os.path.join(temp_dir, "release-metadata.yaml")
             with open(metadata_path, "w") as f:
@@ -472,7 +473,7 @@ class SnapshotCreator:
             }
         return enriched_plan
 
-    def validate_preconditions(self, release_tag: str) -> List[str]:
+    def validate_preconditions(self, release_tag: str, base_branch: str = "main") -> List[str]:
         """
         Validate all preconditions for snapshot creation.
 
@@ -489,7 +490,7 @@ class SnapshotCreator:
         errors = []
 
         # Check current state
-        release_info = self.state_manager.derive_state()
+        release_info = self.state_manager.derive_state(base_branch=base_branch)
         if not release_info.success:
             errors.append(
                 f"Configuration error: {release_info.config_error.message}"

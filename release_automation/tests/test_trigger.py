@@ -15,12 +15,18 @@ from release_automation.scripts.trigger import Trigger, parse_trigger
 RELEASE_ISSUE_LABELS = [{"name": "release-issue"}, {"name": "release-state: planned"}]
 
 
-def issue_comment_payload(body, labels=RELEASE_ISSUE_LABELS, commenter="alice"):
+def issue_comment_payload(body, labels=RELEASE_ISSUE_LABELS, commenter="alice", issue_body=None):
     return {
         "action": "created",
         "comment": {"id": 101, "body": body, "user": {"login": commenter}},
-        "issue": {"number": 42, "labels": labels, "user": {"login": "release-bot[bot]"}},
+        "issue": {"number": 42, "labels": labels, "user": {"login": "release-bot[bot]"}, "body": issue_body},
     }
+
+
+ISSUE_BODY_R18 = (
+    "## Release r1.8\n\n<!-- release-automation:workflow-owned -->\n"
+    "<!-- release-automation:release-tag:r1.8 -->\n"
+)
 
 
 def parse(event_name, payload, actor="dispatcher"):
@@ -117,6 +123,12 @@ def test_comment_with_null_body():
     assert parse("issue_comment", payload).should_continue is False
 
 
+def test_slash_command_carries_the_issue_release_tag():
+    t = parse("issue_comment", issue_comment_payload("/sync-issue", issue_body=ISSUE_BODY_R18))
+
+    assert t.release_tag == "r1.8"
+
+
 def test_comment_on_other_issue_is_skipped():
     t = parse("issue_comment", issue_comment_payload("/create-snapshot", labels=[{"name": "bug"}]))
 
@@ -126,10 +138,10 @@ def test_comment_on_other_issue_is_skipped():
 # ── issues ───────────────────────────────────────────────────────────────────
 
 
-def issues_payload(action, labels=RELEASE_ISSUE_LABELS):
+def issues_payload(action, labels=RELEASE_ISSUE_LABELS, issue_body=None):
     return {
         "action": action,
-        "issue": {"number": 42, "labels": labels, "user": {"login": "release-bot[bot]"}},
+        "issue": {"number": 42, "labels": labels, "user": {"login": "release-bot[bot]"}, "body": issue_body},
         "sender": {"login": "alice"},
     }
 
@@ -148,6 +160,11 @@ def test_issue_close_and_reopen(action, trigger_type):
         user="release-bot[bot]",
         should_continue=True,
     )
+
+
+@pytest.mark.parametrize("action", ["closed", "reopened"])
+def test_issue_event_carries_the_issue_release_tag(action):
+    assert parse("issues", issues_payload(action, issue_body=ISSUE_BODY_R18)).release_tag == "r1.8"
 
 
 def test_other_issue_action_is_ignored():
@@ -181,7 +198,7 @@ def pr_payload(action="closed", merged=True, base="release-snapshot/r1.2-abc1234
 def test_merged_pr_into_snapshot_branch():
     t = parse("pull_request", pr_payload())
 
-    assert t == Trigger(trigger_type="pr_merge", user="carol", should_continue=True)
+    assert t == Trigger(trigger_type="pr_merge", user="carol", should_continue=True, release_tag="r1.2")
 
 
 def test_merged_pr_without_merged_by_falls_back_to_author():
@@ -211,8 +228,18 @@ def test_workflow_dispatch_is_sync_issue():
 
     # The dispatch input is ignored: dispatch only ever syncs the issue.
     assert t == Trigger(
-        trigger_type="workflow_dispatch", command="sync-issue", user="dave", should_continue=True
+        trigger_type="workflow_dispatch", command="sync-issue", user="dave", should_continue=True,
+        ref="main",
     )
+
+
+@pytest.mark.parametrize("event_name", ["workflow_dispatch", "push"])
+@pytest.mark.parametrize(
+    "ref,branch",
+    [("refs/heads/maintenance/r1", "maintenance/r1"), ("refs/heads/main", "main"), ("refs/tags/r1.2", ""), ("", "")],
+)
+def test_dispatch_and_push_carry_the_ref_branch(event_name, ref, branch):
+    assert parse(event_name, {"ref": ref}).ref == branch
 
 
 # ── push ─────────────────────────────────────────────────────────────────────
@@ -243,6 +270,7 @@ def test_push_is_a_sync_issue_whatever_it_changed(commits):
         command="sync-issue",
         user="erin",
         should_continue=True,
+        ref="main",
     )
 
 
@@ -286,7 +314,7 @@ def run_main(tmp_path, monkeypatch, event_name, payload):
 
 OUTPUT_NAMES = {
     "trigger_type", "command", "command_args", "issue_number", "user",
-    "should_continue", "confirm_tag", "trigger",
+    "should_continue", "confirm_tag", "ref", "release_tag", "trigger",
 }
 
 
@@ -305,6 +333,8 @@ def test_main_writes_check_trigger_outputs(tmp_path, monkeypatch):
         "user": "alice",
         "should_continue": "true",
         "confirm_tag": "r1.2",
+        "ref": "",
+        "release_tag": "",
     }
 
 

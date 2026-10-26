@@ -21,7 +21,10 @@ from release_automation.scripts.state_manager import (
     ReleaseInfoResult,
     ReleaseState,
 )
+from release_automation.scripts.release_line import base_branch_for
+from release_automation.scripts.state_manager import ReleaseStateManager
 from release_automation.scripts.trigger import Trigger
+from release_automation.tests.fake_github import FakeGitHub
 
 
 COMMANDS = ["create-snapshot", "discard-snapshot", "delete-draft", "sync-issue", "publish-release"]
@@ -429,6 +432,101 @@ def test_non_slash_triggers_are_not_validated(trigger, state):
     assert client.calls == []
 
 
+# ── routing matrix: trigger × line → base branch → plan (spec 1.1-1.5) ──────────
+
+
+MB = "maintenance/r1"
+
+
+def plan_yaml(tag, release_type):
+    return f"repository:\n  target_release_tag: {tag}\n  target_release_type: {release_type}\n"
+
+
+def two_lines(maintenance_branch=True, main_plan=("r2.2", "pre-release-alpha")):
+    """main plans r2.2; maintenance/r1 (if present) plans r1.8."""
+    files = {("main", "release-plan.yaml"): plan_yaml(*main_plan)}
+    branches = {"main": "m1"}
+    if maintenance_branch:
+        files[(MB, "release-plan.yaml")] = plan_yaml("r1.8", "maintenance-release")
+        branches[MB] = "b1"
+    return FakeGitHub(files=files, branches=branches, permissions={"alice": "write"})
+
+
+def route(trigger, gh):
+    base_branch = base_branch_for(trigger, gh)
+    release_info = ReleaseStateManager(gh).derive_state(base_branch=base_branch)
+    return evaluate(trigger, release_info, client=gh)
+
+
+R18 = dict(release_tag="r1.8")
+R22 = dict(release_tag="r2.2")
+
+
+@pytest.mark.parametrize(
+    "trigger,base_branch,release_tag",
+    [
+        (Trigger(trigger_type="push", command="sync-issue", should_continue=True, ref="main"), "main", "r2.2"),
+        (Trigger(trigger_type="push", command="sync-issue", should_continue=True, ref=MB), MB, "r1.8"),
+        (Trigger(trigger_type="workflow_dispatch", command="sync-issue", should_continue=True, ref=MB), MB, "r1.8"),
+        (Trigger(trigger_type="workflow_dispatch", command="sync-issue", should_continue=True, ref="main"), "main", "r2.2"),
+        (Trigger(trigger_type="slash_command", command="sync-issue", user="alice", should_continue=True, **R18), MB, "r1.8"),
+        (Trigger(trigger_type="slash_command", command="sync-issue", user="alice", should_continue=True, **R22), "main", "r2.2"),
+        (Trigger(trigger_type="issue_close", should_continue=True, **R18), MB, "r1.8"),
+        (Trigger(trigger_type="issue_reopen", should_continue=True, **R22), "main", "r2.2"),
+        (Trigger(trigger_type="pr_merge", should_continue=True, **R18), MB, "r1.8"),
+        (Trigger(trigger_type="pr_merge", should_continue=True, **R22), "main", "r2.2"),
+    ],
+)
+def test_routing_with_a_maintenance_branch(trigger, base_branch, release_tag):
+    plan = route(trigger, two_lines())
+
+    assert plan.allowed
+    assert (plan.base_branch, plan.release_tag) == (base_branch, release_tag)
+
+
+@pytest.mark.parametrize(
+    "trigger",
+    [
+        Trigger(trigger_type="push", command="sync-issue", should_continue=True, ref="main"),
+        Trigger(trigger_type="slash_command", command="sync-issue", user="alice", should_continue=True, release_tag="r1.7"),
+        Trigger(trigger_type="pr_merge", should_continue=True, release_tag="r1.7"),
+    ],
+)
+def test_routing_without_a_maintenance_branch_stays_on_main(trigger):
+    # spec 1.1: case A, main plans the maintenance release
+    plan = route(trigger, two_lines(maintenance_branch=False, main_plan=("r1.7", "maintenance-release")))
+
+    assert plan.allowed and (plan.base_branch, plan.release_tag) == ("main", "r1.7")
+
+
+@pytest.mark.parametrize(
+    "trigger,response",
+    [
+        (Trigger(trigger_type="push", command="sync-issue", should_continue=True, ref="main"), ""),
+        # A command on main's Release Issue (r2.2) after main's plan went back to r1.9
+        (Trigger(trigger_type="slash_command", command="create-snapshot", user="alice", should_continue=True,
+                 release_tag="r2.2"), "config_error"),
+    ],
+)
+def test_main_planning_a_maintained_cycle_is_a_config_error(trigger, response):
+    # spec 1.5: maintenance/r1 exists, main plans r1.9
+    result = route(trigger, two_lines(main_plan=("r1.9", "maintenance-release")))
+
+    assert not result.allowed
+    assert (result.error_type, result.response) == ("release_line", response)
+    assert MB in result.error_message
+
+
+def test_base_branch_reaches_the_plan_document(tmp_path, monkeypatch):
+    out = run_main(
+        tmp_path, monkeypatch, Trigger(trigger_type="push", command="sync-issue", should_continue=True, ref=MB),
+        {"STATE": "planned", "RELEASE_TAG": "r1.8", "RELEASE_TYPE": "maintenance-release", "BASE_BRANCH": MB},
+        FakeClient(),
+    )
+
+    assert json.loads(out["plan"])["base_branch"] == MB
+
+
 # ── configuration errors ─────────────────────────────────────────────────────
 
 
@@ -497,7 +595,7 @@ def test_plan_and_rejection_serialise_to_json():
 
 STATE_KEYS = ("STATE", "RELEASE_TAG", "RELEASE_TYPE", "CONFIG_ERROR", "CONFIG_ERROR_TYPE", "SRC_COMMIT_SHA",
               "SNAPSHOT_BRANCH", "RELEASE_REVIEW_BRANCH", "RELEASE_PR_NUMBER", "RELEASE_ISSUE_NUMBER",
-              "COMMONALITIES_RELEASE", "IDENTITY_CONSENT_MANAGEMENT_RELEASE")
+              "COMMONALITIES_RELEASE", "IDENTITY_CONSENT_MANAGEMENT_RELEASE", "BASE_BRANCH")
 
 
 def run_main(tmp_path, monkeypatch, trigger, env, client):

@@ -165,6 +165,7 @@ class TestSyncReleaseIssue:
         issue_manager = MagicMock()
         bot_responder = MagicMock()
         state_manager.get_current_snapshot.return_value = None
+        gh.get_branch_sha.return_value = None  # no maintenance branch
 
         # Make retry_on_not_found call the function directly (no actual retry in tests)
         gh.retry_on_not_found.side_effect = lambda fn, **kwargs: fn()
@@ -418,6 +419,81 @@ class TestSyncReleaseIssue:
             draft_release_url=draft_release_url,
             snapshot_branch_url=""
         )
+
+
+class TestReleaseIssuesPerLine:
+    """Spec 5.1-5.4: one open Release Issue per line; sync and cleanup stay on their line."""
+
+    MB = "maintenance/r1"
+
+    @staticmethod
+    def issue(number, tag):
+        return {
+            "number": number,
+            "title": f"Release {tag}",
+            "body": f"{WORKFLOW_MARKER}\n<!-- release-automation:release-tag:{tag} -->",
+            "labels": [{"name": "release-issue"}, {"name": "release-state:planned"}],
+            "html_url": f"https://github.com/test/repo/issues/{number}",
+        }
+
+    def manager(self, base_branch, current_tag, open_issues):
+        gh = MagicMock()
+        gh.retry_on_not_found.side_effect = lambda fn, **kwargs: fn()
+        gh.get_branch_sha.side_effect = lambda name: "b1" if name == self.MB else None
+        gh.search_issues.return_value = open_issues
+        current = next(i for i in open_issues if current_tag in i["body"])
+        gh.get_issue.return_value = current
+        state_manager = MagicMock()
+        state_manager.get_current_snapshot.return_value = None
+        state_manager.derive_state.return_value = ReleaseInfoResult(
+            success=True, state=ReleaseState.PLANNED, release_tag=current_tag,
+            source="release-plan.yaml", base_branch=base_branch,
+        )
+        manager = IssueSyncManager(gh, state_manager, IssueManager(), MagicMock(), base_branch=base_branch)
+        return manager, gh, state_manager
+
+    @staticmethod
+    def plan(tag):
+        return {"repository": {"target_release_tag": tag, "target_release_type": "pre-release-alpha"}}
+
+    def test_sync_on_main_leaves_the_maintenance_issue_open(self):
+        # spec 5.1
+        manager, gh, state_manager = self.manager("main", "r2.2", [self.issue(1, "r2.2"), self.issue(2, "r1.9")])
+
+        manager.sync_release_issue(self.plan("r2.2"))
+
+        gh.close_issue.assert_not_called()
+        state_manager.derive_state.assert_called_once_with(retry_draft_release=True, base_branch="main")
+
+    def test_sync_on_the_maintenance_line_leaves_mains_issue_open(self):
+        # spec 5.2
+        manager, gh, state_manager = self.manager(self.MB, "r1.9", [self.issue(1, "r2.2"), self.issue(2, "r1.9")])
+
+        manager.sync_release_issue(self.plan("r1.9"))
+
+        gh.close_issue.assert_not_called()
+        state_manager.derive_state.assert_called_once_with(retry_draft_release=True, base_branch=self.MB)
+
+    def test_superseded_issue_on_the_same_line_is_closed(self):
+        # spec 5.3: main moves r2.2 -> r2.3
+        manager, gh, _ = self.manager(
+            "main", "r2.3", [self.issue(1, "r2.2"), self.issue(2, "r1.9"), self.issue(3, "r2.3")]
+        )
+
+        manager.sync_release_issue(self.plan("r2.3"))
+
+        gh.close_issue.assert_called_once_with(1, state_reason="not_planned")
+
+    def test_case_b_issue_title_names_the_line(self):
+        # spec 5.4
+        gh = MagicMock()
+        manager = IssueSyncManager(gh, MagicMock(), IssueManager(), MagicMock(), base_branch=self.MB)
+
+        manager.create_release_issue(
+            {"repository": {"target_release_tag": "r1.9", "target_release_type": "maintenance-release"}}
+        )
+
+        assert gh.create_issue.call_args.kwargs["title"] == "Release r1.9 (maintenance) (maintenance/r1)"
 
 
 class TestCreateReleaseIssue:
@@ -920,6 +996,20 @@ class TestSyncForWorkflow:
         assert calls["draft_release_url_override"] is None
         assert calls["force_update"] is True
         assert (calls["common_cache_status"], calls["common_cache_details"], calls["common_sync_pr_url"]) == ("stale", "d", "u")
+
+    def test_reads_the_plan_of_the_base_branch(self, monkeypatch, tmp_path):
+        gh = MagicMock()
+        gh.get_file_content.return_value = PLAN_YAML
+        seen = {}
+        monkeypatch.setattr(
+            IssueSyncManager, "sync_release_issue",
+            lambda self, release_plan, **kw: seen.setdefault("base", self.base_branch) and SyncResult(action="none"),
+        )
+
+        sync_for_workflow(gh, release_tag="r4.1", state="planned", base_branch="maintenance/r4")
+
+        gh.get_file_content.assert_called_once_with("release-plan.yaml", ref="maintenance/r4")
+        assert seen["base"] == "maintenance/r4"
 
     def test_no_action_is_unchanged(self, monkeypatch, tmp_path):
         outcome, _, summary = self.run(monkeypatch, tmp_path, SyncResult(action="none", reason="up_to_date"))

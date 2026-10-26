@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from .github_client import GitHubClient
+from .release_line import MAIN_BRANCH, line_of
 from .state_manager import ReleaseState, ReleaseStateManager
 from .issue_manager import IssueManager
 from .bot_responder import BotResponder
@@ -64,7 +65,8 @@ class IssueSyncManager:
         github_client: GitHubClient,
         state_manager: Optional[ReleaseStateManager] = None,
         issue_manager: Optional[IssueManager] = None,
-        bot_responder: Optional[BotResponder] = None
+        bot_responder: Optional[BotResponder] = None,
+        base_branch: str = MAIN_BRANCH,
     ):
         """
         Initialize the issue sync manager.
@@ -74,11 +76,13 @@ class IssueSyncManager:
             state_manager: ReleaseStateManager for state derivation (optional for finalize_published_issue)
             issue_manager: IssueManager for issue content management
             bot_responder: BotResponder for message templates (optional for finalize_published_issue)
+            base_branch: Line the Release Issue belongs to (release_line.line_of)
         """
         self.gh = github_client
         self.state_manager = state_manager
         self.issue_manager = issue_manager
         self.bot = bot_responder
+        self.base_branch = base_branch
         self._labels_ensured = False  # Track if we've already ensured labels
 
     def ensure_labels_exist(self) -> List[str]:
@@ -146,6 +150,7 @@ class IssueSyncManager:
         else:
             release_info = self.state_manager.derive_state(
                 retry_draft_release=True,
+                base_branch=self.base_branch,
             )
             if not release_info.success:
                 return SyncResult(
@@ -256,9 +261,10 @@ class IssueSyncManager:
         """
         Close older workflow-owned Release Issues for superseded release tags.
 
-        Current automation has one active Release Issue per repository. When
-        the target release tag changes, the old issue keeps its workflow and
-        release-tag markers but no longer matches the current tag lookup.
+        There is one active Release Issue per line (main, maintenance/rX).
+        When the target release tag changes, the old issue keeps its workflow
+        and release-tag markers but no longer matches the current tag lookup.
+        Issues of other lines are left alone.
         """
         current_issue_number = current_issue["number"]
         current_issue_url = current_issue.get("html_url", "")
@@ -278,6 +284,8 @@ class IssueSyncManager:
 
             match = RELEASE_TAG_MARKER_RE.search(body)
             if not match or match.group("tag") == release_tag:
+                continue
+            if line_of(self.gh, match.group("tag")) != self.base_branch:
                 continue
 
             current_labels = [
@@ -343,7 +351,8 @@ class IssueSyncManager:
         title = self.issue_manager.generate_title(
             release_tag=release_tag,
             release_type=release_type,
-            meta_release=meta_release
+            meta_release=meta_release,
+            base_branch=self.base_branch,
         )
 
         # Generate body using the template
@@ -410,7 +419,7 @@ class IssueSyncManager:
 
         # Check if title needs updating
         current_title = issue.get("title", "")
-        if self.issue_manager.should_update_title(current_title, release_plan):
+        if self.issue_manager.should_update_title(current_title, release_plan, self.base_branch):
             return True
 
         # In PLANNED state, always refresh the issue body. This is the state
@@ -564,12 +573,13 @@ class IssueSyncManager:
 
         # Check if title needs updating
         new_title = None
-        if self.issue_manager.should_update_title(issue.get("title", ""), release_plan):
+        if self.issue_manager.should_update_title(issue.get("title", ""), release_plan, self.base_branch):
             repo_config = release_plan.get("repository", {})
             new_title = self.issue_manager.generate_title(
                 release_tag=repo_config.get("target_release_tag", ""),
                 release_type=repo_config.get("target_release_type", ""),
-                meta_release=repo_config.get("meta_release")
+                meta_release=repo_config.get("meta_release"),
+                base_branch=self.base_branch,
             )
 
         # Update issue
@@ -739,6 +749,7 @@ def sync_for_workflow(
     common_cache_details: str = "",
     common_sync_pr_url: str = "",
     summary_path: str = "",
+    base_branch: str = MAIN_BRANCH,
 ) -> WorkflowSync:
     """
     Sync the Release Issue for a workflow run (create, update, or leave it).
@@ -754,6 +765,8 @@ def sync_for_workflow(
         common_cache_status, common_cache_details, common_sync_pr_url: Cache
             detection and common sync PR, shown in the CONFIG section
         summary_path: GITHUB_STEP_SUMMARY ("" to skip)
+        base_branch: Line of the release (Plan.base_branch); its
+            release-plan.yaml is read
 
     Returns:
         WorkflowSync; issue_action "error" when the sync failed (logged)
@@ -791,8 +804,8 @@ def sync_for_workflow(
             ))
         return WorkflowSync()
 
-    print(f"Reading release-plan.yaml for {release_tag}")
-    release_plan = gh.get_file_content("release-plan.yaml", ref="main")
+    print(f"Reading release-plan.yaml for {release_tag} from {base_branch}")
+    release_plan = gh.get_file_content("release-plan.yaml", ref=base_branch)
     if release_plan is None:
         print("::warning::Could not read release-plan.yaml - skipping issue sync")
         return WorkflowSync()
@@ -814,6 +827,7 @@ def sync_for_workflow(
         state_manager=ReleaseStateManager(github_client=gh),
         issue_manager=IssueManager(),
         bot_responder=BotResponder(),
+        base_branch=base_branch,
     )
     print(f"Syncing Release Issue for {release_tag} (state: {requested_state})")
     try:

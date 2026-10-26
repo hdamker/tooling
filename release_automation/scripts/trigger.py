@@ -21,6 +21,7 @@ from typing import Any, Dict
 from .config import SNAPSHOT_BRANCH_PREFIX
 
 RELEASE_ISSUE_LABEL = "release-issue"
+RELEASE_TAG_MARKER_RE = re.compile(r"<!--\s*release-automation:release-tag:(?P<tag>.*?)\s*-->")
 
 TRIGGER_SLASH_COMMAND = "slash_command"
 TRIGGER_UNKNOWN = "unknown"
@@ -61,6 +62,9 @@ class Trigger:
         user: Commenter, issue author, PR merger or actor, by event
         should_continue: Whether the workflow proceeds past check-trigger
         confirm_tag: Tag given with /publish-release --confirm
+        ref: Branch of a dispatch or push ("" for other events)
+        release_tag: Tag the event names — the Release Issue's release-tag
+            marker, or the snapshot branch of a merged Release PR
     """
     trigger_type: str = ""
     command: str = ""
@@ -69,6 +73,13 @@ class Trigger:
     user: str = ""
     should_continue: bool = False
     confirm_tag: str = ""
+    ref: str = ""
+    release_tag: str = ""
+
+
+def _issue_release_tag(issue: Dict[str, Any]) -> str:
+    match = RELEASE_TAG_MARKER_RE.search(issue.get("body") or "")
+    return match.group("tag") if match else ""
 
 
 def _is_release_issue(issue: Dict[str, Any]) -> bool:
@@ -104,6 +115,7 @@ def _parse_comment(payload: Dict[str, Any]) -> Trigger:
             user=user,
             should_continue=True,
             confirm_tag=confirm_tag,
+            release_tag=_issue_release_tag(issue),
         )
 
     return Trigger(trigger_type=TRIGGER_UNKNOWN, issue_number=issue_number, user=user)
@@ -124,6 +136,7 @@ def _parse_issue_event(payload: Dict[str, Any]) -> Trigger:
         # The issue author, not the sender
         user=issue["user"]["login"],
         should_continue=trigger_type is not None,
+        release_tag=_issue_release_tag(issue) if trigger_type else "",
     )
 
 
@@ -135,7 +148,13 @@ def _parse_pull_request(payload: Dict[str, Any]) -> Trigger:
         and pr["base"]["ref"].startswith(SNAPSHOT_BRANCH_PREFIX)
     ):
         merger = pr.get("merged_by") or pr["user"]
-        return Trigger(trigger_type="pr_merge", user=merger["login"], should_continue=True)
+        snapshot_id = pr["base"]["ref"][len(SNAPSHOT_BRANCH_PREFIX):]
+        return Trigger(
+            trigger_type="pr_merge",
+            user=merger["login"],
+            should_continue=True,
+            release_tag=snapshot_id.split("-")[0],
+        )
     return Trigger(trigger_type=TRIGGER_UNKNOWN)
 
 
@@ -163,11 +182,13 @@ def parse_trigger(
         return _parse_pull_request(payload)
     if event_name in ("workflow_dispatch", "push"):
         # Both only ever sync the Release Issue; the dispatch command input is ignored.
+        ref = payload.get("ref") or ""
         return Trigger(
             trigger_type=event_name,
             command="sync-issue",
             user=actor,
             should_continue=True,
+            ref=ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else "",
         )
     return Trigger(trigger_type=TRIGGER_UNKNOWN)
 

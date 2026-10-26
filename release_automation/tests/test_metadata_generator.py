@@ -299,6 +299,20 @@ class TestMetadataGenerator:
 
         assert result["repository"]["repository_name"] == "TestRepo-QoD"
 
+    @pytest.mark.parametrize("base_branch", ["main", "maintenance/r1"])
+    def test_generate_records_the_base_branch(self, generator, base_branch):
+        release_plan = {
+            "repository": {"target_release_tag": "r1.8", "target_release_type": "maintenance-release"},
+            "apis": [],
+        }
+
+        result = generator.generate(
+            release_plan=release_plan, api_versions={}, src_commit_sha="a" * 40, api_titles={},
+            repo="camaraproject/ReleaseTest2", base_branch=base_branch,
+        )
+
+        assert result["repository"]["base_branch"] == base_branch
+
     def test_generate_falls_back_to_plan_without_repo_param(self, generator):
         """Falls back to release plan repository_name when repo not provided."""
         release_plan = {

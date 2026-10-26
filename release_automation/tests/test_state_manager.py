@@ -30,6 +30,7 @@ def mock_github_client():
     client.get_branch_creation_time.return_value = "2026-01-29T12:00:00Z"
     client.find_pr_for_branch.return_value = None
     client.search_issues.return_value = []  # No release issues by default
+    client.get_branch_sha.return_value = None  # No maintenance branch by default
     return client
 
 
@@ -37,6 +38,92 @@ def mock_github_client():
 def state_manager(mock_github_client):
     """Create a ReleaseStateManager with mocked client."""
     return ReleaseStateManager(mock_github_client)
+
+
+class TestDeriveStatePerLine:
+    """derive_state(base_branch): the plan of the base branch, and its tag on that line (spec 1.1, 1.2, 1.5, 1.6)."""
+
+    MB = "maintenance/r1"
+
+    @staticmethod
+    def plan(tag, release_type="maintenance-release"):
+        return f"repository:\n  target_release_tag: {tag}\n  target_release_type: {release_type}\n"
+
+    def given(self, client, plans, branches=()):
+        client.get_file_content.side_effect = lambda path, ref="main", **kw: plans.get(ref)
+        client.get_branch_sha.side_effect = lambda name: "x" if name in branches else None
+
+    def test_main_without_maintenance_branch(self, state_manager, mock_github_client):
+        self.given(mock_github_client, {"main": self.plan("r1.7")})
+
+        result = state_manager.derive_state()
+
+        assert result.success and result.state == ReleaseState.PLANNED
+        assert (result.release_tag, result.base_branch) == ("r1.7", "main")
+
+    def test_maintenance_branch_reads_its_own_plan(self, state_manager, mock_github_client):
+        self.given(
+            mock_github_client,
+            {"main": self.plan("r2.2", "pre-release-alpha"), self.MB: self.plan("r1.8")},
+            branches=[self.MB],
+        )
+
+        result = state_manager.derive_state(base_branch=self.MB)
+
+        assert result.success and result.state == ReleaseState.PLANNED
+        assert (result.release_tag, result.base_branch) == ("r1.8", self.MB)
+
+    @pytest.mark.parametrize("tag,published", [("r1.8", False), ("r1.7", True)])
+    def test_main_planning_a_maintained_cycle_is_a_config_error(
+        self, state_manager, mock_github_client, tag, published
+    ):
+        self.given(mock_github_client, {"main": self.plan(tag)}, branches=[self.MB])
+        mock_github_client.tag_exists.return_value = published
+
+        result = state_manager.derive_state()
+
+        assert not result.success
+        assert result.config_error.error_type == "release_line"
+        assert self.MB in result.config_error.message
+
+    def test_maintenance_branch_planning_another_cycle_is_a_config_error(
+        self, state_manager, mock_github_client
+    ):
+        self.given(mock_github_client, {self.MB: self.plan("r2.1", "public-release")}, branches=[self.MB])
+
+        result = state_manager.derive_state(base_branch=self.MB)
+
+        assert not result.success and result.config_error.error_type == "release_line"
+
+    @pytest.mark.parametrize(
+        "base_branch,state",
+        [("main", ReleaseState.PLANNED), ("maintenance/r1", ReleaseState.SNAPSHOT_ACTIVE)],
+    )
+    def test_snapshot_on_one_line_leaves_the_other_planned(
+        self, state_manager, mock_github_client, base_branch, state
+    ):
+        # spec 5.5 / 5.6: P-033 reads this state for the PR's base branch
+        self.given(
+            mock_github_client,
+            {"main": self.plan("r2.2", "pre-release-alpha"), self.MB: self.plan("r1.8")},
+            branches=[self.MB],
+        )
+        snapshot = Branch(name="release-snapshot/r1.8-abc1234", sha="s1")
+        mock_github_client.list_branches.side_effect = (
+            lambda pattern: [snapshot] if pattern == "release-snapshot/r1.8-*" else []
+        )
+
+        result = state_manager.derive_state(base_branch=base_branch)
+
+        assert result.success and result.state == state
+
+    def test_published_on_main_without_maintenance_branch(self, state_manager, mock_github_client):
+        self.given(mock_github_client, {"main": self.plan("r1.6", "public-release")})
+        mock_github_client.tag_exists.return_value = True
+
+        result = state_manager.derive_state()
+
+        assert result.success and result.state == ReleaseState.PUBLISHED
 
 
 class TestDeriveState:

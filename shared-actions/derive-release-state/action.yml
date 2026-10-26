@@ -6,11 +6,24 @@ description: |
   is published, or is not planned.
 
   The release_tag is derived from the authoritative source:
-  - PLANNED/NOT_PLANNED: from release-plan.yaml on main branch
+  - PLANNED/NOT_PLANNED: from release-plan.yaml on the base branch
   - SNAPSHOT_ACTIVE/DRAFT_READY: from release-metadata.yaml on snapshot branch
   - PUBLISHED: from the git tag
 
+  The base branch is main or maintenance/rX (the line of the release). A
+  release-plan.yaml whose target_release_tag belongs to another line is a
+  configuration error (config_error_type release_line).
+
+inputs:
+  base_branch:
+    description: "Branch whose release-plan.yaml defines the release (main or maintenance/rX)"
+    required: false
+    default: "main"
+
 outputs:
+  base_branch:
+    description: "Branch whose release-plan.yaml was read"
+    value: ${{ steps.derive.outputs.base_branch }}
   release_tag:
     description: "Release tag from authoritative source (release-plan.yaml or release-metadata.yaml)"
     value: ${{ steps.derive.outputs.release_tag }}
@@ -51,7 +64,7 @@ outputs:
     description: "Configuration error message if state derivation failed (empty if successful)"
     value: ${{ steps.derive.outputs.config_error }}
   config_error_type:
-    description: "Type of configuration error: missing_file|malformed_yaml|missing_field (empty if successful)"
+    description: "Type of configuration error: missing_file|malformed_yaml|missing_field|release_line (empty if successful)"
     value: ${{ steps.derive.outputs.config_error_type }}
   release_issue_number:
     description: "Release Issue number if found (empty if no workflow-owned issue exists)"
@@ -85,6 +98,7 @@ runs:
         GITHUB_TOKEN: ${{ github.token }}
         GITHUB_SERVER_URL: ${{ github.server_url }}
         REPO: ${{ github.repository }}
+        BASE_BRANCH: ${{ inputs.base_branch }}
         SCRIPTS_PATH: ${{ github.action_path }}/../../release_automation/scripts
       run: |
         import os
@@ -111,13 +125,16 @@ runs:
         manager = ReleaseStateManager(github_client=gh)
 
         # Derive state from repository artifacts (authoritative source)
-        release_info = manager.derive_state()
+        base_branch = os.environ.get('BASE_BRANCH') or 'main'
+        print(f"Base branch: {base_branch}")
+        release_info = manager.derive_state(base_branch=base_branch)
         output_file = os.environ['GITHUB_OUTPUT']
 
         # Handle configuration errors
         if not release_info.success:
             error = release_info.config_error
             with open(output_file, 'a') as f:
+                f.write(f"base_branch={base_branch}\n")
                 f.write("release_tag=\n")
                 f.write("state=\n")
                 f.write("source=\n")
@@ -158,7 +175,7 @@ runs:
             snapshot = manager.get_current_snapshot(release_tag)
 
         # Compute derived values
-        release_plan_url = f"{server_url}/{repo}/blob/main/release-plan.yaml"
+        release_plan_url = f"{server_url}/{repo}/blob/{base_branch}/release-plan.yaml"
 
         src_commit_sha_short = ''
         if snapshot and snapshot.src_commit_sha:
@@ -168,6 +185,7 @@ runs:
 
         # Write outputs to GITHUB_OUTPUT
         with open(output_file, 'a') as f:
+            f.write(f"base_branch={base_branch}\n")
             f.write(f"release_tag={release_tag or ''}\n")
             f.write(f"state={state.value}\n")
             f.write(f"source={source}\n")
@@ -198,7 +216,7 @@ runs:
                 plan_commonalities = ""
                 plan_icm = ""
                 plan_rtype = release_info.release_type or ""
-                plan, _ = manager._read_release_plan_with_validation()
+                plan, _ = manager._read_release_plan_with_validation(base_branch)
                 if plan:
                     for api in plan.get("apis", []):
                         plan_apis.append({
