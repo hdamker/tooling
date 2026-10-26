@@ -376,6 +376,11 @@ def test_publish_modes_cover_all_release_types():
     assert set(policy.PUBLISHERS) == set(policy.config.SHORT_TYPE_MAP)
 
 
+def test_maintenance_release_publishes_from_a_draft():
+    # Spec 6.5: draft until RM#675 is decided
+    assert policy.PUBLISH_MODES["maintenance-release"] == policy.PUBLISH_MODE_DRAFT
+
+
 @pytest.mark.parametrize("command", ["create-snapshot", "discard-snapshot", "delete-draft", "sync-issue"])
 def test_slash_command_plan_responds_with_interim(command):
     state = next(s for s, cmds in ALLOWED.items() if command in cmds)
