@@ -5,15 +5,23 @@
 # all configuration is centralized in camaraproject/tooling.
 #
 # Triggers:
-# - Slash commands: /create-snapshot, /discard-snapshot, /delete-draft, /publish-release
+# - Slash commands: /create-snapshot, /discard-snapshot, /delete-draft,
+#   /publish-release, /sync-issue
 # - Issue events: close (with auto-reopen), reopen
 # - PR merge: on release-snapshot branches (creates draft release)
-# - Push to main: on release-plan.yaml, code/common/**, or this caller
-#   workflow itself. All three paths end up running sync-issue so the
-#   Release Issue body reflects the current repo state — most notably,
-#   pushing to code/common/** (typically after a sync PR merge) refreshes
-#   the common-cache status in the Release Issue and clears any stale warning.
-# - Manual: workflow_dispatch triggers sync-issue (reads from release-plan.yaml)
+# - Push to main or a maintenance/rX branch: on release-plan.yaml,
+#   code/common/**, or this caller workflow itself. All three paths end up
+#   running sync-issue for that branch's release line so the Release Issue
+#   body reflects the current repo state — most notably, pushing to
+#   code/common/** (typically after a sync PR merge) refreshes the
+#   common-cache status in the Release Issue and clears any stale warning.
+# - Manual: workflow_dispatch with action
+#   - sync-issue (default): sync the Release Issue of the selected branch
+#   - create-maintenance-branch: create maintenance/<cycle> for a release
+#     cycle (e.g. r1) once main plans a later cycle; codeowners only
+#
+# A maintenance/rX branch carries its own copy of this file (pushes and PRs
+# run the copy of their branch); create-maintenance-branch copies main's.
 
 name: CAMARA Release Automation
 
@@ -32,21 +40,36 @@ on:
     branches:
       - 'release-snapshot/**'
 
-  # Push to main with release-plan.yaml, common file, or caller workflow changes.
-  # Listing the caller itself as a path ensures the workflow runs once right
-  # after it is merged (future caller updates pick up their own trigger).
+  # Push to main or a maintenance branch with release-plan.yaml, common file,
+  # or caller workflow changes. Listing the caller itself as a path ensures
+  # the workflow runs once right after it is merged (future caller updates
+  # pick up their own trigger).
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'maintenance/**'
     paths:
       - 'release-plan.yaml'
       - 'code/common/**'
       - '.github/workflows/release-automation.yml'
 
-  # Manual trigger for sync-issue only
-  # Use this for: initial setup, recovery after manual repo changes, or forced sync
-  # All other commands must be issued via slash commands in the Release Issue
-  # Future: will accept branch input (main by default, maintenance branches as option)
+  # Manual trigger. sync-issue: initial setup, recovery after manual repo
+  # changes, or forced sync. All release commands are slash commands in the
+  # Release Issue.
   workflow_dispatch:
+    inputs:
+      action:
+        description: "sync-issue, or create-maintenance-branch (run from main)"
+        type: choice
+        options:
+          - sync-issue
+          - create-maintenance-branch
+        default: sync-issue
+      cycle:
+        description: "Release cycle for create-maintenance-branch, e.g. r1"
+        type: string
+        required: false
+        default: ""
 
 # Serialize release automation runs per repository.
 # Prevents race conditions from concurrent slash commands, issue events, PR merges,
@@ -62,7 +85,6 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
-  id-token: write
 
 jobs:
   release-automation:

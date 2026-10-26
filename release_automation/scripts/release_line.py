@@ -14,6 +14,7 @@ import json
 import os
 import re
 import sys
+from typing import Optional, Tuple
 
 from .github_client import GitHubClient
 from .trigger import Trigger, write_outputs
@@ -26,10 +27,16 @@ MAINTENANCE_BRANCH_RE = re.compile(r"^maintenance/r[1-9]\d*$")
 REF_TRIGGERS = ("push", "workflow_dispatch")
 
 
+def tag_version(release_tag: str) -> Optional[Tuple[int, int]]:
+    """(X, Y) of a tag rX.Y, the order of release tags; None for anything else."""
+    match = re.match(r"^r([1-9]\d*)\.(\d+)$", release_tag or "")
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
 def maintenance_branch(release_tag: str) -> str:
     """maintenance/rX for a tag rX.Y, "" for anything else."""
-    match = re.match(r"^r([1-9]\d*)\.\d+$", release_tag or "")
-    return f"{MAINTENANCE_BRANCH_PREFIX}r{match.group(1)}" if match else ""
+    version = tag_version(release_tag)
+    return f"{MAINTENANCE_BRANCH_PREFIX}r{version[0]}" if version else ""
 
 
 def line_of(gh, release_tag: str) -> str:

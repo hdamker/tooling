@@ -193,11 +193,11 @@ Installed at `.github/workflows/release-automation.yml`. Key configuration:
 
 | Aspect | Value | Purpose |
 |--------|-------|---------|
-| **Permissions** | `contents: write`, `issues: write`, `pull-requests: write`, `id-token: write` | Branch / release ops, issue management, PR creation, `id-token: write` is retained by the template but no longer read by the release automation workflow |
+| **Permissions** | `contents: write`, `issues: write`, `pull-requests: write` | Branch / release ops, issue management, PR creation |
 | **Concurrency** | `release-automation-${{ github.repository }}`, `cancel-in-progress: false` | Serialize runs, prevent race conditions |
-| **Triggers** | `issue_comment`, `issues`, `pull_request` (on `release-snapshot/**`), `push` (on `main`), `workflow_dispatch` | Slash commands, lifecycle events, auto-sync, manual |
+| **Triggers** | `issue_comment`, `issues`, `pull_request` (on `release-snapshot/**`), `push` (on `main` and `maintenance/**`), `workflow_dispatch` (inputs `action`: `sync-issue` or `create-maintenance-branch`, `cycle`) | Slash commands, lifecycle events, auto-sync, manual sync, maintenance branch creation |
 
-**Push-path filter on main** (controls when the caller auto-fires):
+**Push-path filter on `main` and `maintenance/**`** (controls when the caller auto-fires; a push syncs the Release Issue of the pushed branch's line):
 - `release-plan.yaml` — triggers sync-issue (release configuration changed)
 - `code/common/**` — triggers sync-issue + common-cache sync handler (cache updated for repos on `commonalities_release >= r4.2`)
 - `.github/workflows/release-automation.yml` — triggers sync-issue so a caller update is picked up immediately after merge
@@ -210,7 +210,9 @@ Installed at `.github/workflows/camara-validation.yml`. Runs validation on PRs a
 
 The release automation workflow takes its tooling checkout (Python scripts, shared actions) from the `job` context (`job.workflow_repository`, `job.workflow_sha`) — guaranteeing that helper code ships from the same repository + commit as the workflow itself, even when callers reference floating tags such as `@v1-rc` or `@v1`. There is no caller-side override; testing a branch or a fork means pointing the caller's `uses:` at it.
 
-The validation workflow still derives its tooling checkout from OIDC claims on the caller's `id-token: write` and accepts `with.tooling_ref_override` (a full 40-character SHA) for break-glass or testing.
+The validation workflow checks tooling out the same way, so neither caller needs `id-token: write` or passes a ref override.
+
+A `maintenance/rX` branch carries its own copies of both callers, because `push` and `pull_request` events run the caller file of the branch concerned. `create-maintenance-branch` commits `main`'s current callers onto the new branch; caller updates must cover `main` and every open `maintenance/*` branch.
 
 ---
 
@@ -361,9 +363,10 @@ Use this checklist to verify that a repository is correctly configured for relea
 Release automation caller:
 - [ ] `.github/workflows/release-automation.yml` exists
 - [ ] `uses:` line references correct org/repo/ref for current phase (see [branching-model.md](branching-model.md))
-- [ ] `permissions:` includes `contents: write`, `issues: write`, `pull-requests: write`, `id-token: write`
+- [ ] `permissions:` includes `contents: write`, `issues: write`, `pull-requests: write`
 - [ ] `concurrency:` group is `release-automation-${{ github.repository }}`
-- [ ] `push.paths` includes `release-plan.yaml`, `code/common/**`, and `.github/workflows/release-automation.yml`
+- [ ] `push.branches` is `main` and `maintenance/**`; `push.paths` includes `release-plan.yaml`, `code/common/**`, and `.github/workflows/release-automation.yml`
+- [ ] `workflow_dispatch` has the inputs `action` (`sync-issue`, `create-maintenance-branch`) and `cycle`
 
 Validation caller:
 - [ ] `.github/workflows/camara-validation.yml` exists

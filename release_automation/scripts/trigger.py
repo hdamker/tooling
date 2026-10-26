@@ -37,6 +37,12 @@ SLASH_COMMANDS = (
 )
 
 
+# Values of the caller's workflow_dispatch input "action"
+DISPATCH_SYNC_ISSUE = "sync-issue"
+DISPATCH_CREATE_MAINTENANCE_BRANCH = "create-maintenance-branch"
+DISPATCH_ACTIONS = (DISPATCH_SYNC_ISSUE, DISPATCH_CREATE_MAINTENANCE_BRANCH)
+
+
 def _js_trim(text: str) -> str:
     # JavaScript String.prototype.trim() also strips U+FEFF; str.strip() does not.
     return text.strip().strip("\ufeff").strip()
@@ -54,10 +60,10 @@ class Trigger:
         trigger_type: slash_command | issue_close | issue_reopen | pr_merge |
             workflow_dispatch | push | unknown; empty
             when the event concerns no Release Issue
-        command: Slash command name without the slash, or sync-issue for
-            dispatch and push
+        command: Slash command name without the slash, the dispatch action
+            input (sync-issue by default), or sync-issue for push
         command_args: Text after the command on its first line (argument-taking
-            commands only)
+            commands only); the cycle input of create-maintenance-branch
         issue_number: Issue the event happened on
         user: Commenter, issue author, PR merger or actor, by event
         should_continue: Whether the workflow proceeds past check-trigger
@@ -181,14 +187,23 @@ def parse_trigger(
     if event_name == "pull_request":
         return _parse_pull_request(payload)
     if event_name in ("workflow_dispatch", "push"):
-        # Both only ever sync the Release Issue; the dispatch command input is ignored.
+        # A push syncs the Release Issue; a dispatch runs its action input
+        # (sync-issue by default) and passes the cycle input to
+        # create-maintenance-branch.
         ref = payload.get("ref") or ""
+        branch = ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ""
+        inputs = (payload.get("inputs") or {}) if event_name == "workflow_dispatch" else {}
+        action = (inputs.get("action") or DISPATCH_SYNC_ISSUE).strip()
+        if action not in DISPATCH_ACTIONS:
+            print(f"Unknown dispatch action: {action}")
+            return Trigger(trigger_type=TRIGGER_UNKNOWN, user=actor, ref=branch)
         return Trigger(
             trigger_type=event_name,
-            command="sync-issue",
+            command=action,
+            command_args=(inputs.get("cycle") or "").strip() if action == DISPATCH_CREATE_MAINTENANCE_BRANCH else "",
             user=actor,
             should_continue=True,
-            ref=ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else "",
+            ref=branch,
         )
     return Trigger(trigger_type=TRIGGER_UNKNOWN)
 

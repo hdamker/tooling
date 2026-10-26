@@ -245,6 +245,42 @@ class TestGitHubClient(unittest.TestCase):
             self.client.create_branch_at_sha("release/r4.1", "abc123")
 
     @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_commit_files_adds_one_commit_on_the_branch_head(self, mock_run_gh):
+        mock_run_gh.side_effect = ["head1\n", "tree1\n", "tree2\n", "commit2\n", "{}"]
+
+        sha = self.client.commit_files(
+            "maintenance/r1", {"CHANGELOG/CHANGELOG-r1.md": "# r1.8\n"}, "chore: set up"
+        )
+
+        self.assertEqual(sha, "commit2")
+        calls = mock_run_gh.call_args_list
+        self.assertIn("repos/owner/repo/git/ref/heads/maintenance/r1", calls[0].args[0])
+        self.assertIn("repos/owner/repo/git/commits/head1", calls[1].args[0])
+        self.assertEqual(json.loads(calls[2].kwargs["input"]), {
+            "base_tree": "tree1",
+            "tree": [{"path": "CHANGELOG/CHANGELOG-r1.md", "mode": "100644", "type": "blob", "content": "# r1.8\n"}],
+        })
+        self.assertEqual(json.loads(calls[3].kwargs["input"]),
+                         {"message": "chore: set up", "tree": "tree2", "parents": ["head1"]})
+        # A fast-forward of the branch: no force
+        update = calls[4].args[0]
+        self.assertIn("repos/owner/repo/git/refs/heads/maintenance/r1", update)
+        self.assertIn("sha=commit2", update)
+        self.assertIn("force=false", update)
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_commit_files_on_a_missing_branch_raises(self, mock_run_gh):
+        mock_run_gh.side_effect = GitHubClientError("gh command failed: HTTP 404: Not Found")
+        with self.assertRaises(GitHubClientError):
+            self.client.commit_files("maintenance/r9", {"a": "b"}, "m")
+
+    @patch("subprocess.run")
+    def test_run_gh_passes_input_on_stdin(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="{}")
+        self.client._run_gh(["api", "x", "--input", "-"], input='{"a": 1}')
+        self.assertEqual(mock_run.call_args.kwargs["input"], '{"a": 1}')
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
     def test_find_open_pr(self, mock_run_gh):
         mock_run_gh.return_value = json.dumps([{"number": 7, "url": "https://github.com/owner/repo/pull/7"}])
         self.assertEqual(self.client.find_open_pr("sync-common/r4.3"), (7, "https://github.com/owner/repo/pull/7"))

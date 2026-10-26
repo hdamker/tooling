@@ -16,6 +16,7 @@ from release_automation.scripts.command_policy import (
     evaluate,
 )
 from release_automation.scripts.github_client import GitHubClientError
+from release_automation.scripts.maintenance_branch import BranchPlan
 from release_automation.scripts.state_manager import (
     ConfigurationError,
     ReleaseInfoResult,
@@ -581,6 +582,7 @@ def test_plan_and_rejection_serialise_to_json():
         "publish_mode": "draft",
         "response": "publish_confirmation",
         "action": "",
+        "branch_plan": None,
     }
     assert json.loads(rejection.to_json()) == {
         "allowed": False,
@@ -839,6 +841,7 @@ def test_main_writes_the_plan_document(tmp_path, monkeypatch):
         "publish_mode": "draft",
         "response": "interim_processing",
         "action": "discard-snapshot",
+        "branch_plan": None,
         "command_args": "redo",
         "issue_number": "42",
         "user": "alice",
@@ -854,3 +857,209 @@ def test_main_writes_the_plan_document(tmp_path, monkeypatch):
         "common_sync_pr_url": "",
         "base_context": base,
     }
+
+
+# ── create-maintenance-branch (spec 3.1-3.5) ─────────────────────────────────
+
+
+def create_mb(cycle="r1", user="alice", ref="main"):
+    return Trigger(trigger_type="workflow_dispatch", command="create-maintenance-branch", command_args=cycle,
+                   user=user, should_continue=True, ref=ref)
+
+
+def cycle_one(main_plan=("r2.1", "public-release"), permissions=None, **kwargs):
+    """main plans main_plan; cycle 1 has public r1.6 and maintenance r1.7, r1.8 (src aaa…)."""
+    releases = [{"tag": t, "draft": False, "prerelease": False, "html_url": ""} for t in ("r1.6", "r1.7", "r1.8")]
+    return FakeGitHub(
+        files={("main", "release-plan.yaml"): plan_yaml(*main_plan),
+               ("r1.8", "release-metadata.yaml"): "repository:\n  src_commit_sha: " + "a" * 40 + "\n"},
+        branches={"main": "m1", **kwargs.get("branches", {})},
+        releases=releases,
+        permissions={"alice": "write"} if permissions is None else permissions,
+    )
+
+
+@pytest.mark.parametrize("main_plan", [("r2.1", "public-release"), ("r2.1", "none"), ("r2.1", "pre-release-alpha")])
+def test_create_maintenance_branch_plan(main_plan):
+    # spec 3.5
+    result = route(create_mb(), cycle_one(main_plan=main_plan))
+
+    assert result.allowed, result
+    assert (result.action, result.base_branch, result.response) == ("create-maintenance-branch", "main", "")
+    assert result.branch_plan == BranchPlan(
+        cycle="r1", branch=MB, patched_release="r1.8", patched_sha="a" * 40, next_tag="r1.9"
+    )
+    assert policy.finalize_due(result)
+
+
+def test_create_maintenance_branch_refused_while_main_is_on_the_cycle():
+    # spec 3.1
+    result = route(create_mb(), cycle_one(main_plan=("r1.9", "maintenance-release")))
+
+    assert not result.allowed
+    assert result.response == "" and result.error_type == ""
+    assert "main has not left cycle r1" in result.error_message
+    assert not policy.finalize_due(result)
+
+
+@pytest.mark.parametrize("permission", ["read", "triage", "none"])
+def test_create_maintenance_branch_needs_write_access(permission):
+    # spec 3.4: checked first
+    gh = cycle_one(main_plan=("r1.9", "maintenance-release"), permissions={"alice": permission})
+
+    result = route(create_mb(), gh)
+
+    assert not result.allowed
+    assert "write access" in result.error_message
+
+
+def test_create_maintenance_branch_refused_when_the_branch_exists():
+    # spec 3.3
+    gh = cycle_one(branches={MB: "b1"})
+    gh.files[(MB, "release-plan.yaml")] = plan_yaml("r1.8", "maintenance-release")
+
+    result = route(create_mb(), gh)
+
+    assert not result.allowed and result.error_message == f"{MB} already exists."
+
+
+def test_create_maintenance_branch_is_dispatched_from_main():
+    gh = cycle_one(branches={"maintenance/r2": "b2"})
+    gh.files[("maintenance/r2", "release-plan.yaml")] = plan_yaml("r2.3", "maintenance-release")
+
+    result = route(create_mb(ref="maintenance/r2"), gh)
+
+    assert not result.allowed
+    assert "from main" in result.error_message
+
+
+def test_main_writes_the_refusal_of_a_dispatch(tmp_path, monkeypatch):
+    out = run_main(
+        tmp_path, monkeypatch, create_mb(),
+        {"STATE": "planned", "RELEASE_TAG": "r1.9", "RELEASE_TYPE": "maintenance-release"},
+        cycle_one(main_plan=("r1.9", "maintenance-release")),
+    )
+
+    assert (out["action"], out["finalize"], out["response"]) == ("", "false", "")
+    assert "main has not left cycle r1" in out["refusal"]
+
+
+def test_main_has_no_refusal_for_a_plan_or_a_slash_rejection(tmp_path, monkeypatch):
+    allowed = run_main(tmp_path, monkeypatch, create_mb(),
+                       {"STATE": "planned", "RELEASE_TAG": "r2.1", "RELEASE_TYPE": "public-release"}, cycle_one())
+    rejected = run_main(tmp_path, monkeypatch, slash("delete-draft"),
+                        {"STATE": "planned", "RELEASE_TAG": "r1.2"}, WRITE)
+
+    assert allowed["refusal"] == "" and rejected["refusal"] == ""
+    assert json.loads(allowed["plan"])["branch_plan"]["next_tag"] == "r1.9"
+
+
+# ── plan job step summary (tooling#154) ──────────────────────────────────────
+
+
+def summary_of(tmp_path, monkeypatch, trigger, env, client):
+    summary = tmp_path / "summary"
+    summary.write_text("")
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    run_main(tmp_path, monkeypatch, trigger, env, client)
+    return summary.read_text()
+
+
+def test_summary_of_a_command_that_runs(tmp_path, monkeypatch):
+    text = summary_of(
+        tmp_path, monkeypatch, slash("create-snapshot"),
+        {"STATE": "planned", "RELEASE_TAG": "r1.9", "RELEASE_TYPE": "maintenance-release", "BASE_BRANCH": MB,
+         "COMMON_CACHE_STATUS": "in_sync"},
+        WRITE,
+    )
+
+    assert text.startswith("## Release Automation: plan\n")
+    assert "| Trigger | slash_command `/create-snapshot` by @alice on #42 |" in text
+    assert "| Release | r1.9 (maintenance-release), state planned |" in text
+    assert f"| Base branch | {MB} |" in text
+    assert "| Common cache | in_sync |" in text
+    assert "| Plan | create-snapshot, publish mode draft; runs snapshot, finalize |" in text
+
+
+def test_summary_of_a_rejection(tmp_path, monkeypatch):
+    text = summary_of(
+        tmp_path, monkeypatch, slash("delete-draft"),
+        {"STATE": "planned", "RELEASE_TAG": "r1.9", "RELEASE_TYPE": "maintenance-release"}, WRITE,
+    )
+
+    assert "| Plan | rejected: Command /delete-draft is not allowed in state 'planned'." in text
+    assert "| Common cache | not checked |" in text
+
+
+def test_summary_of_a_confirmation_request(tmp_path, monkeypatch):
+    text = summary_of(
+        tmp_path, monkeypatch, publish(confirm_tag=""),
+        {"STATE": "draft-ready", "RELEASE_TAG": "r1.2", "RELEASE_TYPE": "public-release"}, WRITE,
+    )
+
+    assert "| Plan | confirmation requested: /publish-release --confirm r1.2 |" in text
+
+
+def test_summary_of_a_config_error(tmp_path, monkeypatch):
+    text = summary_of(
+        tmp_path, monkeypatch, Trigger(trigger_type="push", command="sync-issue", user="erin", should_continue=True, ref="main"),
+        {"CONFIG_ERROR": "release-plan.yaml on main targets r1.9", "CONFIG_ERROR_TYPE": "release_line"}, WRITE,
+    )
+
+    assert "| Trigger | push by @erin, ref main |" in text
+    assert "| Plan | configuration error (release_line): release-plan.yaml on main targets r1.9 |" in text
+
+
+def test_summary_of_a_sync_without_action(tmp_path, monkeypatch):
+    text = summary_of(
+        tmp_path, monkeypatch, Trigger(trigger_type="workflow_dispatch", command="sync-issue", user="erin",
+                                       should_continue=True, ref="main"),
+        {"STATE": "planned", "RELEASE_TAG": "r2.1", "RELEASE_TYPE": "public-release",
+         "COMMON_CACHE_STATUS": "stale", "COMMON_CACHE_DETAILS": "r4.4 expected"}, WRITE,
+    )
+
+    assert "| Trigger | workflow_dispatch `sync-issue` by @erin, ref main |" in text
+    assert "| Common cache | stale: r4.4 expected |" in text
+    assert "| Plan | no action; runs finalize |" in text
+
+
+def test_summary_of_a_refused_dispatch(tmp_path, monkeypatch):
+    # spec 3.1: the summary says why
+    text = summary_of(
+        tmp_path, monkeypatch, create_mb(),
+        {"STATE": "planned", "RELEASE_TAG": "r1.9", "RELEASE_TYPE": "maintenance-release"},
+        cycle_one(main_plan=("r1.9", "maintenance-release")),
+    )
+
+    assert "| Trigger | workflow_dispatch `create-maintenance-branch r1` by @alice, ref main |" in text
+    assert "| Plan | refused: main has not left cycle r1" in text
+
+
+def test_summary_of_a_maintenance_branch_plan(tmp_path, monkeypatch):
+    text = summary_of(
+        tmp_path, monkeypatch, create_mb(),
+        {"STATE": "planned", "RELEASE_TAG": "r2.1", "RELEASE_TYPE": "public-release"}, cycle_one(),
+    )
+
+    assert ("| Plan | create-maintenance-branch: maintenance/r1 at r1.8 (aaaaaaa), plan PR for r1.9; "
+            "runs act, finalize |") in text
+
+
+def test_summary_of_a_pr_merge_and_an_issue_event(tmp_path, monkeypatch):
+    merge = summary_of(tmp_path, monkeypatch, Trigger(trigger_type="pr_merge", user="bob", should_continue=True,
+                                                      release_tag="r1.9"),
+                       {"STATE": "snapshot-active", "RELEASE_TAG": "r1.9", "RELEASE_TYPE": "public-release"}, WRITE)
+    close = summary_of(tmp_path, monkeypatch, Trigger(trigger_type="issue_close", user="bob", issue_number="7",
+                                                      should_continue=True, release_tag="r1.9"),
+                       {"STATE": "snapshot-active", "RELEASE_TAG": "r1.9", "RELEASE_TYPE": "public-release"}, WRITE)
+
+    assert "| Trigger | pr_merge by @bob (Release PR of r1.9) |" in merge
+    assert "| Plan | create-draft, publish mode draft; runs act, finalize |" in merge
+    assert "| Trigger | issue_close by @bob on #7 |" in close
+    assert "| Plan | reopen-issue, publish mode draft; runs act, finalize |" in close
+
+
+def test_no_summary_without_the_variable(tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+
+    run_main(tmp_path, monkeypatch, slash("sync-issue"), {"STATE": "planned", "RELEASE_TAG": "r1.2"}, WRITE)

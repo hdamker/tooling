@@ -9,7 +9,7 @@ import json
 import pytest
 
 from release_automation.scripts import trigger as trigger_mod
-from release_automation.scripts.trigger import Trigger, parse_trigger
+from release_automation.scripts.trigger import TRIGGER_UNKNOWN, Trigger, parse_trigger
 
 
 RELEASE_ISSUE_LABELS = [{"name": "release-issue"}, {"name": "release-state: planned"}]
@@ -221,16 +221,36 @@ def test_other_pull_request_events_are_ignored(payload):
 # ── workflow_dispatch ────────────────────────────────────────────────────────
 
 
-def test_workflow_dispatch_is_sync_issue():
-    payload = {"inputs": {"command": "create-snapshot"}, "ref": "refs/heads/main"}
+@pytest.mark.parametrize("inputs", [{}, {"action": "sync-issue", "cycle": "r1"}, {"command": "create-snapshot"}])
+def test_workflow_dispatch_is_sync_issue_by_default(inputs):
+    payload = {"inputs": inputs, "ref": "refs/heads/main"}
 
     t = parse("workflow_dispatch", payload, actor="dave")
 
-    # The dispatch input is ignored: dispatch only ever syncs the issue.
+    # cycle belongs to create-maintenance-branch; other inputs are ignored
     assert t == Trigger(
         trigger_type="workflow_dispatch", command="sync-issue", user="dave", should_continue=True,
         ref="main",
     )
+
+
+def test_workflow_dispatch_create_maintenance_branch_carries_the_cycle():
+    payload = {"inputs": {"action": "create-maintenance-branch", "cycle": " r1 "}, "ref": "refs/heads/main"}
+
+    t = parse("workflow_dispatch", payload, actor="dave")
+
+    assert t == Trigger(
+        trigger_type="workflow_dispatch", command="create-maintenance-branch", command_args="r1",
+        user="dave", should_continue=True, ref="main",
+    )
+
+
+def test_workflow_dispatch_with_an_unknown_action_stops():
+    payload = {"inputs": {"action": "create-snapshot"}, "ref": "refs/heads/main"}
+
+    t = parse("workflow_dispatch", payload, actor="dave")
+
+    assert t == Trigger(trigger_type=TRIGGER_UNKNOWN, user="dave", ref="main")
 
 
 @pytest.mark.parametrize("event_name", ["workflow_dispatch", "push"])

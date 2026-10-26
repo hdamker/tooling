@@ -82,3 +82,11 @@ def test_main_writes_base_branch(tmp_path, monkeypatch):
 
     assert release_line.main(client=repo(MB)) == 0
     assert "base_branch<<" in output.read_text() and f"\n{MB}\n" in output.read_text()
+
+
+@pytest.mark.parametrize(
+    "tag,version",
+    [("r1.8", (1, 8)), ("r1.10", (1, 10)), ("r12.3", (12, 3)), ("", None), ("r1", None), ("v1.0", None)],
+)
+def test_tag_version(tag, version):
+    assert release_line.tag_version(tag) == version

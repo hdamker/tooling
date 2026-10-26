@@ -156,6 +156,28 @@ def test_reopen_issue():
     assert gh.reopened == [40]
 
 
+def test_create_maintenance_branch():
+    from release_automation.tests.test_maintenance_branch import PLAN, repo as cycle_one
+
+    gh = cycle_one()
+    branch_plan = {"cycle": "r1", "branch": "maintenance/r1", "patched_release": "r1.8",
+                   "patched_sha": PLAN.patched_sha, "next_tag": "r1.9"}
+
+    outcome = act(plan("create-maintenance-branch", trigger_type="workflow_dispatch", branch_plan=branch_plan), gh, {})
+
+    pr = gh.prs[0]
+    assert outcome == {
+        "action": "create-maintenance-branch",
+        "success": "true",
+        "branch": "maintenance/r1",
+        "setup_commit_sha": gh.commits[0]["sha"],
+        "plan_pr_number": str(pr["number"]),
+        "plan_pr_url": f"{REPO_URL}/pull/{pr['number']}",
+        "warning": "",
+        "error_message": "",
+    }
+
+
 def test_unknown_action_is_an_error():
     with pytest.raises(ValueError, match="unknown action: sync-issue"):
         act(plan("sync-issue"), repo(), {})

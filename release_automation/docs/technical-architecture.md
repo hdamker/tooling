@@ -604,12 +604,12 @@ Each API repository has a minimal caller workflow that forwards events to the re
 | `issue_comment` (created) | Slash command on release issue | Command execution |
 | `issues` (closed/reopened) | Issue has `release-state:*` label | Closure policy enforcement |
 | `pull_request` (closed) | Merged into `release-snapshot/*` branch | Draft release creation |
-| `push` (main) | `release-plan.yaml` changed | Auto sync-issue |
-| `workflow_dispatch` | Manual trigger | Recovery (sync-issue only) |
+| `push` (main, `maintenance/**`) | `release-plan.yaml` changed | Auto sync-issue of the pushed line |
+| `workflow_dispatch` | Manual trigger, input `action` | `sync-issue` (default): recovery; `create-maintenance-branch` with input `cycle` |
 
 **Concurrency:** Global concurrency group per repository (`release-automation-{repo}`) with `cancel-in-progress: false`. This prevents overlapping workflow runs from producing inconsistent state.
 
-**Permissions:** Caller workflows grant `contents`, `issues` and `pull-requests` write. The caller template still declares `id-token: write`; the reusable workflow no longer reads an OIDC token.
+**Permissions:** Caller workflows grant `contents`, `issues` and `pull-requests` write; no OIDC token is read.
 
 **Commands:**
 
