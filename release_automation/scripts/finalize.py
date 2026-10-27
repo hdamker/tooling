@@ -323,7 +323,7 @@ def run_sync_pr(run: Run, clients: Clients) -> SyncPrOutcome:
     base_branch = run.plan.base_branch
     if base_branch == "main":
         git = clients.git(run.repository, "api-repo", clients.token)
-        return create_sync_pr(clients.gh, git, tag, bot_name, bot_email)
+        return create_sync_pr(clients.gh, git, tag, bot_name, bot_email, base_branch=base_branch)
     # Case B: the cycle CHANGELOG into the line and into main, no README
     line_git = clients.git(run.repository, f"api-repo-{base_branch.replace('/', '-')}", clients.token)
     line = create_sync_pr(clients.gh, line_git, tag, bot_name, bot_email, base_branch=base_branch, readme=False)

@@ -505,14 +505,14 @@ class FakeGitHub:
 def stubs(monkeypatch):
     calls = {}
 
-    def fake_sync_pr(gh, git, tag, bot_name, bot_email, base_branch="main", readme=True):
+    def fake_sync_pr(gh, git, tag, bot_name, bot_email, base_branch, readme=True):
         calls["sync_pr"] = dict(work_dir=git.work_dir, tag=tag, bot=(bot_name, bot_email))
         calls.setdefault("sync_prs", []).append(dict(work_dir=git.work_dir, base_branch=base_branch, readme=readme))
         gh.events.append(("sync-pr", tag, base_branch))
         default = SyncPrOutcome(status="created", pr_url="https://github.com/camaraproject/Example/pull/20", pr_number="20")
         return calls.get("sync_pr_outcomes", {}).get(base_branch) or calls.get("sync_pr_outcome", default)
 
-    def fake_common(api_git, commonalities_git, gh, release, bot_name, bot_email, base_branch="main"):
+    def fake_common(api_git, commonalities_git, gh, release, bot_name, bot_email, base_branch):
         calls["common"] = dict(api=api_git.work_dir, commonalities=(commonalities_git.repo, commonalities_git.token), release=release)
         calls["common_base_branch"] = base_branch
         gh.events.append(("common-sync", release, None))
