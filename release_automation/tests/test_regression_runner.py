@@ -570,6 +570,36 @@ class TestPhaseVerifyPostCreate:
         assert snapshot_id == "r1.2-abc1234"
         assert report.extras  # should carry the per-check messages
 
+    def test_main_snapshot_and_release_pr_beside_a_maintenance_line_snapshot(self):
+        """With maintenance/r1 in snapshot too, main's snapshot and Release PR are found."""
+        issue_response = {
+            "labels": [{"name": "release-state:snapshot-active"}],
+            "state": "open",
+        }
+        branches_response = (
+            "main\nmaintenance/r1\n"
+            "release-snapshot/r1.9-8a0a203\nrelease-snapshot/r2.1-5527a2d\n"
+        )
+        pr_list_response = [
+            {"number": 121, "headRefName": "release-review/r1.9-8a0a203", "title": "r1.9"},
+            {"number": 130, "headRefName": "release-review/r2.1-5527a2d", "title": "r2.1"},
+        ]
+        responses = [
+            ("issues/116", issue_response),
+            ("/branches --paginate", branches_response),
+            ("pr list", pr_list_response),
+        ]
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            side_effect=_make_gh_router(responses),
+        ):
+            report, snapshot_id = phase_verify_post_create(
+                "camaraproject/ReleaseTest2", 116
+            )
+        assert report.passed is True, report.detail
+        assert snapshot_id == "r2.1-5527a2d"
+        assert "release review PR=#130" in report.detail
+
     def test_fail_when_state_still_planned(self):
         issue_response = {
             "labels": [{"name": "release-state:planned"}],
@@ -1642,6 +1672,19 @@ class TestPhaseVerifyPlannedUnchanged:
             report = phase_verify_planned_unchanged("o/r", 90)
         assert report.passed is False
         assert "release-snapshot/r1.2-abc1234" in report.detail
+
+    def test_pass_when_only_a_maintenance_line_has_a_snapshot(self):
+        """A snapshot on maintenance/r1 is not main's: main stays planned."""
+        responses = [
+            ("{labels: .labels", {"labels": [{"name": "release-state:planned"}], "state": "open"}),
+            ("branches --paginate", "main\nmaintenance/r1\nrelease-snapshot/r1.9-8a0a203\n"),
+        ]
+        with patch(
+            "release_automation.scripts.regression_runner.gh",
+            side_effect=_gh_router(responses),
+        ):
+            report = phase_verify_planned_unchanged("o/r", 116)
+        assert report.passed is True, report.detail
 
 
 class TestPhaseCloseAutoReopen:
