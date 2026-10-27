@@ -16,8 +16,12 @@ REPO_URL = "https://github.com/camaraproject/Example"
 
 
 class FakeGitHub:
-    def __init__(self, files=None, branches=None, tags=None, releases=None, fail=None, issues=None, permissions=None):
+    def __init__(self, files=None, branches=None, tags=None, releases=None, fail=None, issues=None, permissions=None,
+                 latest=None):
         self.repo = "camaraproject/Example"
+        # GitHub's "Latest" release: publishing a release makes it Latest by
+        # default; make_latest="false" never demotes the current Latest
+        self.latest: Optional[str] = latest
         self.files: Dict[tuple, str] = dict(files or {})   # (ref, path) -> content
         self.branches: Dict[str, str] = dict(branches or {})  # name -> sha
         self.tags: Dict[str, str] = dict(tags or {})  # name -> sha
@@ -127,6 +131,10 @@ class FakeGitHub:
             for r in reversed(self.releases) if include_drafts or not r["draft"]
         ]
 
+    def get_latest_release_tag(self) -> Optional[str]:
+        self._call("get_latest_release_tag")
+        return self.latest
+
     def get_release_id(self, tag, draft_only=False):
         r = self._release(tag, draft_only)
         return r["id"] if r else None
@@ -141,20 +149,26 @@ class FakeGitHub:
         }
         if not draft:
             self.tags[tag] = self.branches[target]
+            if not prerelease and make_latest != "false":
+                self.latest = tag
         self.releases.append(release)
         return {"id": rid, "html_url": release["html_url"]}
 
     def update_release(self, release_id, draft=None, prerelease=None, name=None, body=None, make_latest=None):
         self._call("update_release")
         r = next(r for r in self.releases if r["id"] == release_id)
+        if prerelease is not None:
+            r["prerelease"] = prerelease
         if draft is False and r["draft"]:
             r["draft"] = False
             self.tags[r["tag"]] = self.branches[r["target"]]
             r["html_url"] = f"{REPO_URL}/releases/tag/{r['tag']}"
-        if prerelease is not None:
-            r["prerelease"] = prerelease
+            if not r["prerelease"]:
+                self.latest = r["tag"]
         if make_latest is not None:
             r["make_latest"] = make_latest
+            if make_latest == "true" and not r["draft"] and not r["prerelease"]:
+                self.latest = r["tag"]
         return {"html_url": r["html_url"]}
 
     def delete_release(self, release_id):

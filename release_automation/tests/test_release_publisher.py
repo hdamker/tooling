@@ -631,6 +631,27 @@ def test_publish_draft_public_release_is_marked_latest():
     assert gh.releases[0]["make_latest"] == "true"
 
 
+def test_publish_draft_of_a_line_patch_keeps_the_later_cycle_latest():
+    """Spec 6.2: GitHub makes a published release Latest by default and
+    make_latest="false" does not demote it, so r2.2 must be set back."""
+    gh = draft_repo(prerelease=False, latest="r2.2")
+    gh.releases.insert(0, {"id": 5, "tag": "r2.2", "target": "release/r2.2", "draft": False, "prerelease": False,
+                           "html_url": f"{REPO_URL}/releases/tag/r2.2"})
+
+    outcome = publish_draft(gh, "r1.4", SNAPSHOT, REVIEW, "abc1234def")
+
+    assert outcome.success
+    assert gh.latest == "r2.2"
+
+
+def test_publish_draft_without_later_cycle_takes_latest():
+    gh = draft_repo(prerelease=False, latest="r1.3")
+
+    publish_draft(gh, "r1.4", SNAPSHOT, REVIEW, "abc1234def")
+
+    assert gh.latest == "r1.4"
+
+
 def test_publish_draft_without_draft_fails(capsys):
     gh = draft_repo()
     gh.releases = []

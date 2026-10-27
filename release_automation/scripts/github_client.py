@@ -384,6 +384,14 @@ class GitHubClient:
         except GitHubClientError:
             return None
 
+    def get_latest_release_tag(self) -> Optional[str]:
+        """Tag of the release GitHub marks as Latest, or None when there is none."""
+        try:
+            output = self._run_gh(["api", f"repos/{self.repo}/releases/latest", "--jq", ".tag_name"])
+            return output.strip() or None
+        except GitHubClientError:
+            return None
+
     def get_release_id(self, tag: str, draft_only: bool = False) -> Optional[int]:
         """Get release ID by tag name.
 

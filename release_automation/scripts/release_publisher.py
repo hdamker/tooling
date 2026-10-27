@@ -190,6 +190,7 @@ class ReleasePublisher:
 
         # Step 3: Publish (set draft=false)
         is_prerelease = draft.get("prerelease", False)
+        previous_latest = self.gh.get_latest_release_tag()
 
         try:
             updated = self.gh.update_release(
@@ -205,7 +206,7 @@ class ReleasePublisher:
 
         # Step 3b: Set make_latest separately — GitHub ignores make_latest
         # while the release is still a draft (same PATCH call)
-        self.set_latest(release_id, release_tag, is_prerelease)
+        self.set_latest(release_id, release_tag, is_prerelease, previous_latest)
 
         return PublishResult(
             success=True,
@@ -236,6 +237,7 @@ class ReleasePublisher:
                 success=False,
                 error_message="Failed to finalize release-metadata.yaml"
             )
+        previous_latest = self.gh.get_latest_release_tag()
         try:
             created = self.gh.create_release(
                 release_tag, snapshot_branch, release_tag, body,
@@ -249,7 +251,7 @@ class ReleasePublisher:
             )
 
         # make_latest in its own call, as in publish_release()
-        self.set_latest(created.get("id"), release_tag, is_prerelease)
+        self.set_latest(created.get("id"), release_tag, is_prerelease, previous_latest)
         return PublishResult(
             success=True,
             release_url=created.get("html_url"),
@@ -269,10 +271,22 @@ class ReleasePublisher:
                 return "false"
         return "true"
 
-    def set_latest(self, release_id: Any, release_tag: str, is_prerelease: bool) -> None:
-        """Pass make_latest explicitly, so a patch of an older cycle does not take "Latest"."""
+    def set_latest(
+        self, release_id: Any, release_tag: str, is_prerelease: bool, previous_latest: Optional[str] = None,
+    ) -> None:
+        """Pass make_latest explicitly, so a patch of an older cycle does not take "Latest".
+
+        GitHub makes a published release Latest by default, and make_latest
+        "false" does not demote it; when this release must not be Latest but
+        became it, the release that was Latest before publishing is set back.
+        """
+        flag = self.latest_flag(release_tag, is_prerelease)
         try:
-            self.gh.update_release(release_id, make_latest=self.latest_flag(release_tag, is_prerelease))
+            self.gh.update_release(release_id, make_latest=flag)
+            if flag == "false" and previous_latest and previous_latest != release_tag \
+                    and self.gh.get_latest_release_tag() == release_tag:
+                self.gh.update_release(self.gh.get_release_id(previous_latest), make_latest="true")
+                print(f"Latest kept on {previous_latest}")
         except GitHubClientError:
             print(f"::warning::Failed to set the Latest flag of {release_tag}")
 

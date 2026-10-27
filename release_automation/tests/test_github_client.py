@@ -46,6 +46,15 @@ class TestGitHubClient(unittest.TestCase):
         self.assertIn("previous_tag_name=r1.8", args)
 
     @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
+    def test_get_latest_release_tag(self, mock_run_gh):
+        mock_run_gh.return_value = "r2.2\n"
+        self.assertEqual(self.client.get_latest_release_tag(), "r2.2")
+        self.assertIn("repos/owner/repo/releases/latest", mock_run_gh.call_args[0][0])
+
+        mock_run_gh.side_effect = GitHubClientError("HTTP 404: Not Found")
+        self.assertIsNone(self.client.get_latest_release_tag())
+
+    @patch("release_automation.scripts.github_client.GitHubClient._run_gh")
     def test_tag_exists(self, mock_run_gh):
         mock_run_gh.return_value = "refs/tags/r1.0"
         self.assertTrue(self.client.tag_exists("r1.0"))
