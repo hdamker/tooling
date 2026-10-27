@@ -359,12 +359,11 @@ def snapshot_id_from_branch(branch_name: str) -> str:
     )
 
 
-def find_snapshot_branch(repo: str) -> str | None:
-    """Return the name of the single active release-snapshot/* branch, or None.
+_RELEASE_BRANCH_CYCLE_RE = re.compile(r"^release-(?:snapshot|review)/r([1-9]\d*)\.\d+-")
 
-    Raises InfrastructureError if more than one snapshot branch exists —
-    that indicates prior-run corruption and must not be silently collapsed.
-    """
+
+def _branch_names(repo: str) -> list[str]:
+    """Return the names of all branches of *repo*."""
     data = gh(
         [
             "api", f"repos/{repo}/branches",
@@ -372,10 +371,30 @@ def find_snapshot_branch(repo: str) -> str | None:
             "--jq", ".[].name",
         ]
     )
+    return [line.strip() for line in data.splitlines() if line.strip()]
+
+
+def _of_maintenance_line(branch: str, names: list[str]) -> bool:
+    """Whether a release-snapshot/ or release-review/ branch for rX.Y belongs to an existing maintenance/rX."""
+    match = _RELEASE_BRANCH_CYCLE_RE.match(branch)
+    return bool(match) and f"maintenance/r{match.group(1)}" in names
+
+
+def find_snapshot_branch(repo: str) -> str | None:
+    """Return the name of main's single active release-snapshot/* branch, or None.
+
+    Snapshot branches of a maintenance line (rX.Y with an existing
+    maintenance/rX) are skipped: the canary drives main's Release Issue.
+
+    Raises InfrastructureError if more than one snapshot branch exists —
+    that indicates prior-run corruption and must not be silently collapsed.
+    """
+    all_names = _branch_names(repo)
     names = [
-        line.strip()
-        for line in data.splitlines()
-        if line.strip().startswith(SNAPSHOT_BRANCH_PREFIX)
+        name
+        for name in all_names
+        if name.startswith(SNAPSHOT_BRANCH_PREFIX)
+        and not _of_maintenance_line(name, all_names)
     ]
     if len(names) > 1:
         raise InfrastructureError(
@@ -420,11 +439,17 @@ def release_review_pr_for_issue(repo: str, issue_number: int) -> int | None:
         ],
         parse_json=True,
     )
+    names: list[str] | None = None
     for pr in data:
         head = pr.get("headRefName", "")
         if head.startswith(RELEASE_REVIEW_BRANCH_PREFIX) and not head.endswith(
             "-preserved"
         ):
+            # A maintenance line's Release PR is not main's
+            if names is None:
+                names = _branch_names(repo)
+            if _of_maintenance_line(head, names):
+                continue
             return pr.get("number")
     return None
 
